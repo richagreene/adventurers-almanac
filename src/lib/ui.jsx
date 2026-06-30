@@ -213,33 +213,31 @@ export function BandBar({ segments, height = 24, showVals = true }) {
   );
 }
 
-// Horizontal bar chart — great for ranked item lists (names fit). data: [{ label, v, color? }].
-export function BarChartH({ data, theme, valueFmt = (v) => v, barH = 22, gap = 8 }) {
+// Horizontal bar list — HTML so labels/values stay crisp at any card width
+// (unlike a scaled SVG). Supports +/- values with a centred zero line.
+export function BarChartH({ data, theme, valueFmt = (v) => v, barH = 26, labelW = 132 }) {
   const t = theme || THEME.dashboard;
   const rows = (data || []).filter((d) => d && isFinite(d.v));
-  if (!rows.length) return <div style={serif({ fontStyle: "normal", color: C.muted, padding: 16 })}>No data to chart yet.</div>;
+  if (!rows.length) return <div style={serif({ color: C.muted, padding: 12 })}>No data to chart yet.</div>;
   const maxAbs = Math.max(1, ...rows.map((r) => Math.abs(r.v)));
-  const labelW = 150, valW = 78, H = rows.length * (barH + gap);
   const hasNeg = rows.some((r) => r.v < 0);
-  const zeroX = hasNeg ? labelW + (760 - labelW - valW) / 2 : labelW;
-  const fullW = 760 - labelW - valW;
   return (
-    <svg viewBox={`0 0 760 ${H}`} style={{ width: "100%", height: H }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {rows.map((r, i) => {
-        const y = i * (barH + gap);
         const col = r.color || (r.v >= 0 ? t.accent : C.red);
-        const w = (Math.abs(r.v) / maxAbs) * (hasNeg ? fullW / 2 : fullW);
-        const x = r.v >= 0 ? zeroX : zeroX - w;
+        const frac = Math.abs(r.v) / maxAbs;
         return (
-          <g key={i}>
-            <text x={labelW - 10} y={y + barH * 0.72} textAnchor="end" style={{ ...serif({ fontSize: 13, fill: C.ink }) }}>{r.label}</text>
-            <rect x={labelW} y={y} width={hasNeg ? fullW : fullW} height={barH} fill="rgba(44,32,19,.05)" rx="3" />
-            <rect x={x} y={y} width={Math.max(1, w)} height={barH} fill={col} rx="3" opacity="0.88" />
-            <text x={760 - valW + 8} y={y + barH * 0.72} textAnchor="start" style={mono({ fontSize: 11.5, fill: col, fontWeight: 600 })}>{valueFmt(r.v)}</text>
-          </g>
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ width: labelW, flex: `0 0 ${labelW}px`, textAlign: "right", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", ...serif({ fontSize: 13.5, color: C.ink }) }} title={r.label}>{r.label}</span>
+            <div style={{ flex: 1, position: "relative", height: barH, background: "rgba(44,32,19,.06)", borderRadius: 4, overflow: "hidden" }}>
+              {hasNeg && <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: "rgba(44,32,19,.2)" }} />}
+              <div style={{ position: "absolute", top: 4, bottom: 4, borderRadius: 3, background: col, opacity: 0.9, ...(hasNeg ? (r.v >= 0 ? { left: "50%", width: `${frac * 50}%` } : { right: "50%", width: `${frac * 50}%` }) : { left: 0, width: `${frac * 100}%` }) }} />
+            </div>
+            <span style={{ flex: "0 0 auto", minWidth: 64, textAlign: "right", ...mono({ fontSize: 12.5, fontWeight: 600, color: col }) }}>{valueFmt(r.v)}</span>
+          </div>
         );
       })}
-    </svg>
+    </div>
   );
 }
 

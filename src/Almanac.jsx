@@ -48,7 +48,7 @@ export default class Almanac extends React.Component {
   state = {
     section: "dashboard", openForm: null, fetching: false, fetchMsg: "", priceStatus: "", gearPriceStatus: "",
     flipView: "scanner", fillResult: null, fillMsg: "", bossView: "compendium", bossFocus: "", bossGearStyle: "", dropFormBoss: "",
-    slayView: "planner", slayMaster: "Duradel", gearStyle: "melee", gearSlot: "Weapon", gearItem: null,
+    slayView: "planner", slayMaster: "Duradel", gearStyle: "melee", gearSlot: "Weapon", gearItem: null, gearStatMode: "set",
     questMethod: "optimal", qsortCol: "", qsortDir: 1, qFilterOpen: "", qfSeries: [], qfType: [], qfStatus: [], qName: "", qGate: "",
     tSort: {}, tFilt: {}, tOpen: "", flipPrefill: null, objType: "bank", objBoss: "", flipShowWatch: false, flipCfgVer: 0, _v: 0,
   };
@@ -271,13 +271,14 @@ export default class Almanac extends React.Component {
     this.bossOv = this._load("almanac.bossov.v1", null) || {};
     this.objectives = this._load("almanac.objectives.v1", null) || this.defaultObjectives();
     this.avoidDismiss = this._load("almanac.avoiddismiss.v1", null) || {};
+    this.loadout = this._load("almanac.loadout.v1", null) || { melee: {}, ranged: {}, magic: {} };
   }
 
   // ---------- undo / redo ----------
   // Every persisted key. _save snapshots the *pre-mutation* state of these keys
   // (localStorage lags the in-memory mutation by one write), grouped per
   // synchronous action, so any add/edit/delete/config change is one undo step.
-  _undoKeys = ["almanac.logs.v1", "almanac.goals.v1", "almanac.objectives.v1", "almanac.flipcfg.v1", "almanac.alchcfg.v1", "almanac.farmcfg.v1", "almanac.gcfg.v1", "almanac.blocks.v1", "almanac.bossov.v1", "almanac.questdone.v1", "almanac.stats.v1", "almanac.avoiddismiss.v1"];
+  _undoKeys = ["almanac.logs.v1", "almanac.goals.v1", "almanac.objectives.v1", "almanac.flipcfg.v1", "almanac.alchcfg.v1", "almanac.farmcfg.v1", "almanac.gcfg.v1", "almanac.blocks.v1", "almanac.bossov.v1", "almanac.questdone.v1", "almanac.stats.v1", "almanac.avoiddismiss.v1", "almanac.loadout.v1"];
   _snap() { const s = {}; this._undoKeys.forEach((k) => { s[k] = localStorage.getItem(k); }); return s; }
   _restore(snap) {
     this._undoSuspended = true;
@@ -1144,7 +1145,7 @@ export default class Almanac extends React.Component {
           {n >= 2 && (
             <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
               <Kicker color={TH.accent}>Change per snapshot</Kicker>
-              <div style={{ marginTop: 10 }}><BarChartH data={deltaBars} theme={TH} valueFmt={(v) => this.signed(v)} barH={18} /></div>
+              <div style={{ marginTop: 10 }}><BarChartH data={deltaBars} theme={TH} valueFmt={(v) => this.signed(v)} /></div>
             </Card>
           )}
         </div>
@@ -1384,7 +1385,7 @@ export default class Almanac extends React.Component {
             </Card>
             <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
               <Kicker color={TH.accent}>Net by item</Kicker>
-              <div style={{ marginTop: 10 }}><BarChartH data={itemBars} theme={TH} valueFmt={(v) => this.signed(v)} barH={18} /></div>
+              <div style={{ marginTop: 10 }}><BarChartH data={itemBars} theme={TH} valueFmt={(v) => this.signed(v)} /></div>
             </Card>
           </div>
         )}
@@ -1523,6 +1524,7 @@ export default class Almanac extends React.Component {
       return { item: a.item, alch: a.alch, buy: a.buy, profit, qtyAfford, sustainHrs, phr: profit * cphr, limit: a.limit, gpxp: (profit / 65).toFixed(2), sustain };
     }).sort((a, b) => b.phr - a.phr);
     const best = rows.filter((r) => r.sustain && r.profit > 0)[0] || rows.filter((r) => r.profit > 0)[0] || rows[0];
+    const maxPhr = Math.max(1, ...rows.map((r) => r.phr));
     const log = this.logs.alch;
     const TH = themeFor("alchemy");
     const sess = { n: log.length, profit: log.reduce((a, x) => a + (x.net || 0), 0), xp: log.reduce((a, x) => a + (x.xp || 0), 0), casts: log.reduce((a, x) => a + (x.casts || 0), 0) };
@@ -1573,7 +1575,7 @@ export default class Almanac extends React.Component {
                   <td className="num" style={mono({ fontSize: 12 })}>{this.fmt(r.alch)}</td>
                   <td className="num" style={mono({ fontSize: 12 })}>{this.fmt(r.buy)}</td>
                   <td className="num" style={mono({ fontSize: 12, color: r.profit >= 0 ? C.green : C.red })}>{r.profit >= 0 ? "+" : ""}{r.profit}</td>
-                  <td className="num" style={mono({ fontSize: 12 })}>{this.short(r.phr)}</td>
+                  <td className="num"><div style={mono({ fontSize: 12 })}>{this.short(r.phr)}</div><Bar pct={Math.max(0, Math.min(100, (r.phr / maxPhr) * 100))} c1={C.purple} c2={TH.lite} h={4} /></td>
                   <td className="num" style={mono({ fontSize: 12 })}>{this.fmt(r.limit)}</td>
                   <td className="num" style={mono({ fontSize: 12, color: r.qtyAfford > 0 ? C.ink : C.muted })}>{r.qtyAfford > 0 ? this.fmt(r.qtyAfford) : "—"}</td>
                   <td className="num" style={mono({ fontSize: 12, color: r.sustain ? C.green : C.muted2 })}>{r.qtyAfford > 0 ? r.sustainHrs.toFixed(1) + "h" : "—"}</td>
@@ -1944,12 +1946,37 @@ export default class Almanac extends React.Component {
     const style = this.state.gearStyle, mode = this.mode;
     const sm = this.skillMap; const lvlOf = (n) => (sm[n] || { l: 1 }).l;
     const gsLvl = { att: lvlOf("Attack"), str: lvlOf("Strength"), def: lvlOf("Defence"), range: lvlOf("Ranged"), mage: lvlOf("Magic"), pray: lvlOf("Prayer"), none: 99 };
+    const lo = (this.loadout && this.loadout[style]) || {};
     return (GEAR_DATA[style] || []).map((s) => {
       const items = s.items.filter((it) => { const m = it.mode || "both"; return m === "both" || m === mode; }).map((it) => { const price = this.gearPrices[it.n] != null ? this.gearPrices[it.n] : it.gp; const usable = (it.lvl || 1) <= (gsLvl[it.gs || "none"] || 99); return { ...it, price, usable }; });
       let curName = ""; for (let i = items.length - 1; i >= 0; i--) if (items[i].usable) { curName = items[i].n; break; }
+      const names = items.map((it) => it.n);
+      const equippedName = lo[s.slot] && names.includes(lo[s.slot]) ? lo[s.slot] : curName;
       const best = items[items.length - 1];
-      return { slot: s.slot, items: items.map((m) => ({ ...m, current: m.n === curName })), curName, bestName: best ? best.n : "" };
+      return { slot: s.slot, items: items.map((m) => ({ ...m, current: m.n === curName, equipped: m.n === equippedName })), curName, bestName: best ? best.n : "", equippedName };
     });
+  }
+  equipItem = (slot, name) => { const st = this.state.gearStyle; if (!this.loadout[st]) this.loadout[st] = {}; this.loadout[st][slot] = name; this._save("almanac.loadout.v1", this.loadout); ensureItemStats(name, () => this.bump()); this.setState({ gearItem: name, gearSlot: slot, gearStatMode: "item" }); };
+  resetLoadout = () => { const st = this.state.gearStyle; this.loadout[st] = {}; this._save("almanac.loadout.v1", this.loadout); this.bump(); };
+  _normEq(name) {
+    const st = getItemStats(name); if (st === undefined) { ensureItemStats(name, () => this.bump()); return undefined; } if (!st || !st.eq) return null;
+    const e = st.eq;
+    return { astab: e.attack_stab || 0, aslash: e.attack_slash || 0, acrush: e.attack_crush || 0, amagic: e.attack_magic || 0, arange: e.attack_ranged || 0, dstab: e.defence_stab || 0, dslash: e.defence_slash || 0, dcrush: e.defence_crush || 0, dmagic: e.defence_magic || 0, drange: e.defence_ranged || 0, mstr: e.melee_strength || 0, rstr: e.ranged_strength || 0, mdmg: e.magic_damage || 0, pray: e.prayer || 0, speed: st.wp && st.wp.attack_speed ? st.wp.attack_speed : null };
+  }
+  // Sum the equipped set's bonuses (triggering loads for anything uncached).
+  gearTotals(slots) {
+    const keys = ["astab", "aslash", "acrush", "amagic", "arange", "dstab", "dslash", "dcrush", "dmagic", "drange", "mstr", "rstr", "mdmg", "pray"];
+    const tot = {}; keys.forEach((k) => (tot[k] = 0));
+    let loading = 0, counted = 0, speed = null;
+    slots.forEach((s) => { if (!s.equippedName) return; const o = this._normEq(s.equippedName); if (o === undefined) { loading++; return; } if (!o) return; counted++; keys.forEach((k) => (tot[k] += o[k])); if (s.slot === "Weapon" && o.speed) speed = o.speed; });
+    tot.speed = speed; return { tot, loading, counted };
+  }
+  // Categories the active item leads its slot in (drives the "good for X" nuance).
+  gearLeads(slotItems, name) {
+    const e = this._normEq(name); if (!e) return [];
+    const others = slotItems.map((it) => this._normEq(it.n)).filter(Boolean);
+    const cats = [["Slash", "aslash"], ["Stab", "astab"], ["Crush", "acrush"], ["Magic atk", "amagic"], ["Ranged atk", "arange"], ["Strength", "mstr"], ["Ranged str", "rstr"], ["Magic dmg", "mdmg"]];
+    return cats.filter(([, k]) => e[k] > 0 && e[k] >= Math.max(...others.map((o) => o[k]))).map(([l]) => l);
   }
   renderGear() {
     const style = this.state.gearStyle, mode = this.mode;
@@ -1970,14 +1997,15 @@ export default class Almanac extends React.Component {
     ];
     const sel = byName[this.state.gearSlot] ? this.state.gearSlot : "Weapon";
     const selData = byName[sel] || slots[0];
+    const equippedCount = slots.filter((s) => s.equippedName).length;
     const cell = (name, k) => {
-      if (!name || !byName[name]) return <div key={k} style={{ aspectRatio: "1", borderRadius: 8, border: "1px dashed rgba(201,162,74,.18)" }} />;
-      const s = byName[name]; const cur = s.items.find((it) => it.current);
-      const isSel = name === sel;
+      if (!name || !byName[name]) return <div key={k} style={{ aspectRatio: "1", borderRadius: 8, border: "1px dashed rgba(201,162,74,.14)" }} />;
+      const s = byName[name]; const eqIt = s.items.find((it) => it.equipped);
+      const isSel = name === sel; const isBest = eqIt && eqIt.current;
       return (
-        <div key={k} onClick={() => this.setState({ gearSlot: name })} title={cur ? cur.n : name}
-          style={{ aspectRatio: "1", borderRadius: 8, cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3, padding: 4, background: isSel ? "rgba(201,162,74,.18)" : "rgba(20,12,6,.5)", border: `2px solid ${isSel ? TH.lite : cur ? "rgba(201,162,74,.45)" : "rgba(201,162,74,.12)"}`, boxShadow: isSel ? `0 0 12px ${TH.accent}66` : "none" }}>
-          {cur ? <Icon url={itemIconUrl(cur.n)} name={cur.n} size={34} /> : <span style={mono({ fontSize: 8, color: "#7a6a4a" })}>empty</span>}
+        <div key={k} onClick={() => this.setState({ gearSlot: name })} title={eqIt ? eqIt.n : name}
+          style={{ aspectRatio: "1", borderRadius: 8, cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3, padding: 4, background: isSel ? "rgba(201,162,74,.18)" : "rgba(20,12,6,.5)", border: `2px solid ${isSel ? TH.lite : isBest ? "rgba(201,162,74,.5)" : eqIt ? "rgba(201,162,74,.25)" : "rgba(201,162,74,.1)"}`, boxShadow: isSel ? `0 0 12px ${TH.accent}66` : "none" }}>
+          {eqIt ? <Icon url={itemIconUrl(eqIt.n)} name={eqIt.n} size={34} style={{ background: "rgba(201,162,74,.16)", color: "#e7cf8c" }} /> : <span style={mono({ fontSize: 8, color: "#7a6a4a" })}>empty</span>}
           <span style={mono({ fontSize: 7.5, letterSpacing: ".08em", color: "#bfa676", textTransform: "uppercase" })}>{name.split(" ")[0]}</span>
         </div>
       );
@@ -1987,17 +2015,24 @@ export default class Almanac extends React.Component {
         <SectionTitle kicker={"The Armoury · " + (mode === "iron" ? "Ironman (obtain paths)" : "Main (live GE prices)")} title="Gear Progression" accent={TH.accent}
           right={<div style={{ display: "flex", gap: 8, alignItems: "center" }}><Seg options={[{ key: "melee", label: "MELEE" }, { key: "ranged", label: "RANGED" }, { key: "magic", label: "MAGIC" }]} active={style} onPick={(v) => this.setState({ gearStyle: v, gearSlot: "Weapon" })} /><Btn onClick={this.refreshGearPrices}>⟳ Prices</Btn></div>} />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-          <div style={mono({ fontSize: 11, color: C.muted2 })}>{style[0].toUpperCase() + style.slice(1)} · {mode === "iron" ? "Ironman" : "Main"} · {upgrades} upgrades ahead · gold ring = your current best</div>
+          <div style={mono({ fontSize: 11, color: C.muted2 })}>{style[0].toUpperCase() + style.slice(1)} · {mode === "iron" ? "Ironman" : "Main"} · {upgrades} upgrades ahead · tap items to build a set</div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>{this.state.gearPriceStatus && <span style={mono({ fontSize: 10, color: C.muted })}>{this.state.gearPriceStatus}</span>}<Seg options={[{ key: "main", label: "MAIN" }, { key: "iron", label: "IRONMAN" }]} active={this.mode} onPick={this.setMode} size={9} /></div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 16, alignItems: "start" }}>
-          {/* paperdoll */}
-          <Card pad={16} style={{ background: "linear-gradient(160deg,#2a1a10,#1c120a)", border: `1px solid ${TH.accent}55` }}>
-            <div style={{ textAlign: "center", ...mono({ fontSize: 9, letterSpacing: ".22em", color: "#bfa676", textTransform: "uppercase", marginBottom: 12 }) }}>Equipment · {style}</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {grid.map((row, ri) => (<div key={ri} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>{row.map((n, ci) => cell(n, ri + "-" + ci))}</div>))}
-            </div>
-          </Card>
+        <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 16, alignItems: "start" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {/* paperdoll */}
+            <Card pad={16} style={{ background: "linear-gradient(160deg,#2a1a10,#1c120a)", border: `1px solid ${TH.accent}55` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <span style={mono({ fontSize: 9, letterSpacing: ".22em", color: "#bfa676", textTransform: "uppercase" })}>Equipment · {style}</span>
+                <span onClick={this.resetLoadout} style={{ cursor: "pointer", ...mono({ fontSize: 9, color: "#c89a5a" }) }}>reset</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {grid.map((row, ri) => (<div key={ri} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>{row.map((n, ci) => cell(n, ri + "-" + ci))}</div>))}
+              </div>
+            </Card>
+            {/* total / this-item stats */}
+            {this.renderGearStats(slots, selData, equippedCount)}
+          </div>
           {/* upgrade ladder for selected slot */}
           <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -2006,12 +2041,12 @@ export default class Almanac extends React.Component {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 10, marginTop: 12 }}>
               {selData.items.map((it, i) => (
-                <div key={i} onClick={() => this.setState({ gearItem: it.n })} style={{ cursor: "pointer", background: it.current ? "rgba(201,162,74,.16)" : it.usable ? C.cardLight : "#ece1c6", border: it.current ? "2px solid " + C.gold : it.usable ? "1px solid rgba(44,32,19,.18)" : "1px dashed rgba(44,32,19,.28)", borderRadius: 8, padding: "10px 11px", display: "flex", gap: 10, opacity: it.usable ? 1 : 0.7 }}>
+                <div key={i} onClick={() => this.equipItem(sel, it.n)} style={{ cursor: "pointer", background: it.equipped ? "rgba(201,162,74,.2)" : it.usable ? C.cardLight : "#ece1c6", border: it.equipped ? "2px solid " + C.gold : it.current ? "1px solid " + C.gold : it.usable ? "1px solid rgba(44,32,19,.18)" : "1px dashed rgba(44,32,19,.28)", borderRadius: 8, padding: "10px 11px", display: "flex", gap: 10, opacity: it.usable ? 1 : 0.72 }}>
                   <Icon url={itemIconUrl(it.n)} name={it.n} size={34} style={{ marginTop: 2 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
                       <span style={cinzel({ fontWeight: 600, fontSize: 13.5, color: it.usable ? C.ink : "#9a8a6a" })}>{it.n}</span>
-                      {it.current && <Tag color={C.ink} bg="rgba(201,162,74,.3)">BEST</Tag>}
+                      {it.equipped ? <Tag color={C.ink} bg="rgba(201,162,74,.35)">EQUIPPED</Tag> : it.current ? <Tag color={C.goldDeep} bg="rgba(201,162,74,.16)">BEST</Tag> : null}
                     </div>
                     <div style={mono({ fontSize: 9.5, color: C.muted, marginTop: 2 })}>{it.req}</div>
                     <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5 }}>
@@ -2023,62 +2058,66 @@ export default class Almanac extends React.Component {
                 </div>
               ))}
             </div>
-            <div style={serif({ fontSize: 12, color: C.muted, marginTop: 10 })}>Tap a slot in the armour stand to switch slots; tap any item for its full equipment stats.</div>
+            <div style={serif({ fontSize: 12, color: C.muted, marginTop: 10 })}>Tap an item to equip it on the armour stand; the stat card sums your whole set. Switch slots from the stand.</div>
           </Card>
         </div>
-        {this.state.gearItem && this.renderGearModal(this.state.gearItem, selData)}
       </div>
     );
   }
-  renderGearModal(name, selData) {
+  renderGearStats(slots, selData, equippedCount) {
     const TH = themeFor("gear");
-    const it = (selData.items || []).find((x) => x.n === name) || {};
-    const stats = getItemStats(name);
-    if (stats === undefined) ensureItemStats(name, () => this.bump());
-    const close = () => this.setState({ gearItem: null });
-    const eq = stats && stats.eq, wp = stats && stats.wp;
-    const row = (label, val, pos) => (<div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}><span style={mono({ fontSize: 11.5, color: C.muted2 })}>{label}</span><span style={mono({ fontSize: 11.5, fontWeight: 600, color: val > 0 ? C.green : val < 0 ? C.red : C.muted })}>{pos && val > 0 ? "+" : ""}{val}</span></div>);
-    return (
-      <div onClick={close} style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(20,12,6,.6)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "60px 20px", overflowY: "auto" }}>
-        <div onClick={(e) => e.stopPropagation()} style={{ width: "min(640px,100%)", background: C.card, border: `2px solid ${TH.accent}`, borderRadius: 10, boxShadow: "0 18px 50px rgba(0,0,0,.5)", overflow: "hidden" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 20px", background: `linear-gradient(120deg, ${TH.g1}, ${TH.g2})` }}>
-            <div style={{ width: 48, height: 48, borderRadius: 8, background: "rgba(255,255,255,.06)", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon url={itemIconUrl(name)} name={name} size={36} /></div>
-            <div style={{ flex: 1 }}>
-              <div style={cinzel({ fontWeight: 700, fontSize: 20, color: "#f0e2bd" })}>{name}</div>
-              <div style={mono({ fontSize: 10, letterSpacing: ".1em", color: TH.lite, textTransform: "uppercase" })}>{selData.slot} · {it.req || "—"}</div>
-            </div>
-            <span onClick={close} style={{ cursor: "pointer", ...cinzel({ fontSize: 22, color: "#cdb98a" }) }}>×</span>
-          </div>
-          <div style={{ padding: "16px 20px" }}>
-            <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 12 }}>
-              <Tag color={it.price > 0 ? C.gold : C.muted} bg="rgba(201,162,74,.14)">{it.price > 0 ? this.short(it.price) + " gp" : "untradeable"}</Tag>
-              {it.current && <Tag color={C.green} bg="rgba(92,110,53,.16)">your current best</Tag>}
-              {it.bestFor && <span style={serif({ fontSize: 12.5, color: C.muted })}>{it.bestFor}</span>}
-            </div>
-            {eq ? (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 28px" }}>
-                <div>
-                  <Kicker color={TH.accent}>Attack bonuses</Kicker>
-                  {row("Stab", eq.attack_stab, 1)}{row("Slash", eq.attack_slash, 1)}{row("Crush", eq.attack_crush, 1)}{row("Magic", eq.attack_magic, 1)}{row("Ranged", eq.attack_ranged, 1)}
-                  <div style={{ height: 10 }} />
-                  <Kicker color={TH.accent}>Other</Kicker>
-                  {row("Melee strength", eq.melee_strength, 1)}{row("Ranged strength", eq.ranged_strength, 1)}{row("Magic damage", eq.magic_damage, 1)}{row("Prayer", eq.prayer, 1)}
-                  {wp && wp.attack_speed ? <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}><span style={mono({ fontSize: 11.5, color: C.muted2 })}>Attack speed</span><span style={mono({ fontSize: 11.5, fontWeight: 600, color: C.ink })}>{(wp.attack_speed * 0.6).toFixed(1)}s · {wp.attack_speed} ticks</span></div> : null}
-                </div>
-                <div>
-                  <Kicker color={TH.accent}>Defence bonuses</Kicker>
-                  {row("Stab", eq.defence_stab, 1)}{row("Slash", eq.defence_slash, 1)}{row("Crush", eq.defence_crush, 1)}{row("Magic", eq.defence_magic, 1)}{row("Ranged", eq.defence_ranged, 1)}
-                </div>
-              </div>
-            ) : stats === null ? (
-              <div style={serif({ fontSize: 13, color: C.muted, padding: "8px 0" })}>No equipment stats found for this item{it.get ? ` — obtain via: ${it.get}` : ""}.</div>
-            ) : (
-              <div style={serif({ fontSize: 13, color: C.muted, padding: "8px 0" })}>Loading equipment stats…</div>
-            )}
-            {this.mode === "iron" && it.get && <div style={{ marginTop: 12, padding: "9px 11px", background: C.cardLight, borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}><div style={mono({ fontSize: 8.5, letterSpacing: ".14em", color: C.muted, textTransform: "uppercase", marginBottom: 3 })}>Obtain</div><div style={serif({ fontSize: 13, color: C.ink })}>{it.get}</div></div>}
+    const mode = this.state.gearStatMode === "item" ? "item" : "set";
+    const ATK = [["Stab", "astab"], ["Slash", "aslash"], ["Crush", "acrush"], ["Magic", "amagic"], ["Range", "arange"]];
+    const DEF = [["Stab", "dstab"], ["Slash", "dslash"], ["Crush", "dcrush"], ["Magic", "dmagic"], ["Range", "drange"]];
+    const OTH = [["Str", "mstr"], ["Rng str", "rstr"], ["Mage %", "mdmg"], ["Pray", "pray"]];
+    const sv = (v) => (v > 0 ? "+" + v : "" + v);
+    const rows = (list, obj) => list.map(([l, k]) => (<div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}><span style={mono({ fontSize: 11, color: C.muted2 })}>{l}</span><span style={mono({ fontSize: 11, fontWeight: 600, color: obj[k] > 0 ? C.green : obj[k] < 0 ? C.red : C.muted })}>{sv(obj[k])}</span></div>));
+    const statGrid = (obj, speed) => (
+      <div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 22px" }}>
+          <div><Kicker color={TH.accent}>Attack</Kicker>{rows(ATK, obj)}</div>
+          <div><Kicker color={TH.accent}>Defence</Kicker>{rows(DEF, obj)}</div>
+        </div>
+        <div style={{ marginTop: 10 }}><Kicker color={TH.accent}>Other</Kicker>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 18px", marginTop: 2 }}>
+            {OTH.map(([l, k]) => (<span key={k} style={mono({ fontSize: 11, color: C.muted2 })}>{l} <strong style={{ color: obj[k] > 0 ? C.green : C.ink }}>{sv(obj[k])}</strong></span>))}
+            {speed ? <span style={mono({ fontSize: 11, color: C.muted2 })}>Speed <strong style={{ color: C.ink }}>{(speed * 0.6).toFixed(1)}s</strong></span> : null}
           </div>
         </div>
       </div>
+    );
+    let body;
+    if (mode === "set") {
+      const { tot, loading, counted } = this.gearTotals(slots);
+      body = (
+        <div>
+          <div style={mono({ fontSize: 9.5, color: C.muted, marginBottom: 8 })}>COMBINED · {counted}/{equippedCount} items{loading ? ` · loading ${loading}…` : ""}</div>
+          {statGrid(tot, tot.speed)}
+        </div>
+      );
+    } else {
+      const active = this.state.gearItem && selData.items.find((x) => x.n === this.state.gearItem) ? this.state.gearItem : selData.equippedName;
+      const it = selData.items.find((x) => x.n === active) || {};
+      const obj = this._normEq(active);
+      const leads = obj ? this.gearLeads(selData.items, active) : [];
+      body = (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+            <Icon url={itemIconUrl(active)} name={active} size={28} />
+            <div style={{ flex: 1, minWidth: 0 }}><div style={cinzel({ fontWeight: 600, fontSize: 14 })}>{active}</div><div style={mono({ fontSize: 9, color: C.muted })}>{selData.slot} · {it.req || "—"}</div></div>
+            {!it.equipped && <Btn tone="gold" onClick={() => this.equipItem(selData.slot, active)} style={{ padding: "4px 9px" }}>Equip</Btn>}
+          </div>
+          {leads.length > 0 && <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 8 }}>{leads.map((l) => <Tag key={l} color={C.goldDeep} bg="rgba(201,162,74,.16)">leads: {l}</Tag>)}</div>}
+          {it.bestFor && <div style={serif({ fontSize: 12, color: C.muted2, marginBottom: 8 })}>{it.bestFor}</div>}
+          {obj ? statGrid(obj, obj.speed) : obj === null ? <div style={serif({ fontSize: 12.5, color: C.muted })}>No equipment stats found{it.get ? ` — obtain: ${it.get}` : ""}.</div> : <div style={serif({ fontSize: 12.5, color: C.muted })}>Loading stats…</div>}
+        </div>
+      );
+    }
+    return (
+      <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
+        <div style={{ marginBottom: 12 }}><Seg options={[{ key: "set", label: "FULL SET" }, { key: "item", label: "THIS ITEM" }]} active={mode} onPick={(v) => this.setState({ gearStatMode: v })} size={9} /></div>
+        {body}
+      </Card>
     );
   }
 
@@ -2143,7 +2182,7 @@ export default class Almanac extends React.Component {
                     <td><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{r.name}</div><div style={serif({ fontSize: 10.5, fontStyle: "normal", color: C.muted })}>{r.teles}</div></td>
                     <td style={serif({ fontSize: 13 })}>{r.crop}</td>
                     <td className="num" style={mono({ fontSize: 12 })}>{r.patches}</td>
-                    <td className="num"><div style={mono({ fontSize: 12 })}>{this.fmt(r.xpRun)}</div><Bar pct={Math.min(100, (r.xpRun / runMax) * 100)} h={3} /></td>
+                    <td className="num"><div style={mono({ fontSize: 12 })}>{this.fmt(r.xpRun)}</div><Bar pct={Math.min(100, (r.xpRun / runMax) * 100)} c1={TH.accent} c2={TH.lite} h={4} /></td>
                     <td className="num" style={mono({ fontSize: 12, color: r.gpRun >= 0 ? C.green : C.red })}>{r.gpRun >= 0 ? "+" + this.short(r.gpRun) : this.signed(r.gpRun)}</td>
                     <td className="num" style={mono({ fontSize: 12 })}>{r.effRuns}<span style={{ color: C.muted }}>/{r.maxRunsDay}</span></td>
                     <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{r.growHrs < 1.5 ? Math.round(r.growHrs * 60) + "m" : r.growHrs + "h"}</td>
@@ -2319,14 +2358,42 @@ export default class Almanac extends React.Component {
     ];
     const count = (s) => base.filter((d) => d.status === s).length;
     const caColors = [C.green, C.teal, "#9a7530", C.purple, C.red, C.ink];
+    const DTH = themeFor("diary");
+    // Per-region renown: each region as a card with its four tier bars.
+    const tierOrder = ["Easy", "Medium", "Hard", "Elite"];
+    const sColor = (s) => (s === "Done" ? C.green : s === "Stat-ready" ? "#9a7530" : C.red);
+    const regions = {}; base.forEach((d) => { (regions[d.region] = regions[d.region] || {})[d.tier] = d; });
+    const regionRenown = Object.keys(regions).sort().map((region) => {
+      const byTier = regions[region]; const list = Object.values(byTier);
+      return { region, doneN: list.filter((t) => t.status === "Done").length, totN: list.length, ordered: tierOrder.map((tn) => byTier[tn] || null) };
+    });
+    const statRow = [["Completed", count("Done"), C.green], ["Stat-ready", count("Stat-ready"), "#9a7530"], ["Blocked", count("Blocked"), C.red]];
     return (
       <div>
-        <SectionTitle kicker="Regional Renown" title="Diary & Combat Achievements" accent={themeFor("diary").accent} />
-        <StatCards cols={3} items={[
-          { label: "Completed", value: "" + count("Done"), color: C.green },
-          { label: "Stat-ready", value: "" + count("Stat-ready"), color: "#9a7530" },
-          { label: "Blocked", value: "" + count("Blocked"), color: C.red },
-        ]} />
+        <SectionTitle kicker="Regional Renown" title="Diary & Combat Achievements" accent={DTH.accent} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 12, marginBottom: 16 }}>
+          {statRow.map(([l, v, c], i) => (<Card key={i} pad={16} style={{ borderTop: `3px solid ${c}` }}><Kicker>{l}</Kicker><div style={cinzel({ fontWeight: 800, fontSize: 30, color: c, marginTop: 6 })}>{v}</div></Card>))}
+        </div>
+        <Card style={{ marginBottom: 16, borderTop: `3px solid ${DTH.accent}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+            <Kicker color={DTH.accent}>Regional renown · all diaries by area</Kicker>
+            <div style={{ display: "flex", gap: 14 }}>{[["Done", C.green], ["Ready", "#9a7530"], ["Blocked", C.red]].map(([l, c], i) => (<span key={i} style={{ display: "flex", alignItems: "center", gap: 5, ...mono({ fontSize: 10, color: C.muted2 }) }}><span style={{ width: 10, height: 10, borderRadius: 2, background: c }} />{l}</span>))}</div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 12, marginTop: 14 }}>
+            {regionRenown.map((r) => (
+              <div key={r.region} style={{ background: C.cardLight, border: "1px solid rgba(44,32,19,.15)", borderRadius: 6, padding: "13px 15px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+                  <span style={cinzel({ fontWeight: 600, fontSize: 14.5, color: C.ink })}>{r.region}</span>
+                  <span style={mono({ fontSize: 10, fontWeight: 600, color: DTH.accent })}>{r.doneN}/{r.totN}</span>
+                </div>
+                <div style={{ display: "flex", gap: 5 }}>
+                  {r.ordered.map((t, i) => (<div key={i} title={t ? `${tierOrder[i]} · ${t.status}` : `${tierOrder[i]} · n/a`} style={{ flex: 1, height: 11, borderRadius: 3, background: t ? sColor(t.status) : "rgba(44,32,19,.10)" }} />))}
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, ...mono({ fontSize: 8, letterSpacing: ".04em", color: C.muted }) }}>{tierOrder.map((tn) => <span key={tn}>{tn[0]}</span>)}</div>
+              </div>
+            ))}
+          </div>
+        </Card>
         <Card style={{ marginBottom: 14 }}><DataTable tableKey="diary" model={model} cols={cols} open={this.state.tOpen} on={this.tableHandlers()} empty="No diaries match." /></Card>
         <Card>
           <Kicker color={C.goldDeep}>Combat Achievement tiers</Kicker>
