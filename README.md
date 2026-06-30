@@ -30,10 +30,10 @@ Twelve interlinked sections, mirroring (and extending) the workbook:
 
 ## Live data sources
 
-* **Stats** — enter a RuneScape name and hit *Fetch stats*. Primary source is the
-  **Wise Old Man API** (CORS-friendly, also detects your account type for the
-  Main/Ironman default); falls back to the official **OSRS Hiscores** via the
-  `/api/hiscores` serverless proxy (`api/hiscores.js`).
+* **Stats** — enter a RuneScape name and hit *Fetch stats*. Pulled live from the
+  official **OSRS Hiscores** via the `/api/hiscores` serverless proxy
+  (`api/hiscores.js`), which also detects your account type for the Main/Ironman
+  default by checking the official Ironman hiscores board.
 * **Prices** — the **OSRS Wiki real-time prices API** (`latest` / `mapping` /
   `volumes`) powers the flip scanner, alch picks, gear prices and boss drop
   values. Hit any **⟳ Live prices** button to refresh.
@@ -63,7 +63,7 @@ function provides the hiscores proxy in production.
 index.html              app shell, fonts, PWA tags
 src/main.jsx            mounts <Almanac/>
 src/Almanac.jsx         the whole app (state, math, all 12 sections)
-src/lib/api.js          live data layer (WOM, hiscores, Wiki prices, MediaWiki)
+src/lib/api.js          live data layer (hiscores, Wiki prices, MediaWiki)
 src/lib/ui.jsx          parchment theme + shared components
 src/data/               baked-in database (quests, bosses, diaries, gear, orderings)
 api/hiscores.js         serverless proxy for the official OSRS hiscores

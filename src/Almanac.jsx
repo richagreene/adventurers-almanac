@@ -3,7 +3,7 @@
 // The original was an Excel workbook whose two inputs (a Hiscores paste and a
 // GEPrices Power-Query snapshot) fed eleven interlinked planning sheets. This
 // app keeps all of that depth but swaps those two static inputs for live data:
-//   * stats   -> Wise Old Man / OSRS Hiscores (enter a RuneScape name)
+//   * stats   -> official OSRS Hiscores (enter a RuneScape name)
 //   * prices  -> OSRS Wiki real-time prices API (the "⟳ Live prices" buttons)
 // Everything you enter (logs, goals, quest/diary progress, per-boss session
 // rates) is saved in your browser, so the ledger is yours and persists.

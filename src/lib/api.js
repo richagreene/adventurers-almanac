@@ -1,7 +1,7 @@
 // Live-data layer for The Adventurer's Almanac.
 //
 // Replaces the two static ingestion sheets from the original workbook:
-//   * Hiscores  -> OSRS Hiscores (via /api/hiscores proxy) + Wise Old Man
+//   * Hiscores  -> official OSRS Hiscores (via the /api/hiscores proxy)
 //   * GEPrices  -> OSRS Wiki real-time prices API (latest / mapping / volumes)
 // The OSRS Wiki MediaWiki API is used only to fill gaps the baked-in data
 // modules don't cover.
@@ -9,7 +9,6 @@
 // Everything degrades gracefully: if a fetch fails (offline, CORS, rate
 // limit) the app keeps working on its last cached values / manual entry.
 
-const WOM = "https://api.wiseoldman.net/v2";
 const PRICES = "https://prices.runescape.wiki/api/v1/osrs";
 const WIKI = "https://oldschool.runescape.wiki/api.php";
 
@@ -56,35 +55,9 @@ export function combatLevel(map) {
   return Math.floor(base + Math.max(melee, range, mage));
 }
 
-const WOM_TYPE = {
-  regular: "main", ironman: "iron", hardcore: "iron",
-  ultimate: "iron", group: "iron",
-};
-
-// ---- Wise Old Man (CORS-friendly; also yields account type) ----
-async function fromWiseOldMan(rsn) {
-  const r = await fetch(`${WOM}/players/${encodeURIComponent(rsn)}`, {
-    headers: { Accept: "application/json" },
-  });
-  if (r.status === 404) throw new Error("not-tracked");
-  const p = await J(r);
-  const skills = (p.latestSnapshot && p.latestSnapshot.data && p.latestSnapshot.data.skills) || {};
-  const map = {};
-  Object.keys(skills).forEach((k) => {
-    const name = ALIAS[k.toLowerCase()];
-    if (!name) return;
-    const s = skills[k];
-    map[name] = { level: s.level, xp: s.experience };
-  });
-  return {
-    source: "Wise Old Man",
-    mode: WOM_TYPE[p.type] || "main",
-    map,
-    overall: skills.overall ? { level: skills.overall.level, xp: skills.overall.experience } : null,
-  };
-}
-
 // ---- Official OSRS Hiscores (via our serverless proxy to dodge CORS) ----
+// The proxy reports `mode` ("main"/"iron") by checking the official Ironman
+// hiscores board, and `qp` from the Quest Points activity when it's present.
 async function fromHiscores(rsn) {
   const r = await fetch(`/api/hiscores?player=${encodeURIComponent(rsn)}`, {
     headers: { Accept: "application/json" },
@@ -101,44 +74,32 @@ async function fromHiscores(rsn) {
   (d.activities || []).forEach((a) => {
     if (/quest point/i.test(a.name || "") && a.score > 0) qp = a.score;
   });
-  return { source: "OSRS Hiscores", mode: null, map, qp };
+  return { source: "OSRS Hiscores", mode: d.mode === "iron" ? "iron" : "main", map, qp };
 }
 
 /**
- * Fetch a player's live stats. Tries Wise Old Man first (CORS-friendly and
- * gives the account type for the Main/Ironman default), then falls back to the
- * official hiscores proxy. Quest points aren't exposed by either source for
- * mains, so `qp` is usually null and the Quests tab supplies it interactively.
+ * Fetch a player's live stats from the official OSRS Hiscores (via the
+ * /api/hiscores proxy, which dodges CORS and detects account type). Quest
+ * points aren't exposed by the hiscores for mains, so `qp` is usually null and
+ * the Quests tab supplies it interactively.
  */
 export async function fetchPlayer(rsn) {
   const name = (rsn || "").trim();
   if (!name) return { ok: false, error: "Enter a RuneScape name." };
-  let primary, secondary;
+  let data;
   try {
-    primary = await fromWiseOldMan(name);
+    data = await fromHiscores(name);
   } catch (e) {
-    primary = null;
+    return { ok: false, error: `Couldn't find "${name}" on the OSRS Hiscores. Check spelling, or enter stats manually.` };
   }
-  try {
-    secondary = await fromHiscores(name);
-  } catch (e) {
-    secondary = null;
-  }
-  const chosen = primary || secondary;
-  if (!chosen) {
-    return { ok: false, error: `Couldn't find "${name}" on Wise Old Man or the hiscores. Check spelling, or enter stats manually.` };
-  }
-  // Prefer WOM levels/xp but borrow QP from hiscores if it ever appears.
-  const map = chosen.map;
-  const qp = (secondary && secondary.qp) || (primary && primary.qp) || null;
   return {
     ok: true,
     rsn: name,
-    source: chosen.source + (primary && secondary ? " + Hiscores" : ""),
-    mode: chosen.mode, // null when only hiscores answered
-    skills: toSkillsRaw(map),
-    combat: combatLevel(map),
-    qp,
+    source: data.source,
+    mode: data.mode,
+    skills: toSkillsRaw(data.map),
+    combat: combatLevel(data.map),
+    qp: data.qp || null,
   };
 }
 
