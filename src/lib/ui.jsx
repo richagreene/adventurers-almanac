@@ -25,6 +25,47 @@ export const mono = (extra) => ({ fontFamily: "'JetBrains Mono', monospace", ...
 export const serif = (extra) => ({ fontFamily: "'EB Garamond', Georgia, serif", ...extra });
 export const cinzel = (extra) => ({ fontFamily: "'Cinzel', serif", ...extra });
 
+// Per-section theming. Every tab gets its own jewel-toned accent + banner
+// gradient so each feels distinct, while the dark/earthy tones keep the whole
+// almanac cohesive. `lite` is the highlight used for icon glows.
+export const THEME = {
+  dashboard: { accent: "#b98f3e", lite: "#e3c878", g1: "#3a2a14", g2: "#5a4424", icon: "⚔" },
+  skills:    { accent: "#3c6b6b", lite: "#7fb0ad", g1: "#15302f", g2: "#274a48", icon: "✦" },
+  goals:     { accent: "#9a6b30", lite: "#d8a85a", g1: "#33220f", g2: "#54381b", icon: "✸" },
+  networth:  { accent: "#6e7d3a", lite: "#b6c06a", g1: "#23301a", g2: "#3c4d24", icon: "🪙" },
+  flipping:  { accent: "#b98f3e", lite: "#e3c878", g1: "#3a2a14", g2: "#5a4424", icon: "⚖" },
+  alchemy:   { accent: "#6a4a8a", lite: "#b6a0d8", g1: "#241636", g2: "#3a2456", icon: "🔮" },
+  bossing:   { accent: "#963a2c", lite: "#d57a5a", g1: "#2e1410", g2: "#4a201a", icon: "☠" },
+  slayer:    { accent: "#8a3b30", lite: "#c87a5a", g1: "#2a1410", g2: "#46211a", icon: "🗡" },
+  gear:      { accent: "#4a5e70", lite: "#8aa6bc", g1: "#19242e", g2: "#2c3e4c", icon: "🛡" },
+  farming:   { accent: "#5c6e35", lite: "#9fbf6a", g1: "#1f2c16", g2: "#36431f", icon: "🌱" },
+  quests:    { accent: "#5a4a8a", lite: "#9a8ad0", g1: "#1e1a36", g2: "#332c56", icon: "📜" },
+  diary:     { accent: "#8a6a38", lite: "#d8b878", g1: "#2e2212", g2: "#4a3820", icon: "🏅" },
+};
+export const themeFor = (sec) => THEME[sec] || THEME.dashboard;
+
+// Themed hero banner (the coloured gradient strip at the top of a section).
+export function Hero({ theme, icon, kicker, title, blurb, statLabel, statValue, statSub }) {
+  const t = theme || THEME.dashboard;
+  return (
+    <div style={{ background: `linear-gradient(115deg, ${t.g1}, ${t.g2})`, border: `2px solid ${t.accent}`, borderRadius: 8, padding: "18px 24px", marginBottom: 20, display: "flex", alignItems: "center", gap: 22, flexWrap: "wrap", boxShadow: "0 4px 16px rgba(30,20,8,.28)" }}>
+      <div style={{ width: 52, height: 52, flex: "0 0 52px", borderRadius: "50%", background: `radial-gradient(circle at 38% 32%, ${t.lite}, ${t.accent} 60%, ${t.g2})`, border: `2px solid ${t.lite}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 25, boxShadow: `0 0 18px ${t.accent}66` }}>{icon || t.icon}</div>
+      <div style={{ flex: 1, minWidth: 200 }}>
+        {kicker && <div style={mono({ fontSize: 9.5, letterSpacing: ".24em", color: t.lite, textTransform: "uppercase" })}>{kicker}</div>}
+        <div style={cinzel({ fontWeight: 700, fontSize: 23, color: "#f0e2bd", margin: "3px 0" })}>{title}</div>
+        {blurb && <div style={serif({ fontSize: 13.5, fontStyle: "italic", color: "#cdb98a" })}>{blurb}</div>}
+      </div>
+      {statValue != null && (
+        <div style={{ textAlign: "right", paddingLeft: 22, borderLeft: "1px solid rgba(201,162,74,.3)" }}>
+          {statLabel && <div style={mono({ fontSize: 9.5, letterSpacing: ".18em", color: "#9c7c44", textTransform: "uppercase" })}>{statLabel}</div>}
+          <div style={cinzel({ fontWeight: 800, fontSize: 28, color: t.lite })}>{statValue}</div>
+          {statSub && <div style={mono({ fontSize: 10, color: "#cdb98a" })}>{statSub}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // A parchment panel/card.
 export function Card({ children, style, pad = 18 }) {
   return (
@@ -52,13 +93,16 @@ export function Kicker({ children, color = C.muted, style }) {
   );
 }
 
-// A section heading block.
-export function SectionTitle({ kicker, title, right }) {
+// A section heading block. `accent` tints the kicker + underline rule so each
+// tab reads as its own place while sharing the layout.
+export function SectionTitle({ kicker, title, right, accent }) {
+  const a = accent || C.goldDeep;
   return (
     <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 18 }}>
       <div>
-        {kicker && <Kicker color={C.goldDeep}>{kicker}</Kicker>}
+        {kicker && <Kicker color={a}>{kicker}</Kicker>}
         <div style={cinzel({ fontWeight: 700, fontSize: 26, color: C.ink, marginTop: 4 })}>{title}</div>
+        <div style={{ width: 54, height: 3, marginTop: 8, borderRadius: 2, background: `linear-gradient(90deg, ${a}, transparent)` }} />
       </div>
       {right}
     </div>

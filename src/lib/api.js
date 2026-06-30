@@ -150,6 +150,26 @@ export async function priceById(id) {
   return (r.data && r.data[id]) || null;
 }
 
+// Every tradeable item name (from the GE mapping), sorted — used to populate
+// the Flip Ledger autocomplete. Cached via fetchPrices.
+let _itemNames = null;
+export async function fetchItemNames() {
+  if (_itemNames) return _itemNames;
+  const { mapping } = await fetchPrices({ maxAgeMs: 24 * 60 * 60 * 1000 });
+  _itemNames = (mapping || []).map((m) => m.name).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  return _itemNames;
+}
+
+// Live nature-rune price (id 561). Returns gp (high, then low) or null.
+export async function natureRunePrice() {
+  try {
+    const p = await priceById(561);
+    return p ? p.high || p.low || null : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // ----------------------------------------------------------------------------
 // MediaWiki API — used to fill gaps the baked-in data doesn't cover.
 // ----------------------------------------------------------------------------

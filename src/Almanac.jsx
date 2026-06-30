@@ -12,8 +12,8 @@ import React from "react";
 import { LEDGER_DATA } from "./data/ledgerData.js";
 import { QUEST_ORDER } from "./data/questOrder.js";
 import { GEAR_DATA } from "./data/gearData.js";
-import { fetchPlayer, fetchPrices, priceById, combatLevel } from "./lib/api.js";
-import { C, mono, serif, cinzel, Card, Kicker, SectionTitle, StatCards, Bar, Seg, Tag, Btn, DataTable } from "./lib/ui.jsx";
+import { fetchPlayer, fetchPrices, priceById, combatLevel, fetchItemNames, natureRunePrice } from "./lib/api.js";
+import { C, mono, serif, cinzel, Card, Kicker, SectionTitle, StatCards, Bar, Seg, Tag, Btn, DataTable, Hero, themeFor } from "./lib/ui.jsx";
 
 const D = LEDGER_DATA;
 
@@ -49,7 +49,7 @@ export default class Almanac extends React.Component {
     flipView: "scanner", fillResult: null, fillMsg: "", bossView: "compendium", bossFocus: "", dropFormBoss: "",
     slayView: "planner", slayMaster: "Duradel", gearStyle: "melee",
     questMethod: "optimal", qsortCol: "", qsortDir: 1, qFilterOpen: "", qfSeries: [], qfType: [], qfStatus: [], qName: "", qGate: "",
-    tSort: {}, tFilt: {}, tOpen: "", flipPrefill: null, _v: 0,
+    tSort: {}, tFilt: {}, tOpen: "", flipPrefill: null, objType: "bank", objBoss: "", _v: 0,
   };
 
   // ---- static reference tables (ported from the workbook / design) ----
@@ -202,9 +202,21 @@ export default class Almanac extends React.Component {
     this.blocks = this._load("almanac.blocks.v1", null);
     if (!this.blocks) { this.blocks = {}; (D.slayer || []).forEach((t) => { if (t.verdict === "Block") this.blocks[t.task] = true; }); }
     this.bossOv = this._load("almanac.bossov.v1", null) || {};
+    this.objectives = this._load("almanac.objectives.v1", null) || this.defaultObjectives();
     this.gearPrices = {};
+    this.itemNames = [];
     this.bump();
+    // Background: pull the full tradeable-item list (for flip autocomplete) and
+    // the live nature-rune price. Both degrade silently if the network is blocked.
+    fetchItemNames().then((names) => { this.itemNames = names; this.bump(); }).catch(() => {});
+    this.refreshNatRune();
   }
+
+  // Pull the live nature-rune price (GE id 561) for the High Alchemy maths.
+  refreshNatRune = async () => {
+    const p = await natureRunePrice();
+    if (p && p > 0 && p !== this.alchcfg.natRune) { this.alchcfg.natRune = p; this._save("almanac.alchcfg.v1", this.alchcfg); this.bump(); }
+  };
 
   // ---------- helpers ----------
   xpFor(level) { let xp = 0; for (let n = 1; n < level; n++) xp += Math.floor(n + 300 * Math.pow(2, n / 7)); return Math.floor(xp / 4); }
@@ -213,6 +225,7 @@ export default class Almanac extends React.Component {
   signed(n) { return (n >= 0 ? "+" : "−") + this.short(Math.abs(n)); }
   pct(x) { return (x * 100).toFixed(x < 0.1 ? 1 : 0) + "%"; }
   today() { return new Date().toISOString().slice(0, 10); }
+  fmtDays(days) { if (days == null) return "—"; if (days <= 0) return "done"; if (days >= 365) return (days / 365).toFixed(days >= 3650 ? 0 : 1) + "y"; if (days >= 14) return Math.round(days / 7) + "w"; return days + "d"; }
   dShort(iso) { if (!iso) return ""; const p = ("" + iso).split("-"); return p.length >= 3 ? p[1] + "/" + p[2] : iso; }
   val(id) { const el = document.getElementById(id); return el ? ("" + el.value).trim() : ""; }
   num(id) { return Math.round(this.parseNum(this.val(id))) || 0; }
@@ -243,6 +256,28 @@ export default class Almanac extends React.Component {
   stColor(s) { return s === "Done" ? C.green : s === "Stat-ready" ? "#9a7530" : C.red; }
   stBg(s) { return s === "Done" ? "rgba(92,110,53,.16)" : s === "Stat-ready" ? "rgba(201,162,74,.18)" : "rgba(150,58,44,.12)"; }
 
+  // Drop-rate luck verdict. `rate` is the 1/N denominator, `got` the count
+  // received over `kc` kills. expected = kc/N. With got>0 we compare against
+  // expected (got/expected ratio → spooned vs late); with got==0 we grade how
+  // far past the rate you are (expected → dry). Getting a 1/3000 drop at 1 KC
+  // gives a huge ratio → "extremely spooned".
+  luckVerdict(kc, rate, got) {
+    const expected = rate > 0 ? kc / rate : 0;
+    if (kc <= 0) return { t: "—", c: C.muted };
+    if (got > 0) {
+      const ratio = got / Math.max(expected, 1e-9);
+      if (ratio >= 4) return { t: "extremely spooned", c: C.green };
+      if (ratio >= 2) return { t: "spooned", c: C.green };
+      if (ratio >= 1.2) return { t: "ahead of rate", c: C.green };
+      if (ratio >= 0.8) return { t: "on rate", c: C.muted };
+      return { t: "late but got it", c: C.gold };
+    }
+    if (expected >= 4) return { t: "extremely dry", c: C.red };
+    if (expected >= 2.5) return { t: "very dry", c: C.red };
+    if (expected >= 1.5) return { t: "dry", c: C.red };
+    if (expected >= 0.5) return { t: "on rate", c: C.muted };
+    return { t: "early days", c: C.muted };
+  }
   flipTax(sell, qty) { return Math.min(5000000, Math.floor(sell * 0.02)) * qty; }
   computeFlip(f) {
     if (f.avgBuy != null && f.avgSell != null) {
@@ -326,7 +361,7 @@ export default class Almanac extends React.Component {
   toggleForm = (f) => this.setState((s) => ({ openForm: s.openForm === f ? null : f, fillResult: null }));
   setCfg = (cfg, key, raw, opts = {}) => { let v = opts.str ? raw : Math.max(0, Math.round(this.parseNum(raw) || 0)); this[cfg][key] = v; this._save("almanac." + cfg + ".v1", this[cfg]); this.bump(); };
 
-  addNw = () => { const cash = this.num("nw_cash"), items = this.num("nw_items"); if (cash + items <= 0) return; this.logs.nw.push({ date: this.val("nw_date") || this.today(), cash, items, note: this.val("nw_note") }); this.saveLogs(); this.setState({ openForm: null }); };
+  addNw = () => { const cash = this.num("nw_cash"), bank = this.num("nw_bank"); if (cash + bank <= 0) return; const items = Math.max(0, bank - cash); this.logs.nw.push({ date: this.val("nw_date") || this.today(), cash, items, note: this.val("nw_note") }); this.saveLogs(); this.setState({ openForm: null }); };
   addFlip = () => { const item = this.val("flip_item") || "Item", qty = this.num("flip_qty") || 1, avgBuy = this.num("flip_buy"), avgSell = this.num("flip_sell"); if (avgBuy <= 0 || avgSell <= 0) return; this.logs.flips.unshift({ buyDate: this.val("flip_bdate") || this.today(), sellDate: this.val("flip_sdate") || this.today(), item, qty, avgBuy, avgSell, notes: this.val("flip_notes") }); this.saveLogs(); this.setState({ openForm: null, flipPrefill: null }); };
   // Fill calculator: weighted-average a multi-fill flip whose price moved across partials.
   calcFill = () => {
@@ -359,6 +394,105 @@ export default class Almanac extends React.Component {
 
   addGoal = () => { const skill = this.val("sg_skill"); if (!skill || this.goals.find((g) => g.skill === skill)) { this.setState({ openForm: null }); return; } this.goals.push({ skill, tgt: Math.max(2, Math.min(99, this.num("sg_tgt") || 99)), method: this.val("sg_method") || "Custom plan", xpHr: this.num("sg_xphr"), gpHr: this.num("sg_gphr") }); this._save("almanac.goals.v1", this.goals); this.setState({ openForm: null }); };
   removeGoal = (sk) => { this.goals = this.goals.filter((g) => g.skill !== sk); this._save("almanac.goals.v1", this.goals); this.bump(); };
+
+  // ---------- comprehensive objectives (bank / quest / diary / loot) ----------
+  defaultObjectives() {
+    return [
+      { id: "seed_bank", type: "bank", target: this.gcfg ? this.gcfg.bankGoal || 1e9 : 1e9 },
+      { id: "seed_cape", type: "quest", quest: "__cape__" },
+    ];
+  }
+  addObjective = () => {
+    const type = this.state.objType || "bank";
+    const o = { id: "o" + Date.now() + "_" + Math.round(this.parseNum(this.val("rsn_input")) || this.objectives.length), type };
+    if (type === "bank") { o.target = this.num("obj_bank"); if (o.target <= 0) return; }
+    else if (type === "quest") { o.quest = this.val("obj_quest") || "__cape__"; }
+    else if (type === "diary") { o.diary = this.val("obj_diary"); if (!o.diary) return; }
+    else if (type === "loot") { o.boss = this.state.objBoss || this.val("obj_boss"); o.drop = this.val("obj_drop"); if (!o.boss || !o.drop) return; }
+    this.objectives.push(o); this._save("almanac.objectives.v1", this.objectives); this.setState({ openForm: null });
+  };
+  removeObjective = (id) => { this.objectives = this.objectives.filter((o) => o.id !== id); this._save("almanac.objectives.v1", this.objectives); this.bump(); };
+
+  // Best gp/hr earner open to the player right now — drives funding suggestions.
+  bestEarner() {
+    const aCost = this.alchCost(), cphr = this.alchcfg.castsPerHour || 1200;
+    const alchBest = Math.max(0, ...this.alchItems.map((a) => (a.alch - a.buy - aCost) * cphr));
+    const slay = this.slayWeighted();
+    const accBoss = Math.max(0, ...D.bosses.filter((b) => this.bossEff(b).acc).map((b) => this.bossEff(b).estGp));
+    const cands = [
+      { name: "High Alchemy", perHr: alchBest },
+      { name: "Slayer (after blocks)", perHr: slay.gp },
+      { name: "best boss open now", perHr: accBoss },
+    ];
+    return cands.reduce((b, m) => (m.perHr > b.perHr ? m : b));
+  }
+  // Skill requirements in a quest/diary gate the player hasn't met yet.
+  missingReqs(gate) {
+    const lv = {}; this.skillsRaw.forEach(([nm, l]) => { lv[nm.toLowerCase()] = l; }); lv.runecrafting = lv.runecraft;
+    const out = []; const re = /([A-Za-z][A-Za-z ]*?)\s+(\d+)/g; let m;
+    while ((m = re.exec(gate || ""))) { const sk = m[1].trim().toLowerCase(), need = +m[2]; if (lv[sk] != null && lv[sk] < need) out.push(m[1].trim() + " " + lv[sk] + "→" + need); }
+    return out;
+  }
+  // Fractional progress (0..1) toward a gate's skill requirements.
+  reqProgress(gate) {
+    const lv = {}; this.skillsRaw.forEach(([nm, l]) => { lv[nm.toLowerCase()] = l; }); lv.runecrafting = lv.runecraft;
+    const reqs = []; const re = /([A-Za-z][A-Za-z ]*?)\s+(\d+)/g; let m;
+    while ((m = re.exec(gate || ""))) { const sk = m[1].trim().toLowerCase(), need = +m[2]; if (lv[sk] != null) reqs.push({ cur: lv[sk], need }); }
+    if (!reqs.length) return 1;
+    return reqs.reduce((a, r) => a + Math.min(1, r.cur / r.need), 0) / reqs.length;
+  }
+  // Synthesize a goal's progress + a suggested route from live & logged data.
+  objectiveView(o) {
+    const d = this.derive();
+    if (o.type === "bank") {
+      const target = o.target || 0, remain = Math.max(0, target - d.netWorth);
+      const pct = target > 0 ? Math.min(100, (d.netWorth / target) * 100) : 0;
+      const best = this.bestEarner();
+      const days = d.gpDay > 0 ? Math.ceil(remain / d.gpDay) : null;
+      const eta = remain <= 0 ? "done" : days != null ? this.fmtDays(days) : "—";
+      const route = remain <= 0 ? "Target reached — set a higher one." : `Top earner now: ${best.name} (~${this.short(best.perHr)}/hr). ` + (days != null ? `At ${this.short(d.gpDay)}/day that's ~${this.fmtDays(days)} away.` : "Log net-worth snapshots so a date can be projected.");
+      return { kind: "Bank value", title: this.short(target) + " bank", sub: `${this.short(d.netWorth)} of ${this.short(target)} · ${this.short(remain)} to go`, pct, route, eta, done: remain <= 0 };
+    }
+    if (o.type === "quest") {
+      if (o.quest === "__cape__") {
+        const order = QUEST_ORDER.optimal || [];
+        const byName = {}; D.quests.forEach((q) => (byName[q.n] = q));
+        const remaining = order.map((n) => byName[n]).filter((q) => q && this.qStatus(q) !== "Done");
+        const ready = remaining.filter((q) => this.qStatus(q) === "Stat-ready").map((q) => q.n);
+        const route = d.qRemaining === 0 ? "Every quest complete — claim the cape!" : ready.length ? `Do next (stat-ready): ${ready.slice(0, 3).join(", ")}${ready.length > 3 ? "…" : ""}.` : `Next up "${remaining[0] ? remaining[0].n : "?"}" is stat-blocked — train its requirements first.`;
+        return { kind: "Quest", title: "Quest Cape", sub: `${d.qDone}/${d.qTotal} done · ${d.qRemaining} to go · ${this.questPoints} QP`, pct: d.qPct, route, eta: d.qRemaining ? d.qRemaining + " left" : "done", done: d.qRemaining === 0 };
+      }
+      const q = D.quests.find((x) => x.n === o.quest);
+      if (!q) return null;
+      const st = this.qStatus(q), miss = this.missingReqs(q.gate);
+      const pct = st === "Done" ? 100 : this.reqProgress(q.gate) * 100;
+      const route = st === "Done" ? "Completed." : st === "Stat-ready" ? "Stat requirements met — start it now." : `Stat-blocked — train ${miss.join(", ") || "earlier quests in the chain"}.`;
+      return { kind: "Quest", title: q.n, sub: (q.series ? q.series + " series" : "Quest") + (q.gate ? " · needs " + q.gate : ""), pct, route, eta: st, done: st === "Done" };
+    }
+    if (o.type === "diary") {
+      const dy = D.diaries.find((x) => x.region + " " + x.tier === o.diary);
+      if (!dy) return null;
+      const st = this.diaryStatus(dy), miss = this.missingReqs(dy.gate);
+      const pct = st === "Done" ? 100 : this.reqProgress(dy.gate) * 100;
+      const route = st === "Done" ? "Completed." : miss.length ? `Train ${miss.join(", ")} to unlock the tasks.` : "Stats met — knock out the diary tasks.";
+      return { kind: "Diary", title: `${dy.region} ${dy.tier}`, sub: "Achievement Diary" + (dy.gate ? " · needs " + dy.gate : ""), pct, route, eta: st, done: st === "Done" };
+    }
+    if (o.type === "loot") {
+      const b = D.bosses.find((x) => x.n === o.boss); const drops = this.bossDrops[o.boss] || []; const dr = drops.find((x) => x.n === o.drop);
+      if (!b || !dr) return null;
+      const killKc = this.logs.boss.filter((x) => x.boss === o.boss).reduce((a, x) => a + (x.kills || 0), 0);
+      const dropKc = Math.max(0, ...this.logs.drop.filter((x) => x.boss === o.boss).map((x) => x.kc || 0));
+      const kc = Math.max(killKc, dropKc);
+      const got = this.logs.drop.filter((x) => x.boss === o.boss && x.drop === o.drop).length;
+      const e = this.bossEff(b), kph = e.kills || 0;
+      const pct = got > 0 ? 100 : Math.min(100, (kc / dr.rate) * 100);
+      const v = this.luckVerdict(kc, dr.rate, got);
+      const hrsToRate = kph > 0 ? Math.round(dr.rate / kph) : 0;
+      const route = got > 0 ? `Obtained — ${v.t} (${got}× by ${this.fmt(kc)} KC).` : `1/${this.fmt(dr.rate)} drop. ` + (kph > 0 ? `~${kph} kills/hr → about ${hrsToRate}h to hit rate. ` : "") + `You're ${this.fmt(kc)} KC in.` + (e.acc ? "" : " ⚠ you don't meet this boss's combat/Slayer reqs yet.");
+      return { kind: "Loot", title: dr.n, sub: `from ${b.n}` + (dr.v > 0 ? ` · ${this.short(dr.v)}` : ""), pct, route, eta: got > 0 ? "got it" : v.t, done: got > 0 };
+    }
+    return null;
+  }
   setGoalField = (sk, k, v) => { const g = this.goals.find((x) => x.skill === sk); if (!g) return; g[k] = k === "method" ? v : k === "tgt" ? Math.max(2, Math.min(99, parseInt(v) || 0)) : Math.round(this.parseNum(v)); this._save("almanac.goals.v1", this.goals); this.bump(); };
 
   cycleQuest = (n) => { this.questOv[n] = !this.questOv[n]; this._save("almanac.questdone.v1", this.questOv); this.bump(); };
@@ -374,6 +508,7 @@ export default class Almanac extends React.Component {
   render() {
     if (!this.logs) return <div style={{ padding: 40, color: "#999" }}>Loading…</div>;
     const sec = this.state.section;
+    const TH = themeFor(sec);
     const t = TITLES[sec] || TITLES.dashboard;
     const rsn = (this.stats && this.stats.rsn) || "Adventurer";
     const initial = (rsn[0] || "A").toUpperCase();
@@ -410,12 +545,15 @@ export default class Almanac extends React.Component {
         </aside>
 
         {/* ---- main column ---- */}
-        <main style={{ flex: 1, minWidth: 0, minHeight: "100vh", background: "#e9dcbf", backgroundImage: "radial-gradient(circle at 15% 0%, rgba(255,250,235,.55), transparent 45%), radial-gradient(circle at 85% 100%, rgba(150,120,70,.16), transparent 50%)" }}>
+        <main style={{ flex: 1, minWidth: 0, minHeight: "100vh", background: "#e9dcbf", backgroundImage: `radial-gradient(circle at 15% 0%, rgba(255,250,235,.55), transparent 45%), radial-gradient(circle at 85% 6%, ${TH.accent}1f, transparent 42%), radial-gradient(circle at 85% 100%, rgba(150,120,70,.16), transparent 50%)`, transition: "background-image .4s ease" }}>
           {/* header + RSN bar */}
-          <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "14px 30px", borderBottom: "2px solid #c9a24a", background: "linear-gradient(180deg, rgba(231,217,184,.97), rgba(231,217,184,.85))", position: "sticky", top: 0, zIndex: 25 }}>
-            <div>
-              <div style={mono({ fontSize: 9, letterSpacing: ".22em", color: "#8a6a38", textTransform: "uppercase" })}>{t[0]}</div>
-              <div style={cinzel({ fontWeight: 700, fontSize: 21, color: "#3a2812" })}>{t[1]}</div>
+          <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "14px 30px", borderBottom: `2px solid ${TH.accent}`, boxShadow: `inset 0 -4px 0 -2px ${TH.accent}55`, background: "linear-gradient(180deg, rgba(231,217,184,.97), rgba(231,217,184,.85))", position: "sticky", top: 0, zIndex: 25 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 8, flex: "0 0 34px", background: `linear-gradient(140deg, ${TH.g1}, ${TH.g2})`, border: `1px solid ${TH.accent}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, boxShadow: `0 0 12px ${TH.accent}44` }}>{TH.icon}</div>
+              <div>
+                <div style={mono({ fontSize: 9, letterSpacing: ".22em", color: TH.accent, textTransform: "uppercase" })}>{t[0]}</div>
+                <div style={cinzel({ fontWeight: 700, fontSize: 21, color: "#3a2812" })}>{t[1]}</div>
+              </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
               <input className="led" id="rsn_input" defaultValue={this.stats && !this.stats.demo ? rsn : ""} placeholder="RuneScape name…" onKeyDown={(e) => { if (e.key === "Enter") this.fetchStats(e); }} style={{ width: 168 }} />
@@ -601,7 +739,7 @@ export default class Almanac extends React.Component {
     });
     return (
       <div>
-        <SectionTitle kicker="Live from your hiscores" title="Skills" />
+        <SectionTitle kicker="Live from your hiscores" title="Skills" accent={themeFor("skills").accent} />
         <StatCards cols={4} items={[
           { label: "Total Level", value: "" + d.totalLevel, color: C.gold },
           { label: "Total XP", value: this.short(d.totalXp), color: C.purple },
@@ -649,16 +787,68 @@ export default class Almanac extends React.Component {
     const bank = this.derive().netWorth;
     const flipPerDay = (() => { const fc = this.logs.flips.map((f) => this.computeFlip(f)); const net = fc.reduce((a, f) => a + f.net, 0); const dates = this.logs.flips.map((f) => new Date(f.sellDate || f.date)); const span = dates.length ? Math.max(1, (Math.max(...dates) - Math.min(...dates)) / 86400000 + 1) : 1; return Math.round(net / span); })();
     const shortfall = Math.max(0, cost - bank);
+    const TH = themeFor("goals");
+    const objViews = this.objectives.map((o) => ({ o, v: this.objectiveView(o) })).filter((x) => x.v);
+    const questOpts = D.quests.filter((q) => this.qStatus(q) !== "Done").map((q) => q.n);
+    const diaryOpts = D.diaries.map((x) => x.region + " " + x.tier);
+    const lootBosses = Object.keys(this.bossDrops);
+    const curBoss = this.state.objBoss || lootBosses[0] || "";
+    const lootDrops = (this.bossDrops[curBoss] || []).map((dd) => dd.n);
+    const kindColor = (k) => ({ "Bank value": C.green, Quest: "#5a4a8a", Diary: C.gold, Loot: C.red }[k] || TH.accent);
     return (
       <div>
-        <SectionTitle kicker="Time to Goal · personal EHP" title="Goal Ledger"
-          right={<Btn tone="gold" onClick={() => this.toggleForm("goal")}>+ Add goal</Btn>} />
+        <SectionTitle kicker="Objectives · live route-finding" title="Goal Ledger" accent={TH.accent}
+          right={<div style={{ display: "flex", gap: 8 }}><Btn onClick={() => this.toggleForm("obj")}>+ Objective</Btn><Btn tone="gold" onClick={() => this.toggleForm("goal")}>+ Skill goal</Btn></div>} />
         <StatCards cols={4} items={[
           { label: "Total grind", value: gH.toFixed(0) + " h" },
           { label: "At " + hpd + " h / day", value: (gH / Math.max(0.1, hpd) / 7).toFixed(1) + " wks" },
           { label: "Net GP cost", value: this.signed(gG), color: gG >= 0 ? C.green : C.red },
-          { label: "Active goals", value: "" + gActive },
+          { label: "Active goals", value: gActive + " skill · " + this.objectives.length + " obj" },
         ]} />
+        {/* ---- Objectives: bank / quest / diary / loot, each with a synthesized route ---- */}
+        {this.state.openForm === "obj" && (
+          <Card style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <select className="led" value={this.state.objType} onChange={(e) => this.setState({ objType: e.target.value })} style={{ width: 150 }}>
+                <option value="bank">Bank value</option><option value="quest">Quest</option><option value="diary">Diary</option><option value="loot">Loot / drop</option>
+              </select>
+              {this.state.objType === "bank" && this.field("obj_bank", "Target bank (gp)", { w: 180 })}
+              {this.state.objType === "quest" && <select className="led" id="obj_quest" style={{ width: 240 }}><option value="__cape__">Quest Cape (all quests)</option>{questOpts.map((n) => <option key={n} value={n}>{n}</option>)}</select>}
+              {this.state.objType === "diary" && <select className="led" id="obj_diary" style={{ width: 240 }}>{diaryOpts.map((n) => <option key={n} value={n}>{n}</option>)}</select>}
+              {this.state.objType === "loot" && <select className="led" id="obj_boss" value={curBoss} onChange={(e) => this.setState({ objBoss: e.target.value })} style={{ width: 190 }}>{lootBosses.map((n) => <option key={n} value={n}>{n}</option>)}</select>}
+              {this.state.objType === "loot" && <select className="led" id="obj_drop" style={{ width: 190 }}>{lootDrops.map((n) => <option key={n} value={n}>{n}</option>)}</select>}
+              <Btn tone="gold" onClick={this.addObjective}>Add</Btn>
+            </div>
+          </Card>
+        )}
+        {objViews.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(330px,1fr))", gap: 14, marginBottom: 18 }}>
+            {objViews.map(({ o, v }) => {
+              const kc = kindColor(v.kind);
+              return (
+                <Card key={o.id} pad={15} style={{ borderLeft: `4px solid ${kc}` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                    <div><Kicker color={kc}>{v.kind}</Kicker><div style={cinzel({ fontWeight: 700, fontSize: 16, color: C.ink, marginTop: 3 })}>{v.title}</div></div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <Tag color={v.done ? C.green : kc} bg={v.done ? "rgba(92,110,53,.16)" : "transparent"}>{v.eta}</Tag>
+                      <span onClick={() => this.removeObjective(o.id)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 12 }) }}>✕</span>
+                    </div>
+                  </div>
+                  <div style={serif({ fontSize: 12.5, color: C.muted, margin: "4px 0 9px" })}>{v.sub}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ flex: 1 }}><Bar pct={Math.max(2, v.pct)} c1={kc} c2={kc} h={7} /></div>
+                    <span style={mono({ fontSize: 11, color: kc })}>{Math.round(v.pct)}%</span>
+                  </div>
+                  <div style={{ marginTop: 10, background: C.cardLight, border: "1px solid rgba(44,32,19,.1)", borderRadius: 6, padding: "8px 10px" }}>
+                    <div style={mono({ fontSize: 8.5, letterSpacing: ".16em", color: C.muted, textTransform: "uppercase", marginBottom: 3 })}>Suggested route</div>
+                    <div style={serif({ fontSize: 13, color: C.ink, lineHeight: 1.4 })}>{v.route}</div>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+        <Kicker color={C.goldDeep} style={{ marginBottom: 8 }}>Skill goals · personal EHP</Kicker>
         {this.state.openForm === "goal" && (
           <Card style={{ marginBottom: 14 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -713,18 +903,22 @@ export default class Almanac extends React.Component {
   // ===================== NET WORTH =====================
   renderNetWorth() {
     const d = this.derive();
+    const TH = themeFor("networth");
     const vals = d.nwSorted.map((s) => s.cash + s.items);
     const peak = Math.max(1, ...vals), min = vals.length ? Math.min(...vals) : 0;
-    const W = 760, H = 170, pad = 14;
-    const x = (i) => (vals.length <= 1 ? W / 2 : pad + (i * (W - pad * 2)) / (vals.length - 1));
-    const y = (v) => { const rng = Math.max(1, peak - min); return pad + (1 - (v - min) / rng) * (H - pad * 2); };
-    const line = vals.map((v, i) => (i === 0 ? "M" : "L") + x(i).toFixed(1) + "," + y(v).toFixed(1)).join(" ");
-    const area = vals.length >= 2 ? "M" + x(0) + "," + (H - pad) + " " + vals.map((v, i) => "L" + x(i).toFixed(1) + "," + y(v).toFixed(1)).join(" ") + " L" + x(vals.length - 1) + "," + (H - pad) + " Z" : "";
+    const n = vals.length;
+    const W = 760, H = 232, padL = 62, padR = 18, padT = 18, padB = 34, iw = W - padL - padR, ih = H - padT - padB;
+    const X = (i) => (n <= 1 ? padL + iw / 2 : padL + (i * iw) / (n - 1));
+    const Y = (v) => padT + (1 - (v - min) / Math.max(1, peak - min)) * ih;
+    const line = vals.map((v, i) => (i === 0 ? "M" : "L") + X(i).toFixed(1) + "," + Y(v).toFixed(1)).join(" ");
+    const area = n >= 2 ? "M" + X(0).toFixed(1) + "," + (padT + ih) + " " + vals.map((v, i) => "L" + X(i).toFixed(1) + "," + Y(v).toFixed(1)).join(" ") + " L" + X(n - 1).toFixed(1) + "," + (padT + ih) + " Z" : "";
+    const yTicks = [0, 0.25, 0.5, 0.75, 1].map((tk) => { const val = min + tk * (peak - min); return { val, y: Y(val) }; });
+    const xTickIdx = n <= 1 ? [0] : [...new Set(Array.from({ length: Math.min(6, n) }, (_, j) => Math.round((j * (n - 1)) / (Math.min(6, n) - 1))))];
     const rows = d.nwSorted.map((s, i) => { const v = s.cash + s.items; const prev = i > 0 ? vals[i - 1] : v; return { i: this.logs.nw.indexOf(s), date: this.dShort(s.date), total: this.short(v), cash: this.fmt(s.cash), items: this.fmt(s.items), note: s.note || "", delta: i > 0 ? this.signed(v - prev) : "—", dc: v - prev >= 0 ? C.green : C.red }; }).reverse();
     const lastDelta = vals.length > 1 ? vals[vals.length - 1] - vals[vals.length - 2] : 0;
     return (
       <div>
-        <SectionTitle kicker="The Treasury" title="Net Worth"
+        <SectionTitle kicker="The Treasury" title="Net Worth" accent={TH.accent}
           right={<Btn tone="gold" onClick={() => this.toggleForm("nw")}>+ Log snapshot</Btn>} />
         <StatCards cols={4} items={[
           { label: "Net Worth", value: this.short(d.netWorth) },
@@ -737,17 +931,31 @@ export default class Almanac extends React.Component {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               {this.field("nw_date", "", { type: "date", def: this.today(), w: 150 })}
               {this.field("nw_cash", "Cash (gp)", { w: 140 })}
-              {this.field("nw_items", "Items value (gp)", { w: 160 })}
-              {this.field("nw_note", "Note (optional)", { w: 220 })}
+              {this.field("nw_bank", "Total bank value (gp)", { w: 190 })}
+              {this.field("nw_note", "Note (optional)", { w: 200 })}
               <Btn tone="gold" onClick={this.addNw}>Save</Btn>
+              <span style={serif({ fontSize: 12, fontStyle: "italic", color: C.muted, flexBasis: "100%" })}>Item/bank value is your total bank minus the cash you hold; net worth is the total. Pull the total from a bank-value plugin or the GE.</span>
             </div>
           </Card>
         )}
-        <Card style={{ marginBottom: 14 }}>
-          {vals.length >= 2 ? (
-            <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 190 }}>
-              <defs><linearGradient id="nwg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="rgba(201,162,74,.45)" /><stop offset="100%" stopColor="rgba(201,162,74,0)" /></linearGradient></defs>
-              <path d={area} fill="url(#nwg)" /><path d={line} fill="none" stroke="#b98f3e" strokeWidth="2.5" />
+        <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
+          <Kicker color={TH.accent}>Wealth curve</Kicker>
+          {n >= 2 ? (
+            <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 248, marginTop: 6 }}>
+              <defs><linearGradient id="nwg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={TH.accent} stopOpacity="0.32" /><stop offset="100%" stopColor={TH.accent} stopOpacity="0" /></linearGradient></defs>
+              {yTicks.map((tk, i) => (
+                <g key={i}>
+                  <line x1={padL} y1={tk.y} x2={W - padR} y2={tk.y} stroke="rgba(44,32,19,.13)" strokeWidth="1" strokeDasharray={i === 0 ? "" : "3 3"} />
+                  <text x={padL - 9} y={tk.y + 3.5} textAnchor="end" style={mono({ fontSize: 10, fill: C.muted })}>{this.short(tk.val)}</text>
+                </g>
+              ))}
+              {xTickIdx.map((idx, i) => (
+                <text key={i} x={X(idx)} y={H - 11} textAnchor="middle" style={mono({ fontSize: 10, fill: C.muted })}>{this.dShort(d.nwSorted[idx].date)}</text>
+              ))}
+              <path d={area} fill="url(#nwg)" />
+              <path d={line} fill="none" stroke={TH.accent} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+              {vals.map((v, i) => (<circle key={i} cx={X(i)} cy={Y(v)} r={i === n - 1 ? 4.5 : 2.4} fill={i === n - 1 ? C.goldBright : TH.accent} stroke="#f2e9d2" strokeWidth={i === n - 1 ? 2 : 1} />))}
+              <text x={X(n - 1) - 6} y={Y(vals[n - 1]) - 10} textAnchor="end" style={cinzel({ fontSize: 13, fontWeight: 700, fill: C.ink })}>{this.short(vals[n - 1])}</text>
             </svg>
           ) : <div style={serif({ fontStyle: "italic", color: C.muted, padding: 20 })}>Log at least two snapshots and your wealth curve draws here.</div>}
         </Card>
@@ -788,7 +996,7 @@ export default class Almanac extends React.Component {
     ];
     return (
       <div>
-        <SectionTitle kicker="Grand Exchange" title="Flipping Desk" />
+        <SectionTitle kicker="Grand Exchange" title="Flipping Desk" accent={themeFor("flipping").accent} />
         <StatCards cols={4} items={stats} />
         <div style={{ marginBottom: 16 }}>
           <Seg options={[{ key: "scanner", label: "SCANNER" }, { key: "ledger", label: "LEDGER" }, { key: "perf", label: "PERFORMANCE" }, { key: "calc", label: "FILL CALC" }]} active={view} onPick={(v) => this.setState({ flipView: v, openForm: null })} />
@@ -802,7 +1010,7 @@ export default class Almanac extends React.Component {
   }
   renderFlipScanner(cfg, capPer) {
     const controls = [
-      { key: "capital", label: "Flip capital available", suffix: "gp", hint: "split across 8 GE slots → " + this.short(capPer) + "/flip" },
+      { key: "capital", label: "Flip capital", suffix: "gp", hint: "split across 8 GE slots" },
       { key: "minMargin", label: "Min margin %", suffix: "%", hint: "floor after the 2% tax" },
       { key: "maxMargin", label: "Max margin %", suffix: "%", hint: "ceiling — above is likely stale/manip" },
       { key: "minProfit4h", label: "Min profit / 4h", suffix: "gp", hint: "the 'worth a GE slot' bar" },
@@ -828,14 +1036,22 @@ export default class Almanac extends React.Component {
               <Btn tone="quiet" onClick={() => this.toggleForm("scan")}>+ Item</Btn>
             </div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(190px,1fr))", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10 }}>
             {controls.map((c) => (
-              <div key={c.key} style={{ background: C.cardLight, padding: "10px 12px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
-                <Kicker>{c.label}</Kicker>
-                <input className="led" defaultValue={this.fmt(cfg[c.key])} onBlur={(e) => this.setCfg("flipcfg", c.key, e.target.value)} style={{ width: "100%", marginTop: 5, fontWeight: 600 }} />
-                <div style={serif({ fontSize: 11, fontStyle: "italic", color: C.muted, marginTop: 4 })}>{c.hint}</div>
+              <div key={c.key} style={{ background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)", display: "flex", flexDirection: "column", minHeight: 108 }}>
+                <Kicker style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.label}</Kicker>
+                <div style={{ position: "relative", marginTop: 6 }}>
+                  <input className="led" defaultValue={this.fmt(cfg[c.key])} onBlur={(e) => this.setCfg("flipcfg", c.key, e.target.value)} style={{ width: "100%", fontWeight: 600, paddingRight: c.suffix ? 34 : 9 }} />
+                  {c.suffix && <span style={{ position: "absolute", right: 9, top: "50%", transform: "translateY(-50%)", ...mono({ fontSize: 10, color: C.muted }) }}>{c.suffix}</span>}
+                </div>
+                <div style={serif({ fontSize: 11, fontStyle: "italic", color: C.muted, marginTop: 6, lineHeight: 1.3, flex: 1 })}>{c.hint}</div>
               </div>
             ))}
+            <div style={{ background: "linear-gradient(160deg, rgba(201,162,74,.20), rgba(201,162,74,.04))", padding: "11px 13px", borderRadius: 6, border: "1px solid " + C.gold, display: "flex", flexDirection: "column", justifyContent: "center", minHeight: 108 }}>
+              <Kicker color={C.goldDeep}>Capital / flip</Kicker>
+              <div style={cinzel({ fontWeight: 800, fontSize: 23, color: C.ink, marginTop: 4 })}>{this.short(capPer)}</div>
+              <div style={serif({ fontSize: 11, fontStyle: "italic", color: C.muted, marginTop: 3 })}>each of 8 GE slots</div>
+            </div>
           </div>
           {this.state.priceStatus && <div style={{ marginTop: 10, ...mono({ fontSize: 11, color: C.muted2 }) }}>{this.state.priceStatus}</div>}
         </Card>
@@ -882,7 +1098,8 @@ export default class Almanac extends React.Component {
           </div>
           {this.state.openForm === "flip" && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
-              {this.field("flip_item", "Item", { w: 170, def: this.state.flipPrefill ? this.state.flipPrefill.item : "" })}
+              {this.field("flip_item", "Item", { w: 170, list: "tradeItems", def: this.state.flipPrefill ? this.state.flipPrefill.item : "" })}
+              <datalist id="tradeItems">{this.itemNames.map((n) => <option key={n} value={n} />)}</datalist>
               {this.field("flip_qty", "Qty", { w: 80, def: this.state.flipPrefill ? this.state.flipPrefill.qty : "" })}
               {this.field("flip_buy", "Avg buy", { w: 100, def: this.state.flipPrefill ? this.state.flipPrefill.avgBuy : "" })}
               {this.field("flip_sell", "Avg sell", { w: 100, def: this.state.flipPrefill ? this.state.flipPrefill.avgSell : "" })}
@@ -1003,17 +1220,35 @@ export default class Almanac extends React.Component {
     const rows = this.alchItems.map((a) => { const profit = a.alch - a.buy - aCost; const need2h = cphr * 2; const sustain = a.limit >= need2h && d.cash >= a.buy * need2h; return { item: a.item, alch: a.alch, buy: a.buy, profit, p4h: profit * a.limit, phr: profit * cphr, limit: a.limit, gpxp: (profit / 65).toFixed(2), sustain }; }).sort((a, b) => b.phr - a.phr);
     const best = rows.filter((r) => r.sustain && r.profit > 0)[0] || rows.filter((r) => r.profit > 0)[0] || rows[0];
     const log = this.logs.alch;
+    const TH = themeFor("alchemy");
+    const sess = { n: log.length, profit: log.reduce((a, x) => a + (x.net || 0), 0), xp: log.reduce((a, x) => a + (x.xp || 0), 0), casts: log.reduce((a, x) => a + (x.casts || 0), 0) };
+    const setupCell = { background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" };
     return (
       <div>
-        <SectionTitle kicker="Arcane Profit · Staff of Fire assumed" title="High Alchemy"
+        <SectionTitle kicker="Arcane Profit · Staff of Fire assumed" title="High Alchemy" accent={TH.accent}
           right={<div style={{ display: "flex", gap: 8 }}><Btn onClick={this.refreshPrices}>⟳ Live prices</Btn><Btn tone="gold" onClick={() => this.toggleForm("alch")}>+ Log session</Btn></div>} />
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginBottom: 14 }}>
-          <Card pad={12}><Kicker>Casts / hour</Kicker><input className="led" defaultValue={this.fmt(this.alchcfg.castsPerHour)} onBlur={(e) => this.setCfg("alchcfg", "castsPerHour", e.target.value)} style={{ width: "100%", marginTop: 5 }} /></Card>
-          <Card pad={12}><Kicker>Nature rune value</Kicker><input className="led" defaultValue={this.fmt(this.alchcfg.natRune)} onBlur={(e) => this.setCfg("alchcfg", "natRune", e.target.value)} style={{ width: "100%", marginTop: 5 }} /></Card>
-          <Card pad={12}><Kicker>Fire source</Kicker>
-            <select className="led" defaultValue={this.alchcfg.fireSource} onChange={(e) => this.setCfg("alchcfg", "fireSource", e.target.value, { str: true })} style={{ width: "100%", marginTop: 5 }}><option value="staff">Fire staff (free)</option><option value="none">Buy fire runes</option></select></Card>
-          <Card pad={12}><Kicker>Cost / cast</Kicker><div style={cinzel({ fontWeight: 700, fontSize: 18, marginTop: 6 })}>{this.fmt(aCost)} gp</div></Card>
-        </div>
+        {best && <Hero theme={TH} kicker="Verdict · best sustainable alch (2h+)" title={best.item}
+          blurb={`+${best.profit} gp/cast · ${best.sustain ? "enough buy-limit & cash to sustain ≥2 hours" : "limited stock — tops out before 2h"}`}
+          statLabel="Profit / hr" statValue={this.short(best.phr)} statSub={this.short(best.phr * 2) + " over 2h"} />}
+        <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <Kicker color={C.purple}>⚙ Setup</Kicker>
+            <Btn tone="quiet" onClick={this.refreshNatRune}>⟳ Nat price (Wiki)</Btn>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 12 }}>
+            <div style={setupCell}><Kicker>Casts / hour</Kicker><input className="led" defaultValue={this.fmt(this.alchcfg.castsPerHour)} onBlur={(e) => this.setCfg("alchcfg", "castsPerHour", e.target.value)} style={{ width: "100%", marginTop: 6 }} /></div>
+            <div style={setupCell}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><Kicker>Nature rune</Kicker><Tag color={C.purple} bg="rgba(106,74,138,.14)">LIVE</Tag></div><div style={cinzel({ fontWeight: 700, fontSize: 19, marginTop: 6 })}>{this.fmt(this.alchcfg.natRune)} <span style={mono({ fontSize: 11, color: C.muted })}>gp</span></div><div style={serif({ fontSize: 10.5, fontStyle: "italic", color: C.muted, marginTop: 2 })}>OSRS Wiki · id 561</div></div>
+            <div style={setupCell}><Kicker>Fire rune source</Kicker>
+              <select className="led" defaultValue={this.alchcfg.fireSource} onChange={(e) => this.setCfg("alchcfg", "fireSource", e.target.value, { str: true })} style={{ width: "100%", marginTop: 6 }}><option value="staff">Fire staff (free)</option><option value="none">Buy fire runes</option></select></div>
+            <div style={setupCell}><Kicker>Cost / cast</Kicker><div style={cinzel({ fontWeight: 700, fontSize: 19, marginTop: 6 })}>{this.fmt(aCost)} <span style={mono({ fontSize: 11, color: C.muted })}>gp</span></div></div>
+          </div>
+        </Card>
+        <StatCards cols={4} items={[
+          { label: "Sessions logged", value: "" + sess.n },
+          { label: "Total profit", value: sess.n ? this.signed(sess.profit) : "—", color: sess.profit >= 0 ? C.green : C.red },
+          { label: "Magic XP", value: sess.xp ? this.short(sess.xp) : "—" },
+          { label: "Casts", value: sess.casts ? this.short(sess.casts) : "—" },
+        ]} />
         {this.state.openForm === "alch" && (
           <Card style={{ marginBottom: 14 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -1023,14 +1258,6 @@ export default class Almanac extends React.Component {
             </div>
           </Card>
         )}
-        {best && <Card style={{ marginBottom: 14, background: "rgba(106,74,138,.10)", border: "1px solid rgba(106,74,138,.35)" }}>
-          <Kicker color={C.purple}>★ Best pick now</Kicker>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 14, marginTop: 6 }}>
-            <span style={cinzel({ fontWeight: 700, fontSize: 22, color: C.ink })}>{best.item}</span>
-            <span style={mono({ fontSize: 14, color: C.purple })}>{this.short(best.phr)}/hr</span>
-            <span style={mono({ fontSize: 12, color: C.muted })}>+{best.profit}/cast · {best.sustain ? "2h+ sustainable ✓" : "limited stock"}</span>
-          </div>
-        </Card>}
         <Card>
           <Kicker color={C.goldDeep}>Item profitability · live</Kicker>
           <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 10 }}>
@@ -1069,7 +1296,7 @@ export default class Almanac extends React.Component {
     const view = this.state.bossView;
     return (
       <div>
-        <SectionTitle kicker="Command Centre · live drop pricing" title="Bossing Compendium"
+        <SectionTitle kicker="Command Centre · live drop pricing" title="Bossing Compendium" accent={themeFor("bossing").accent}
           right={<Seg options={[{ key: "compendium", label: "DATABASE" }, { key: "tracker", label: "TRACKER" }, { key: "focus", label: "FOCUS" }]} active={view} onPick={(v) => this.setState({ bossView: v, openForm: null })} />} />
         {view === "compendium" && this.renderBossDb()}
         {view === "tracker" && this.renderBossTracker()}
@@ -1167,11 +1394,15 @@ export default class Almanac extends React.Component {
     const name = this.state.bossFocus || opts[0];
     const b = D.bosses.find((x) => x.n === name) || D.bosses[0];
     const e = this.bossEff(b);
-    const kc = this.logs.boss.filter((x) => x.boss === name).reduce((a, x) => a + (x.kills || 0), 0);
+    const killKc = this.logs.boss.filter((x) => x.boss === name).reduce((a, x) => a + (x.kills || 0), 0);
+    // A drop logged "at KC N" implies at least N kills, so fold that in — else a
+    // 1-KC pet would read as 0 KC and the verdict would never leave "on rate".
+    const dropKc = Math.max(0, ...this.logs.drop.filter((dd) => dd.boss === name).map((dd) => dd.kc || 0));
+    const kc = Math.max(killKc, dropKc);
     const drops = this.bossDrops[name] || [];
     const dropCount = {}; this.logs.drop.forEach((dd) => { if (dd.boss === name) dropCount[dd.drop] = (dropCount[dd.drop] || 0) + 1; });
     let luck = 0;
-    const dropRows = drops.map((dr) => { const exp = kc / dr.rate; const got = dropCount[dr.n] || 0; luck += got * dr.v; let verdict = "on rate", vc = C.muted; if (kc > 0) { if (got > exp * 1.5 && got > 0) { verdict = "spooned"; vc = C.green; } else if (exp >= 1 && got < exp * 0.5) { verdict = "dry"; vc = C.red; } } return { name: dr.n, rate: "1/" + this.fmt(dr.rate), exp: exp.toFixed(2), got, verdict, vc, value: dr.v > 0 ? this.short(dr.v) : "pet" }; });
+    const dropRows = drops.map((dr) => { const exp = kc / dr.rate; const got = dropCount[dr.n] || 0; luck += got * dr.v; const v = this.luckVerdict(kc, dr.rate, got); return { name: dr.n, rate: "1/" + this.fmt(dr.rate), exp: exp >= 1 ? exp.toFixed(2) : exp > 0 ? exp.toPrecision(2) : "0", got, verdict: v.t, vc: v.c, value: dr.v > 0 ? this.short(dr.v) : "pet" }; });
     // gear recs from GEAR_DATA
     const keys = name.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length >= 4);
     const recs = []; const seen = {};
@@ -1241,7 +1472,7 @@ export default class Almanac extends React.Component {
     const w = this.slayWeighted();
     return (
       <div>
-        <SectionTitle kicker={"The Slayer · " + (this.mode === "iron" ? "Ironman lens (keep resources)" : "Main lens (sell drops)")} title="Task Planner"
+        <SectionTitle kicker={"The Slayer · " + (this.mode === "iron" ? "Ironman lens (keep resources)" : "Main lens (sell drops)")} title="Task Planner" accent={themeFor("slayer").accent}
           right={<Seg options={[{ key: "planner", label: "BLOCK CALC" }, { key: "monsters", label: "MONSTER DB" }, { key: "log", label: "LOG" }]} active={view} onPick={(v) => this.setState({ slayView: v, openForm: null })} />} />
         <StatCards cols={4} items={[
           { label: "Weighted XP/hr (after blocks)", value: this.short(w.xp) },
@@ -1370,7 +1601,7 @@ export default class Almanac extends React.Component {
     });
     return (
       <div>
-        <SectionTitle kicker={"The Armoury · " + (mode === "iron" ? "Ironman (obtain paths)" : "Main (GE prices)")} title="Gear Progression"
+        <SectionTitle kicker={"The Armoury · " + (mode === "iron" ? "Ironman (obtain paths)" : "Main (GE prices)")} title="Gear Progression" accent={themeFor("gear").accent}
           right={<div style={{ display: "flex", gap: 8, alignItems: "center" }}><Seg options={[{ key: "melee", label: "MELEE" }, { key: "ranged", label: "RANGED" }, { key: "magic", label: "MAGIC" }]} active={style} onPick={(v) => this.setState({ gearStyle: v })} /><Btn onClick={this.refreshGearPrices}>⟳ Prices</Btn></div>} />
         {this.state.gearPriceStatus && <div style={{ marginBottom: 10, ...mono({ fontSize: 11, color: C.muted2 }) }}>{this.state.gearPriceStatus}</div>}
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -1413,10 +1644,16 @@ export default class Almanac extends React.Component {
     const xpLeft = Math.max(0, this.xpFor(goal) - farmXp);
     const days = xpDay > 0 ? Math.ceil(xpLeft / xpDay) : 0;
     const agg = {}; this.logs.herb.forEach((h) => { if (!agg[h.tier]) agg[h.tier] = { runs: 0, net: 0 }; agg[h.tier].runs += h.runs || 1; agg[h.tier].net += h.net; });
+    const TH = themeFor("farming");
+    const bestFarm = this.farmDefs.filter((f) => f.unlocked).slice().sort((a, b) => b.net - a.net)[0] || this.farmDefs[0];
+    const loggedNet = this.logs.herb.reduce((a, h) => a + h.net, 0), loggedRuns = this.logs.herb.reduce((a, h) => a + (h.runs || 1), 0);
     return (
       <div>
-        <SectionTitle kicker="The Allotments · grow-time, not play-time" title="Farming Engine"
+        <SectionTitle kicker="The Allotments · grow-time, not play-time" title="Farming Engine" accent={TH.accent}
           right={<Btn tone="gold" onClick={() => this.toggleForm("herb")}>+ Log herb run</Btn>} />
+        {bestFarm && <Hero theme={TH} kicker="Herb-run verdict · best this account can grow" title={`Plant ${bestFarm.tier}`}
+          blurb={`${this.short(bestFarm.net)} net per run at your current Farming level — ${days > 0 ? days + " days to Farming " + goal : "goal reached"}`}
+          statLabel="Logged net" statValue={loggedRuns ? this.signed(loggedNet) : "—"} statSub={loggedRuns ? loggedRuns + " runs" : "no runs yet"} />}
         <StatCards cols={4} items={[
           { label: "XP to Farming " + goal, value: this.short(xpLeft) },
           { label: "XP / circuit", value: this.short(xpCircuit) },
@@ -1514,7 +1751,7 @@ export default class Almanac extends React.Component {
     const methodLabel = { optimal: "Optimal Quest Guide", ironman: "Optimal · Ironman", release: "Release order", series: "By series" }[method] || method;
     return (
       <div>
-        <SectionTitle kicker="The Adventure Log" title="Quest Sequencer"
+        <SectionTitle kicker="The Adventure Log" title="Quest Sequencer" accent={themeFor("quests").accent}
           right={<Seg options={[{ key: "optimal", label: "OPTIMAL" }, { key: "ironman", label: "IRONMAN" }, { key: "release", label: "RELEASE" }, { key: "series", label: "SERIES" }]} active={method} onPick={(v) => this.setState({ questMethod: v })} size={9} />} />
         <StatCards cols={4} items={[
           { label: "Completion", value: d.qPct + "%" },
@@ -1585,7 +1822,7 @@ export default class Almanac extends React.Component {
     const caColors = [C.green, C.teal, "#9a7530", C.purple, C.red, C.ink];
     return (
       <div>
-        <SectionTitle kicker="Regional Renown" title="Diary & Combat Achievements" />
+        <SectionTitle kicker="Regional Renown" title="Diary & Combat Achievements" accent={themeFor("diary").accent} />
         <StatCards cols={3} items={[
           { label: "Completed", value: "" + count("Done"), color: C.green },
           { label: "Stat-ready", value: "" + count("Stat-ready"), color: "#9a7530" },
