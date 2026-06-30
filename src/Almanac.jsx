@@ -13,7 +13,8 @@ import { LEDGER_DATA } from "./data/ledgerData.js";
 import { QUEST_ORDER } from "./data/questOrder.js";
 import { GEAR_DATA } from "./data/gearData.js";
 import { fetchPlayer, fetchPrices, priceById, combatLevel, fetchItemNames, natureRunePrice } from "./lib/api.js";
-import { C, mono, serif, cinzel, Card, Kicker, SectionTitle, StatCards, Bar, Seg, Tag, Btn, DataTable, Hero, themeFor, LineChart, BarChartH } from "./lib/ui.jsx";
+import { C, mono, serif, cinzel, Card, Kicker, SectionTitle, StatCards, Bar, Seg, Tag, Btn, DataTable, Hero, themeFor, LineChart, BarChartH, Icon, Donut, BandBar } from "./lib/ui.jsx";
+import { loadItemIndex, itemIconUrl, skillIconUrl, ensureItemStats, getItemStats } from "./lib/icons.js";
 
 const D = LEDGER_DATA;
 
@@ -244,6 +245,7 @@ export default class Almanac extends React.Component {
     // Background: pull the full tradeable-item list (for flip autocomplete) and
     // the live nature-rune price. Both degrade silently if the network is blocked.
     fetchItemNames().then((names) => { this.itemNames = names; this.bump(); }).catch(() => {});
+    loadItemIndex().then(() => this.bump()).catch(() => {});
     this.refreshNatRune();
   }
 
@@ -785,10 +787,10 @@ export default class Almanac extends React.Component {
     const herbBest = Math.max(...this.farmDefs.filter((f) => f.unlocked).map((f) => f.net));
     const flipNet = d.logs.flips.map((f) => this.computeFlip(f)).reduce((a, f) => a + f.net, 0);
     const money = [
-      { name: "High Alchemy", note: "magic XP + steady gp, AFK-friendly", rate: this.short(alchBest), unit: "gp / hr", c: C.purple },
-      { name: "Slayer (after blocks)", note: slay.blocked + " tasks blocked", rate: this.short(slay.gp), unit: "loot / hr", c: C.red },
-      { name: "Best boss (open now)", note: "scaled to your combat & slayer", rate: this.short(accBoss), unit: "gp / hr", c: C.teal },
-      { name: "Herb run", note: "~5 min, best unlocked tier", rate: this.short(herbBest), unit: "gp / run", c: C.green },
+      { name: "High Alchemy", note: "magic XP + steady gp, AFK-friendly", rate: this.short(alchBest), unit: "gp / hr", c: C.purple, skill: "Magic" },
+      { name: "Slayer (after blocks)", note: slay.blocked + " tasks blocked", rate: this.short(slay.gp), unit: "loot / hr", c: C.red, skill: "Slayer" },
+      { name: "Best boss (open now)", note: "scaled to your combat & slayer", rate: this.short(accBoss), unit: "gp / hr", c: C.teal, skill: "Hitpoints" },
+      { name: "Herb run", note: "~5 min, best unlocked tier", rate: this.short(herbBest), unit: "gp / run", c: C.green, skill: "Farming" },
     ];
     const bestNow = money.slice(0, 3).reduce((b, m) => (this.parseNum(m.rate) > this.parseNum(b.rate) ? m : b));
     // next quest / diary
@@ -832,8 +834,8 @@ export default class Almanac extends React.Component {
             <Kicker color={C.goldDeep}>💰 Money meta · earn the most now</Kicker>
             <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
               {money.map((m, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", background: C.cardLight, borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
-                  <div style={{ width: 8, height: 36, borderRadius: 3, background: m.c }} />
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", background: C.cardLight, borderRadius: 6, border: "1px solid rgba(44,32,19,.12)", borderLeft: `4px solid ${m.c}` }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 8, flex: "0 0 36px", display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(44,32,19,.06)", border: `1px solid ${m.c}44` }}><Icon url={skillIconUrl(m.skill)} name={m.skill} size={22} /></div>
                   <div style={{ flex: 1 }}>
                     <div style={cinzel({ fontWeight: 600, fontSize: 15, color: C.ink })}>{m.name}</div>
                     <div style={serif({ fontSize: 12, color: C.muted })}>{m.note}</div>
@@ -867,6 +869,26 @@ export default class Almanac extends React.Component {
             </div>
           </Card>
         </div>
+        {(d.cash > 0 || d.items > 0) && (
+          <Card style={{ marginTop: 16 }}>
+            <Kicker color={C.goldDeep}>🏛 Wealth composition</Kicker>
+            <div style={{ display: "flex", alignItems: "center", gap: 28, marginTop: 10, flexWrap: "wrap" }}>
+              <Donut size={150} thickness={24} centerLabel="TOTAL" centerValue={this.short(d.netWorth)}
+                segments={[{ value: d.cash, color: "#b98f3e", label: "Cash" }, { value: d.items, color: C.green, label: "Items" }]} />
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                {[["Cash · liquid", d.cash, "#b98f3e"], ["Items · held", d.items, C.green]].map(([l, v, c], i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <span style={{ width: 14, height: 14, borderRadius: 4, background: c }} />
+                    <div>
+                      <div style={mono({ fontSize: 9.5, letterSpacing: ".12em", color: C.muted, textTransform: "uppercase" })}>{l} · {Math.round((v / Math.max(1, d.netWorth)) * 100)}%</div>
+                      <div style={cinzel({ fontWeight: 700, fontSize: 19, color: C.ink })}>{this.fmt(v)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Card>
+        )}
       </div>
     );
   }
@@ -874,35 +896,71 @@ export default class Almanac extends React.Component {
   // ===================== SKILLS =====================
   renderSkills() {
     const d = this.derive();
+    const TH = themeFor("skills");
     const cards = this.skillsRaw.map(([name, level, xp]) => {
       const base = this.xpFor(level), next = this.xpFor(level + 1), need99 = this.xpFor(99);
       const into = xp - base, span = next - base;
       const pctNext = level >= 99 ? 1 : Math.max(0, Math.min(1, span > 0 ? into / span : 0));
       return { name, level, xp, color: this.skillColor(level), barW: pctNext * 100, toNext: level >= 99 ? "maxed" : this.fmt(next - xp) + " to " + (level + 1), to99: level >= 99 ? "★ 99" : this.fmt(need99 - xp) + " to 99" };
     });
+    // Mastery spread by level band.
+    const bands = [
+      { label: "99", color: "#b98f3e", test: (l) => l >= 99 },
+      { label: "90+", color: C.purple, test: (l) => l >= 90 && l < 99 },
+      { label: "70–89", color: C.teal, test: (l) => l >= 70 && l < 90 },
+      { label: "40–69", color: C.green, test: (l) => l >= 40 && l < 70 },
+      { label: "1–39", color: "#9a6a3a", test: (l) => l < 40 },
+    ].map((b) => ({ ...b, value: this.skillsRaw.filter(([, l]) => b.test(l)).length }));
+    const statCards = [
+      { label: "Total Level", value: "" + d.totalLevel, c: "#b98f3e" },
+      { label: "Total XP", value: this.short(d.totalXp), c: C.purple },
+      { label: "Skills at 99", value: "" + d.count99, c: C.teal },
+      { label: "Combat Level", value: "" + this.account.combat, c: C.red },
+    ];
     return (
       <div>
-        <SectionTitle kicker="Live from your hiscores" title="Skills" accent={themeFor("skills").accent} />
-        <StatCards cols={4} items={[
-          { label: "Total Level", value: "" + d.totalLevel, color: C.gold },
-          { label: "Total XP", value: this.short(d.totalXp), color: C.purple },
-          { label: "Skills at 99", value: "" + d.count99, color: C.teal },
-          { label: "Combat Level", value: "" + this.account.combat, color: C.red },
-        ]} />
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px,1fr))", gap: 12 }}>
+        <SectionTitle kicker="Live from your hiscores" title="Skills" accent={TH.accent} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 12, marginBottom: 16 }}>
+          {statCards.map((s, i) => (
+            <Card key={i} pad={14} style={{ borderTop: `3px solid ${s.c}` }}>
+              <Kicker>{s.label}</Kicker>
+              <div style={cinzel({ fontWeight: 800, fontSize: 26, color: s.c, marginTop: 6 })}>{s.value}</div>
+            </Card>
+          ))}
+        </div>
+        <Card style={{ marginBottom: 16, borderTop: `3px solid ${TH.accent}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+            <Kicker color={TH.accent}>Mastery spread</Kicker>
+            <span style={mono({ fontSize: 11, color: C.muted })}>Total level <strong style={{ color: C.ink }}>{d.totalLevel.toLocaleString()}</strong> / 2277</span>
+          </div>
+          <div style={{ marginBottom: 8 }}><Bar pct={(d.totalLevel / 2277) * 100} c1={TH.accent} c2={TH.lite} h={8} /></div>
+          <BandBar segments={bands} height={26} />
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginTop: 10 }}>
+            {bands.map((b, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 11, height: 11, borderRadius: 3, background: b.color }} />
+                <span style={mono({ fontSize: 11, color: C.muted2 })}>{b.label} · {b.value}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px,1fr))", gap: 12 }}>
           {cards.map((s) => (
             <Card key={s.name} pad={14}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ width: 34, height: 34, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", background: s.color, ...cinzel({ fontWeight: 700, fontSize: 15, color: "#f0e7cf" }) }}>{s.level}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={cinzel({ fontWeight: 600, fontSize: 15, color: C.ink })}>{s.name}</div>
-                  <div style={mono({ fontSize: 9.5, color: C.muted })}>{this.short(s.xp)} xp</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+                <div style={{ width: 38, height: 38, borderRadius: 8, flex: "0 0 38px", display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(44,32,19,.06)", border: `1px solid ${s.color}44` }}>
+                  <Icon url={skillIconUrl(s.name)} name={s.name} size={24} />
                 </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={cinzel({ fontWeight: 700, fontSize: 16, color: C.ink })}>{s.name}</div>
+                  <div style={mono({ fontSize: 10, color: C.muted })}>{this.fmt(s.xp)} xp</div>
+                </div>
+                <div style={cinzel({ fontWeight: 800, fontSize: 26, color: s.color })}>{s.level}</div>
               </div>
-              <div style={{ marginTop: 10 }}><Bar pct={s.barW} c1={s.color} c2={s.color} h={6} /></div>
+              <div style={{ marginTop: 11 }}><Bar pct={s.barW} c1={s.color} c2={s.color} h={6} /></div>
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5 }}>
-                <span style={mono({ fontSize: 9, color: C.muted })}>{s.toNext}</span>
-                <span style={mono({ fontSize: 9, color: C.muted })}>{s.to99}</span>
+                <span style={mono({ fontSize: 9.5, color: C.muted })}>{s.toNext}</span>
+                <span style={mono({ fontSize: 9.5, color: C.muted })}>{s.to99}</span>
               </div>
             </Card>
           ))}
@@ -1035,7 +1093,7 @@ export default class Almanac extends React.Component {
               <div key={i}><Kicker>{l}</Kicker><div style={cinzel({ fontWeight: 700, fontSize: 18, marginTop: 5 })}>{v}</div></div>
             ))}
           </div>
-          <div style={serif({ fontSize: 12, fontStyle: "italic", color: C.muted, marginTop: 10 })}>
+          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 10 })}>
             Combat hours are summed as if trained in isolation — a ceiling. Controlled style trains 3 melee stats at once, so real time is ~15–25% under the counted total.
           </div>
         </Card>
@@ -1074,7 +1132,7 @@ export default class Almanac extends React.Component {
               {this.field("nw_bank", "Total bank value (gp)", { w: 190 })}
               {this.field("nw_note", "Note (optional)", { w: 200 })}
               <Btn tone="gold" onClick={this.addNw}>Save</Btn>
-              <span style={serif({ fontSize: 12, fontStyle: "italic", color: C.muted, flexBasis: "100%" })}>Item/bank value is your total bank minus the cash you hold; net worth is the total. Pull the total from a bank-value plugin or the GE.</span>
+              <span style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, flexBasis: "100%" })}>Item/bank value is your total bank minus the cash you hold; net worth is the total. Pull the total from a bank-value plugin or the GE.</span>
             </div>
           </Card>
         )}
@@ -1206,7 +1264,7 @@ export default class Almanac extends React.Component {
                   <input key={c.key + "-" + this.state.flipCfgVer} className="led" defaultValue={this.fmt(cfg[c.key])} onBlur={(e) => this.setCfg("flipcfg", c.key, e.target.value)} style={{ width: "100%", fontWeight: 600, paddingRight: c.suffix ? 34 : 9 }} />
                   {c.suffix && <span style={{ position: "absolute", right: 9, top: "50%", transform: "translateY(-50%)", ...mono({ fontSize: 10, color: C.muted }) }}>{c.suffix}</span>}
                 </div>
-                <div style={serif({ fontSize: 11, fontStyle: "italic", color: C.muted, marginTop: 6, lineHeight: 1.3, flex: 1 })}>{c.hint}</div>
+                <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted, marginTop: 6, lineHeight: 1.3, flex: 1 })}>{c.hint}</div>
               </div>
             ))}
           </div>
@@ -1250,10 +1308,10 @@ export default class Almanac extends React.Component {
                   <td>{r.manualIdx >= 0 ? <span onClick={() => this.delLog("scan", r.manualIdx)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span> : null}</td>
                 </tr>
               ))}
-              {rows.length === 0 && <tr><td colSpan={9} style={serif({ fontStyle: "italic", color: C.muted, padding: 18 })}>{!usingMarket && this.logs.scan.length === 0 ? "Hit ⟳ Live prices to scan the market, or add items manually." : watchN > 0 ? `Nothing clears every gate. ${watchN} item${watchN > 1 ? "s are" : " is"} close — tick “Show watch items”.` : `Nothing clears the gates among ${scanned.toLocaleString()} items${failTop ? ` (${failTop})` : ""}. Loosen the control panel or hit Reset.`}</td></tr>}</tbody>
+              {rows.length === 0 && <tr><td colSpan={9} style={serif({ fontStyle: "normal", color: C.muted, padding: 18 })}>{!usingMarket && this.logs.scan.length === 0 ? "Hit ⟳ Live prices to scan the market, or add items manually." : watchN > 0 ? `Nothing clears every gate. ${watchN} item${watchN > 1 ? "s are" : " is"} close — tick “Show watch items”.` : `Nothing clears the gates among ${scanned.toLocaleString()} items${failTop ? ` (${failTop})` : ""}. Loosen the control panel or hit Reset.`}</td></tr>}</tbody>
             </table>
           </div>
-          <div style={serif({ fontSize: 12, fontStyle: "italic", color: C.muted, marginTop: 8 })}>By default only <strong>FLIP NOW</strong> (clears every gate at your bankroll) shows. Watch items sit within the tolerance % of qualifying.{avoidShown ? ` ${avoidShown} shown ${avoidShown > 1 ? "are" : "is"} on your avoid list (⚑) — flagged from past performance.` : ""} Hit ⟳ Live prices to refresh from the OSRS Wiki.</div>
+          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>By default only <strong>FLIP NOW</strong> (clears every gate at your bankroll) shows. Watch items sit within the tolerance % of qualifying.{avoidShown ? ` ${avoidShown} shown ${avoidShown > 1 ? "are" : "is"} on your avoid list (⚑) — flagged from past performance.` : ""} Hit ⟳ Live prices to refresh from the OSRS Wiki.</div>
         </Card>
       </div>
     );
@@ -1287,7 +1345,7 @@ export default class Almanac extends React.Component {
               <thead><tr>{["Item", "Dates", "Qty", "Buy", "Sell", "Tax", "Net", "ROI", "GP/day", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i > 1 && i < 9 ? "right" : "left", padding: "7px 9px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
               <tbody>{rows.map((r) => (
                 <tr key={r.i}>
-                  <td style={{ ...cinzel({ fontWeight: 600, fontSize: 14 }), padding: "7px 9px" }}>{r.item}{r.notes ? <div style={serif({ fontSize: 11, fontStyle: "italic", color: C.muted })}>{r.notes}</div> : null}</td>
+                  <td style={{ ...cinzel({ fontWeight: 600, fontSize: 14 }), padding: "7px 9px" }}>{r.item}{r.notes ? <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted })}>{r.notes}</div> : null}</td>
                   <td style={{ ...mono({ fontSize: 10, color: C.muted }), padding: "7px 9px" }}>{this.dShort(r.buyDate)}→{this.dShort(r.sellDate)}</td>
                   <td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{r.qty ? this.fmt(r.qty) : "—"}</td>
                   <td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{r.avgBuy ? this.fmt(r.avgBuy) : "—"}</td>
@@ -1344,7 +1402,7 @@ export default class Almanac extends React.Component {
                 <td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{r.hold}</td>
                 <td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{r.win}</td>
               </tr>
-            ))}{rows.length === 0 && <tr><td colSpan={6} style={serif({ fontStyle: "italic", color: C.muted, padding: 16 })}>Log some flips to see performance.</td></tr>}</tbody>
+            ))}{rows.length === 0 && <tr><td colSpan={6} style={serif({ fontStyle: "normal", color: C.muted, padding: 16 })}>Log some flips to see performance.</td></tr>}</tbody>
           </table>
         </Card>
         <Card>
@@ -1356,7 +1414,7 @@ export default class Almanac extends React.Component {
                 <div style={{ textAlign: "right" }}><div style={mono({ fontSize: 13, color: C.green })}>{this.signed(w.net)}</div><div style={mono({ fontSize: 9, color: C.muted })}>{(w.roi >= 0 ? "+" : "") + w.roi}%</div></div>
               </div>
             ))}
-            {wins.length === 0 && <div style={serif({ fontStyle: "italic", color: C.muted })}>No winning flips logged yet.</div>}
+            {wins.length === 0 && <div style={serif({ fontStyle: "normal", color: C.muted })}>No winning flips logged yet.</div>}
           </div>
         </Card>
       </div>
@@ -1380,32 +1438,32 @@ export default class Almanac extends React.Component {
               {av.manual.filter((m) => m.type === "watch").map((m) => (
                 <div key={m.i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: C.cardLight, borderRadius: 6, marginBottom: 6, borderLeft: `3px solid ${C.teal}` }}>
                   <Tag color={pill.watch.c} bg={pill.watch.bg}>WATCH</Tag>
-                  <div style={{ flex: 1 }}><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{m.item}</div>{m.note && <div style={serif({ fontSize: 11.5, fontStyle: "italic", color: C.muted })}>{m.note}</div>}</div>
+                  <div style={{ flex: 1 }}><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{m.item}</div>{m.note && <div style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted })}>{m.note}</div>}</div>
                   <span onClick={() => this.delLog("watch", m.i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span>
                 </div>
               ))}
-              {av.manual.filter((m) => m.type === "watch").length === 0 && <div style={serif({ fontSize: 12.5, fontStyle: "italic", color: C.muted })}>Nothing on your watchlist — add items you're hunting.</div>}
+              {av.manual.filter((m) => m.type === "watch").length === 0 && <div style={serif({ fontSize: 12.5, fontStyle: "normal", color: C.muted })}>Nothing on your watchlist — add items you're hunting.</div>}
             </div>
             <div>
               <div style={mono({ fontSize: 9, letterSpacing: ".16em", color: C.muted, textTransform: "uppercase", marginBottom: 8 })}>Avoid &amp; dead capital</div>
               {av.manual.filter((m) => m.type === "avoid").map((m) => (
                 <div key={"m" + m.i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: C.cardLight, borderRadius: 6, marginBottom: 6, borderLeft: `3px solid ${C.red}` }}>
                   <Tag color={pill.avoid.c} bg={pill.avoid.bg}>AVOID</Tag>
-                  <div style={{ flex: 1 }}><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{m.item}</div>{m.note && <div style={serif({ fontSize: 11.5, fontStyle: "italic", color: C.muted })}>{m.note}</div>}</div>
+                  <div style={{ flex: 1 }}><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{m.item}</div>{m.note && <div style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted })}>{m.note}</div>}</div>
                   <span onClick={() => this.delLog("watch", m.i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span>
                 </div>
               ))}
               {av.auto.map((x) => { const p = pill[x.flag.tier]; return (
                 <div key={"a" + x.p.item} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: C.cardLight, borderRadius: 6, marginBottom: 6, borderLeft: `3px solid ${p.c}` }}>
                   <Tag color={p.c} bg={p.bg}>⚑ {p.label}</Tag>
-                  <div style={{ flex: 1 }}><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{x.p.item}</div><div style={serif({ fontSize: 11.5, fontStyle: "italic", color: C.muted })}>{x.flag.reason}</div></div>
+                  <div style={{ flex: 1 }}><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{x.p.item}</div><div style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted })}>{x.flag.reason}</div></div>
                   <span onClick={() => this.dismissAvoid(x.p.item)} title="Dismiss this auto-flag" style={{ cursor: "pointer", ...mono({ fontSize: 10, color: C.muted2 }) }}>dismiss</span>
                 </div>
               ); })}
-              {av.manual.filter((m) => m.type === "avoid").length === 0 && av.auto.length === 0 && <div style={serif({ fontSize: 12.5, fontStyle: "italic", color: C.muted })}>No items flagged. Poor performers from your flip log auto-appear here.</div>}
+              {av.manual.filter((m) => m.type === "avoid").length === 0 && av.auto.length === 0 && <div style={serif({ fontSize: 12.5, fontStyle: "normal", color: C.muted })}>No items flagged. Poor performers from your flip log auto-appear here.</div>}
             </div>
           </div>
-          <div style={serif({ fontSize: 11.5, fontStyle: "italic", color: C.muted, marginTop: 12 })}>Auto-flagged: net-negative or ≤33% win over ≥3 flips, or a single flip ≤ −10% ROI → <strong style={{ color: C.red }}>Avoid</strong>; ≥3 flips that barely clear tax (avg ROI &lt; 1%) → <strong style={{ color: "#9a7530" }}>Dead capital</strong>. Flagged items show a ⚑ in the scanner. Dismiss to ignore.</div>
+          <div style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted, marginTop: 12 })}>Auto-flagged: net-negative or ≤33% win over ≥3 flips, or a single flip ≤ −10% ROI → <strong style={{ color: C.red }}>Avoid</strong>; ≥3 flips that barely clear tax (avg ROI &lt; 1%) → <strong style={{ color: "#9a7530" }}>Dead capital</strong>. Flagged items show a ⚑ in the scanner. Dismiss to ignore.</div>
         </Card>
       </div>
     );
@@ -1446,7 +1504,7 @@ export default class Almanac extends React.Component {
             )}
           </div>
           {this.state.fillMsg && <div style={{ marginTop: 10, ...mono({ fontSize: 11, color: C.muted2 }) }}>{this.state.fillMsg}</div>}
-          <div style={serif({ fontSize: 12.5, fontStyle: "italic", color: C.muted, marginTop: 12 })}>Enter each partial fill as the price moved — the weighted <strong>Qty, Avg buy, Avg sell</strong> come out. Copy it (tab-separated, paste-ready) or send it straight to the Flip Ledger.</div>
+          <div style={serif({ fontSize: 12.5, fontStyle: "normal", color: C.muted, marginTop: 12 })}>Enter each partial fill as the price moved — the weighted <strong>Qty, Avg buy, Avg sell</strong> come out. Copy it (tab-separated, paste-ready) or send it straight to the Flip Ledger.</div>
         </Card>
       </div>
     );
@@ -1483,7 +1541,7 @@ export default class Almanac extends React.Component {
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 12 }}>
             <div style={setupCell}><Kicker>Casts / hour</Kicker><input className="led" defaultValue={this.fmt(this.alchcfg.castsPerHour)} onBlur={(e) => this.setCfg("alchcfg", "castsPerHour", e.target.value)} style={{ width: "100%", marginTop: 6 }} /></div>
-            <div style={setupCell}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><Kicker>Nature rune</Kicker><Tag color={C.purple} bg="rgba(106,74,138,.14)">LIVE</Tag></div><div style={cinzel({ fontWeight: 700, fontSize: 19, marginTop: 6 })}>{this.fmt(this.alchcfg.natRune)} <span style={mono({ fontSize: 11, color: C.muted })}>gp</span></div><div style={serif({ fontSize: 10.5, fontStyle: "italic", color: C.muted, marginTop: 2 })}>OSRS Wiki · id 561</div></div>
+            <div style={setupCell}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><Kicker>Nature rune</Kicker><Tag color={C.purple} bg="rgba(106,74,138,.14)">LIVE</Tag></div><div style={cinzel({ fontWeight: 700, fontSize: 19, marginTop: 6 })}>{this.fmt(this.alchcfg.natRune)} <span style={mono({ fontSize: 11, color: C.muted })}>gp</span></div><div style={serif({ fontSize: 10.5, fontStyle: "normal", color: C.muted, marginTop: 2 })}>OSRS Wiki · id 561</div></div>
             <div style={setupCell}><Kicker>Fire rune source</Kicker>
               <select className="led" defaultValue={this.alchcfg.fireSource} onChange={(e) => this.setCfg("alchcfg", "fireSource", e.target.value, { str: true })} style={{ width: "100%", marginTop: 6 }}><option value="staff">Fire staff (free)</option><option value="none">Buy fire runes</option></select></div>
             <div style={setupCell}><Kicker>Cost / cast</Kicker><div style={cinzel({ fontWeight: 700, fontSize: 19, marginTop: 6 })}>{this.fmt(aCost)} <span style={mono({ fontSize: 11, color: C.muted })}>gp</span></div></div>
@@ -1584,7 +1642,7 @@ export default class Almanac extends React.Component {
       <div>
         <Card style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={serif({ fontSize: 13, fontStyle: "italic", color: C.muted })}>Est GP/hr = base loot + your kills/hr × live rare-drop value. "Open now" = your combat ({this.account.combat}) & Slayer clear the gate. Tune your real kills/hr & GP/hr in the <strong>Session Rates</strong> tab.</div>
+            <div style={serif({ fontSize: 13, fontStyle: "normal", color: C.muted })}>Est GP/hr = base loot + your kills/hr × live rare-drop value. "Open now" = your combat ({this.account.combat}) & Slayer clear the gate. Tune your real kills/hr & GP/hr in the <strong>Session Rates</strong> tab.</div>
             <Btn onClick={this.refreshDropPrices}>⟳ Price drops</Btn>
           </div>
           {this.state.priceStatus && <div style={{ marginTop: 8, ...mono({ fontSize: 11, color: C.muted2 }) }}>{this.state.priceStatus}</div>}
@@ -1604,7 +1662,7 @@ export default class Almanac extends React.Component {
             <Kicker color={C.goldDeep}>Session rates · your real kills/hr & GP/hr per boss</Kicker>
             <span style={mono({ fontSize: 11, color: C.muted2 })}>{tuned} boss{tuned === 1 ? "" : "es"} tuned</span>
           </div>
-          <div style={serif({ fontSize: 12.5, fontStyle: "italic", color: C.muted, marginTop: 6 })}>These feed the Dashboard money-meta, Goals route-finding and the Focus tab. Edit a row to override the defaults; live KC comes straight from your Kill Log.</div>
+          <div style={serif({ fontSize: 12.5, fontStyle: "normal", color: C.muted, marginTop: 6 })}>These feed the Dashboard money-meta, Goals route-finding and the Focus tab. Edit a row to override the defaults; live KC comes straight from your Kill Log.</div>
         </Card>
         <Card>
           <div className="sheetwrap">
@@ -1650,7 +1708,7 @@ export default class Almanac extends React.Component {
             <thead><tr>{["Date", "Boss", "Kills", "Note", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i === 2 ? "right" : "left", padding: "7px 9px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
             <tbody>{log.map((b, i) => (
               <tr key={i}><td style={{ ...mono({ fontSize: 11 }), padding: "7px 9px" }}>{this.dShort(b.date)}</td><td style={{ ...cinzel({ fontWeight: 600, fontSize: 13 }), padding: "7px 9px" }}>{b.boss}</td><td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{this.fmt(b.kills)}</td><td style={{ ...serif({ fontSize: 13, color: C.muted }), padding: "7px 9px" }}>{b.note || "—"}</td><td style={{ padding: "7px 9px" }}><span onClick={() => this.delLog("boss", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td></tr>
-            ))}{log.length === 0 && <tr><td colSpan={5} style={serif({ fontStyle: "italic", color: C.muted, padding: 16 })}>No kills logged. Track KC here and the Focus tab computes your drop-rate luck.</td></tr>}</tbody>
+            ))}{log.length === 0 && <tr><td colSpan={5} style={serif({ fontStyle: "normal", color: C.muted, padding: 16 })}>No kills logged. Track KC here and the Focus tab computes your drop-rate luck.</td></tr>}</tbody>
           </table>
         </Card>
       </div>
@@ -1693,7 +1751,7 @@ export default class Almanac extends React.Component {
               <Tag color={styleColor[styles.primary]} bg="rgba(44,32,19,.06)">Best: {styles.primary}</Tag>
               {styles.all.length > 1 && <span style={mono({ fontSize: 10, color: C.muted })}>· also {styles.all.slice(1).join(", ")}</span>}
             </div>
-            <div style={serif({ fontSize: 13.5, fontStyle: "italic", color: C.muted, marginTop: 3 })}>Wiki: {styles.note}</div>
+            <div style={serif({ fontSize: 13.5, fontStyle: "normal", color: C.muted, marginTop: 3 })}>Wiki: {styles.note}</div>
             <div style={serif({ fontSize: 14, color: C.ink, marginTop: 10 })}>{this.bossWhy[b.n] || (e.estGp > 0 ? this.short(e.estGp) + "/h · " + b.unique : b.unique)}</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginTop: 14 }}>
               {[["GP/hr", e.estGp > 0 ? this.short(e.estGp) : "—"], ["Kills/hr", e.kills > 0 ? e.kills : "—"], ["Your KC", this.fmt(kc)], ["Combat req", "Cb " + b.minCb], ["Slayer", b.slay > 0 ? b.slay : "none"], ["Loot logged", this.short(luck)]].map(([l, v], i) => (
@@ -1727,7 +1785,7 @@ export default class Almanac extends React.Component {
                     <td className="num" style={mono({ fontSize: 11 })}>{r.value}</td>
                     <td><Tag color={r.vc} bg="transparent">{r.verdict}</Tag></td>
                   </tr>
-                ))}{drops.length === 0 && <tr><td colSpan={7} style={serif({ fontStyle: "italic", color: C.muted, padding: 14 })}>No drop table tracked for this boss.</td></tr>}</tbody>
+                ))}{drops.length === 0 && <tr><td colSpan={7} style={serif({ fontStyle: "normal", color: C.muted, padding: 14 })}>No drop table tracked for this boss.</td></tr>}</tbody>
               </table>
             </div>
           </Card>
@@ -1738,7 +1796,7 @@ export default class Almanac extends React.Component {
               <Kicker color={C.goldDeep}>Best {gearStyle.toLowerCase()} gear you can use for {b.n}</Kicker>
               <Seg options={styles.all.map((s) => ({ key: s, label: s.toUpperCase() }))} active={gearStyle} onPick={(v) => this.setState({ bossGearStyle: v })} size={9} />
             </div>
-            <div style={serif({ fontSize: 12, fontStyle: "italic", color: C.muted, marginTop: 6 })}>Recommended style is <strong style={{ color: styleColor[styles.primary] }}>{styles.primary}</strong> per the OSRS Wiki. Pieces below are the highest tier your stats currently allow.</div>
+            <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 6 })}>Recommended style is <strong style={{ color: styleColor[styles.primary] }}>{styles.primary}</strong> per the OSRS Wiki. Pieces below are the highest tier your stats currently allow.</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(210px,1fr))", gap: 10, marginTop: 12 }}>
               {recs.map((r, i) => (
                 <div key={i} style={{ background: C.cardLight, padding: "9px 11px", borderRadius: 6, borderLeft: "3px solid " + r.c }}>
@@ -1801,7 +1859,7 @@ export default class Almanac extends React.Component {
     return (
       <div>
         <Card style={{ marginBottom: 14 }}>
-          <div style={serif({ fontSize: 13, fontStyle: "italic", color: C.muted, marginBottom: 10 })}>Click a row's BLOCK toggle to remove it from your assignment pool — weighted XP/hr & loot/hr above recompute instantly (you get 6 block slots at Duradel).</div>
+          <div style={serif({ fontSize: 13, fontStyle: "normal", color: C.muted, marginBottom: 10 })}>Click a row's BLOCK toggle to remove it from your assignment pool — weighted XP/hr & loot/hr above recompute instantly (you get 6 block slots at Duradel).</div>
           <DataTable tableKey="slayTask" model={model} cols={cols} open={this.state.tOpen} on={this.tableHandlers()} />
         </Card>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
@@ -1872,7 +1930,7 @@ export default class Almanac extends React.Component {
             <thead><tr>{["Date", "Task", "XP", "Loot", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i > 1 && i < 4 ? "right" : "left", padding: "7px 9px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
             <tbody>{log.map((s, i) => (
               <tr key={i}><td style={{ ...mono({ fontSize: 11 }), padding: "7px 9px" }}>{this.dShort(s.date)}</td><td style={{ ...cinzel({ fontWeight: 600, fontSize: 13 }), padding: "7px 9px" }}>{s.task}</td><td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{this.short(s.xp || 0)}</td><td style={{ ...mono({ fontSize: 12, color: C.green }), padding: "7px 9px", textAlign: "right" }}>{this.signed(s.gp || 0)}</td><td style={{ padding: "7px 9px" }}><span onClick={() => this.delLog("slayerLog", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td></tr>
-            ))}{log.length === 0 && <tr><td colSpan={5} style={serif({ fontStyle: "italic", color: C.muted, padding: 16 })}>No tasks logged yet.</td></tr>}</tbody>
+            ))}{log.length === 0 && <tr><td colSpan={5} style={serif({ fontStyle: "normal", color: C.muted, padding: 16 })}>No tasks logged yet.</td></tr>}</tbody>
           </table>
         </Card>
       </div>
@@ -1908,7 +1966,7 @@ export default class Almanac extends React.Component {
                     <div style={mono({ fontSize: 9.5, color: C.muted, marginTop: 3 })}>{it.req}</div>
                     <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5 }}>
                       <span style={mono({ fontSize: 11, color: it.price > 0 ? C.gold : C.muted })}>{it.price > 0 ? this.short(it.price) + " gp" : "untradeable"}</span>
-                      {mode === "iron" && it.get && <span style={serif({ fontSize: 10.5, fontStyle: "italic", color: C.muted, textAlign: "right", maxWidth: 130 })}>{it.get}</span>}
+                      {mode === "iron" && it.get && <span style={serif({ fontSize: 10.5, fontStyle: "normal", color: C.muted, textAlign: "right", maxWidth: 130 })}>{it.get}</span>}
                     </div>
                     {it.bestFor && <div style={serif({ fontSize: 11, color: C.muted2, marginTop: 4 })}>{it.bestFor}</div>}
                   </div>
@@ -1969,7 +2027,7 @@ export default class Almanac extends React.Component {
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
           <span style={mono({ fontSize: 11, color: C.muted2 })}>TARGET RUNS / DAY</span>
           <input className="led" defaultValue={laps} onBlur={(e) => this.setCfg("farmcfg", "lapsPerDay", e.target.value)} style={{ width: 70 }} />
-          <span style={serif({ fontSize: 12, fontStyle: "italic", color: C.muted })}>Each run type is capped to what its grow time actually allows — fruit trees (16h) max one a day, herbs (~80m) many more.</span>
+          <span style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted })}>Each run type is capped to what its grow time actually allows — fruit trees (16h) max one a day, herbs (~80m) many more.</span>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
           <Card>
@@ -1979,7 +2037,7 @@ export default class Almanac extends React.Component {
                 <thead><tr>{["Run", "Crop", "Patches", "XP/run", "GP/run", "Runs/day", "Grow"].map((h, i) => <th key={i} className={i > 2 ? "num" : ""}>{h}</th>)}</tr></thead>
                 <tbody>{unlockedRuns.map((r, k) => (
                   <tr key={k}>
-                    <td><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{r.name}</div><div style={serif({ fontSize: 10.5, fontStyle: "italic", color: C.muted })}>{r.teles}</div></td>
+                    <td><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{r.name}</div><div style={serif({ fontSize: 10.5, fontStyle: "normal", color: C.muted })}>{r.teles}</div></td>
                     <td style={serif({ fontSize: 13 })}>{r.crop}</td>
                     <td className="num" style={mono({ fontSize: 12 })}>{r.patches}</td>
                     <td className="num"><div style={mono({ fontSize: 12 })}>{this.fmt(r.xpRun)}</div><Bar pct={Math.min(100, (r.xpRun / runMax) * 100)} h={3} /></td>
@@ -1988,7 +2046,7 @@ export default class Almanac extends React.Component {
                     <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{r.growHrs < 1.5 ? Math.round(r.growHrs * 60) + "m" : r.growHrs + "h"}</td>
                   </tr>
                 ))}
-                {unlockedRuns.length === 0 && <tr><td colSpan={7} style={serif({ fontStyle: "italic", color: C.muted, padding: 14 })}>No runs unlocked yet at Farming {farmLvl}.</td></tr>}</tbody>
+                {unlockedRuns.length === 0 && <tr><td colSpan={7} style={serif({ fontStyle: "normal", color: C.muted, padding: 14 })}>No runs unlocked yet at Farming {farmLvl}.</td></tr>}</tbody>
               </table>
             </div>
             {lockedRuns.length > 0 && <div style={{ marginTop: 10, ...serif({ fontSize: 12, color: C.muted }) }}>Upcoming: {lockedRuns.map((r) => `${r.crop} ${r.name.toLowerCase()} (lvl ${r.req})`).join(" · ")}</div>}
@@ -2033,7 +2091,7 @@ export default class Almanac extends React.Component {
                   <td><span onClick={() => this.delLog("herb", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 12 }) }}>✕</span></td>
                 </tr>
               ))}
-              {this.logs.herb.length === 0 && <tr><td colSpan={5} style={serif({ fontStyle: "italic", color: C.muted, padding: 14 })}>No runs logged yet — hit “+ Log herb run”.</td></tr>}</tbody>
+              {this.logs.herb.length === 0 && <tr><td colSpan={5} style={serif({ fontStyle: "normal", color: C.muted, padding: 14 })}>No runs logged yet — hit “+ Log herb run”.</td></tr>}</tbody>
             </table>
           </div>
         </Card>
@@ -2072,10 +2130,25 @@ export default class Almanac extends React.Component {
     const sortBtn = (col, label) => <span onClick={() => this.setState((s) => (s.qsortCol === col ? (s.qsortDir > 0 ? { qsortDir: -1 } : { qsortCol: "", qsortDir: 1 }) : { qsortCol: col, qsortDir: 1 }))} style={{ cursor: "pointer" }}>{label}{sCol === col ? (sDir > 0 ? " ▲" : " ▼") : ""}</span>;
     const anyF = qfS.length || qfT.length || qfSt.length || qN || qG;
     const methodLabel = { optimal: "Optimal Quest Guide", ironman: "Optimal · Ironman", release: "Release order", series: "By series" }[method] || method;
+    const QTH = themeFor("quests");
+    const qd = allQ.filter((q) => q.st === "Done").length, qr = allQ.filter((q) => q.st === "Stat-ready").length, qb = allQ.filter((q) => q.st === "Blocked").length;
+    const qSeg = [{ value: qd, color: C.green, label: "Done" }, { value: qr, color: "#9a7530", label: "Ready" }, { value: qb, color: C.red, label: "Blocked" }];
     return (
       <div>
-        <SectionTitle kicker="The Adventure Log" title="Quest Sequencer" accent={themeFor("quests").accent}
+        <SectionTitle kicker="The Adventure Log" title="Quest Sequencer" accent={QTH.accent}
           right={<Seg options={[{ key: "optimal", label: "OPTIMAL" }, { key: "ironman", label: "IRONMAN" }, { key: "release", label: "RELEASE" }, { key: "series", label: "SERIES" }]} active={method} onPick={(v) => this.setState({ questMethod: v })} size={9} />} />
+        <Card style={{ marginBottom: 14, borderTop: `3px solid ${QTH.accent}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 26, flexWrap: "wrap" }}>
+            <Donut size={130} thickness={20} centerLabel={`${d.qDone} / ${d.qTotal}`} centerValue={d.qPct + "%"} centerColor={QTH.accent} segments={qSeg} />
+            <div style={{ flex: 1, minWidth: 260 }}>
+              <div style={cinzel({ fontWeight: 700, fontSize: 18, color: C.ink, marginBottom: 8 })}>Quest Cape Progress</div>
+              <BandBar segments={qSeg} height={24} />
+              <div style={{ display: "flex", gap: 18, marginTop: 10, flexWrap: "wrap" }}>
+                {qSeg.map((s, i) => (<div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 11, height: 11, borderRadius: 3, background: s.color }} /><span style={mono({ fontSize: 11, color: C.muted2 })}>{s.label} · {s.value}</span></div>))}
+              </div>
+            </div>
+          </div>
+        </Card>
         <StatCards cols={4} items={[
           { label: "Completion", value: d.qPct + "%" },
           { label: "Quest points", value: "" + this.questPoints, sub: this.stats.qpApi ? "incl. hiscores" : "from quests marked done" },

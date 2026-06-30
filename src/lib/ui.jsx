@@ -53,7 +53,7 @@ export function Hero({ theme, icon, kicker, title, blurb, statLabel, statValue, 
       <div style={{ flex: 1, minWidth: 200 }}>
         {kicker && <div style={mono({ fontSize: 9.5, letterSpacing: ".24em", color: t.lite, textTransform: "uppercase" })}>{kicker}</div>}
         <div style={cinzel({ fontWeight: 700, fontSize: 23, color: "#f0e2bd", margin: "3px 0" })}>{title}</div>
-        {blurb && <div style={serif({ fontSize: 13.5, fontStyle: "italic", color: "#cdb98a" })}>{blurb}</div>}
+        {blurb && <div style={serif({ fontSize: 13.5, fontStyle: "normal", color: "#cdb98a" })}>{blurb}</div>}
       </div>
       {statValue != null && (
         <div style={{ textAlign: "right", paddingLeft: 22, borderLeft: "1px solid rgba(201,162,74,.3)" }}>
@@ -140,7 +140,7 @@ export function LineChart({ points, theme, height = 220, yFmt = (v) => v, valueL
   const t = theme || THEME.dashboard;
   const pts = (points || []).filter((p) => p && isFinite(p.v));
   const n = pts.length;
-  if (n < 2) return <div style={serif({ fontStyle: "italic", color: C.muted, padding: 18 })}>Not enough data yet — log a couple of points and the curve draws here.</div>;
+  if (n < 2) return <div style={serif({ fontStyle: "normal", color: C.muted, padding: 18 })}>Not enough data yet — log a couple of points and the curve draws here.</div>;
   const vals = pts.map((p) => p.v);
   const W = 760, H = height, padL = 66, padR = 70, padT = 24, padB = 30, iw = W - padL - padR, ih = H - padT - padB;
   let min = Math.min(...vals), max = Math.max(...vals);
@@ -173,11 +173,51 @@ export function LineChart({ points, theme, height = 220, yFmt = (v) => v, valueL
   );
 }
 
+// Item / skill icon with graceful fallback to a 2-letter badge.
+export function Icon({ url, name, size = 28, abbr, style }) {
+  const [err, setErr] = React.useState(false);
+  React.useEffect(() => { setErr(false); }, [url]);
+  const ab = abbr != null ? abbr : (name ? name.replace(/[^a-zA-Z ]/g, "").trim().split(/\s+/).slice(0, 2).map((w) => w[0] || "").join("").toUpperCase() : "");
+  if (err || !url) {
+    return <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: size, height: size, borderRadius: 6, background: "rgba(44,32,19,.10)", flex: `0 0 ${size}px`, ...mono({ fontSize: Math.max(8, size * 0.32), fontWeight: 700, color: C.muted2 }), ...style }}>{ab}</span>;
+  }
+  return <img src={url} alt={name || ""} referrerPolicy="no-referrer" onError={() => setErr(true)} style={{ width: size, height: size, objectFit: "contain", flex: `0 0 ${size}px`, ...style }} />;
+}
+
+// Donut / ring chart. segments: [{ value, color, label }].
+export function Donut({ segments, size = 150, thickness = 22, centerLabel, centerValue, centerColor = C.ink }) {
+  const segs = (segments || []).filter((s) => s && s.value > 0);
+  const total = segs.reduce((a, s) => a + s.value, 0) || 1;
+  const r = (size - thickness) / 2, cx = size / 2, cy = size / 2, circ = 2 * Math.PI * r;
+  let off = 0;
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} style={{ width: size, height: size }}>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(44,32,19,.10)" strokeWidth={thickness} />
+      {segs.map((s, i) => { const dash = (s.value / total) * circ; const el = <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.color} strokeWidth={thickness} strokeDasharray={`${dash.toFixed(2)} ${(circ - dash).toFixed(2)}`} strokeDashoffset={(-off).toFixed(2)} transform={`rotate(-90 ${cx} ${cy})`} />; off += dash; return el; })}
+      {centerValue != null && <text x={cx} y={cy + (centerLabel ? -2 : size * 0.06)} textAnchor="middle" style={cinzel({ fontSize: size * 0.19, fontWeight: 800, fill: centerColor })}>{centerValue}</text>}
+      {centerLabel && <text x={cx} y={cy + size * 0.14} textAnchor="middle" style={mono({ fontSize: size * 0.08, fill: C.muted, letterSpacing: ".08em" })}>{centerLabel}</text>}
+    </svg>
+  );
+}
+
+// Stacked single-row band bar (level spreads, quest status…). segments: [{ value, color, label, fg? }].
+export function BandBar({ segments, height = 24, showVals = true }) {
+  const segs = (segments || []).filter((s) => s && s.value > 0);
+  const total = segs.reduce((a, s) => a + s.value, 0) || 1;
+  return (
+    <div style={{ display: "flex", height, borderRadius: 6, overflow: "hidden", border: "1px solid rgba(44,32,19,.15)" }}>
+      {segs.map((s, i) => (
+        <div key={i} title={s.label} style={{ width: (s.value / total) * 100 + "%", background: s.color, display: "flex", alignItems: "center", justifyContent: "center", ...mono({ fontSize: 11, fontWeight: 700, color: s.fg || "#f4ecd6" }) }}>{showVals && (s.value / total) > 0.05 ? s.value : ""}</div>
+      ))}
+    </div>
+  );
+}
+
 // Horizontal bar chart — great for ranked item lists (names fit). data: [{ label, v, color? }].
 export function BarChartH({ data, theme, valueFmt = (v) => v, barH = 22, gap = 8 }) {
   const t = theme || THEME.dashboard;
   const rows = (data || []).filter((d) => d && isFinite(d.v));
-  if (!rows.length) return <div style={serif({ fontStyle: "italic", color: C.muted, padding: 16 })}>No data to chart yet.</div>;
+  if (!rows.length) return <div style={serif({ fontStyle: "normal", color: C.muted, padding: 16 })}>No data to chart yet.</div>;
   const maxAbs = Math.max(1, ...rows.map((r) => Math.abs(r.v)));
   const labelW = 150, valW = 78, H = rows.length * (barH + gap);
   const hasNeg = rows.some((r) => r.v < 0);
@@ -372,7 +412,7 @@ export function DataTable({ tableKey, model, cols, open, on, empty = "Nothing ma
             ))}
             {model.rows.length === 0 && (
               <tr>
-                <td colSpan={cols.length} style={serif({ fontSize: 13, fontStyle: "italic", color: C.muted, padding: 18 })}>
+                <td colSpan={cols.length} style={serif({ fontSize: 13, fontStyle: "normal", color: C.muted, padding: 18 })}>
                   {empty}
                 </td>
               </tr>
