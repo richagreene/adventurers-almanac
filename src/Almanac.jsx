@@ -268,13 +268,14 @@ export default class Almanac extends React.Component {
     if (!this.blocks) { this.blocks = {}; (D.slayer || []).forEach((t) => { if (t.verdict === "Block") this.blocks[t.task] = true; }); }
     this.bossOv = this._load("almanac.bossov.v1", null) || {};
     this.objectives = this._load("almanac.objectives.v1", null) || this.defaultObjectives();
+    this.avoidDismiss = this._load("almanac.avoiddismiss.v1", null) || {};
   }
 
   // ---------- undo / redo ----------
   // Every persisted key. _save snapshots the *pre-mutation* state of these keys
   // (localStorage lags the in-memory mutation by one write), grouped per
   // synchronous action, so any add/edit/delete/config change is one undo step.
-  _undoKeys = ["almanac.logs.v1", "almanac.goals.v1", "almanac.objectives.v1", "almanac.flipcfg.v1", "almanac.alchcfg.v1", "almanac.farmcfg.v1", "almanac.gcfg.v1", "almanac.blocks.v1", "almanac.bossov.v1", "almanac.questdone.v1", "almanac.stats.v1"];
+  _undoKeys = ["almanac.logs.v1", "almanac.goals.v1", "almanac.objectives.v1", "almanac.flipcfg.v1", "almanac.alchcfg.v1", "almanac.farmcfg.v1", "almanac.gcfg.v1", "almanac.blocks.v1", "almanac.bossov.v1", "almanac.questdone.v1", "almanac.stats.v1", "almanac.avoiddismiss.v1"];
   _snap() { const s = {}; this._undoKeys.forEach((k) => { s[k] = localStorage.getItem(k); }); return s; }
   _restore(snap) {
     this._undoSuspended = true;
@@ -467,7 +468,35 @@ export default class Almanac extends React.Component {
   };
   fillToLedger = () => { const r = this.state.fillResult; if (!r) return; this.setState({ flipView: "ledger", openForm: "flip", flipPrefill: { qty: r.qty, avgBuy: r.avgBuy, avgSell: r.avgSell } }); };
   addScan = () => { const name = this.val("scan_name"); if (!name) return; this.logs.scan.unshift({ name, buy: this.num("scan_buy"), sell: this.num("scan_sell"), vol: this.num("scan_vol"), limit: this.num("scan_limit") || 1, age: this.num("scan_age") }); this.saveLogs(); this.setState({ openForm: null }); };
-  addWatch = () => { const item = this.val("watch_item"); if (!item) return; this.logs.watch.unshift({ item, target: this.num("watch_target"), note: this.val("watch_note") }); this.saveLogs(); this.setState({ openForm: null }); };
+  addWatch = () => { const item = this.val("watch_item"); if (!item) return; const type = this.val("watch_type") || "watch"; this.logs.watch.unshift({ item, type, note: this.val("watch_note") }); this.saveLogs(); this.setState({ openForm: null }); };
+  dismissAvoid = (item) => { this.avoidDismiss[(item || "").toLowerCase()] = true; this._save("almanac.avoiddismiss.v1", this.avoidDismiss); this.bump(); };
+  undismissAvoid = (item) => { delete this.avoidDismiss[(item || "").toLowerCase()]; this._save("almanac.avoiddismiss.v1", this.avoidDismiss); this.bump(); };
+  // Decide whether an item's flip history flags it. Avoid triggers (any):
+  // net-negative over ≥3 flips, ≤33% win over ≥3, or one flip ≤ −10% ROI.
+  // Dead-capital (only if not avoided): ≥3 flips, net ≥ 0 but avg ROI < 1%.
+  flipFlag(p) {
+    const winRate = p.flips ? p.wins / p.flips : 0, avgRoi = p.flips ? p.roiSum / p.flips : 0;
+    if (p.flips >= 3 && p.net < 0) return { tier: "avoid", reason: `${this.signed(p.net)} over ${p.flips} flips · ${Math.round(winRate * 100)}% win` };
+    if (p.flips >= 3 && winRate <= 1 / 3) return { tier: "avoid", reason: `only ${Math.round(winRate * 100)}% win over ${p.flips} flips` };
+    if (p.worstRoi <= -10) return { tier: "avoid", reason: `a flip at ${p.worstRoi.toFixed(1)}% ROI` };
+    if (p.flips >= 3 && p.net >= 0 && avgRoi < 1) return { tier: "dead", reason: `avg ROI ${avgRoi.toFixed(1)}% · ties up a GE slot` };
+    return null;
+  }
+  // Shared watch/avoid model used by both the Performance tab and the scanner.
+  flipAvoidList() {
+    const perf = {};
+    this.logs.flips.map((f) => this.computeFlip(f)).forEach((f) => {
+      if (!perf[f.item]) perf[f.item] = { item: f.item, flips: 0, net: 0, roiSum: 0, holdSum: 0, wins: 0, worstRoi: Infinity };
+      const p = perf[f.item]; p.flips++; p.net += f.net; p.roiSum += f.roi; p.holdSum += f.hold; if (f.net > 0) p.wins++; p.worstRoi = Math.min(p.worstRoi, f.roi);
+    });
+    const manual = this.logs.watch.map((w, i) => ({ ...w, i, type: w.type || "watch" }));
+    const manualLc = new Set(manual.map((m) => m.item.toLowerCase()));
+    const auto = Object.values(perf).map((p) => ({ p, flag: this.flipFlag(p) })).filter((x) => x.flag && !manualLc.has(x.p.item.toLowerCase()) && !this.avoidDismiss[x.p.item.toLowerCase()]);
+    const byName = new Map();
+    manual.filter((m) => m.type === "avoid").forEach((m) => byName.set(m.item.toLowerCase(), { tier: "avoid", reason: m.note || "manually avoided" }));
+    auto.forEach((x) => byName.set(x.p.item.toLowerCase(), { tier: x.flag.tier, reason: x.flag.reason }));
+    return { manual, auto, byName, perf };
+  }
   addAlch = () => { const casts = this.num("alch_casts"); if (casts <= 0) return; const item = this.val("alch_item") || "High alch", alchVal = this.num("alch_alch"), buy = this.num("alch_buy"); this.logs.alch.unshift({ date: this.today(), item, casts, alchVal, buy, net: (alchVal - buy - this.alchCost()) * casts, xp: casts * 65 }); this.saveLogs(); this.setState({ openForm: null }); };
   addHerb = () => { const tier = this.val("herb_tier") || "Snapdragon", runs = this.num("herb_runs") || 1, netOv = this.num("herb_net"); const def = this.farmDefs.find((f) => f.tier === tier); this.logs.herb.unshift({ date: this.today(), tier, runs, net: netOv > 0 ? netOv : def ? def.net * runs : 0 }); this.saveLogs(); this.setState({ openForm: null }); };
   editHerb = (i, key, raw) => { const h = this.logs.herb[i]; if (!h) return; const v = Math.round(this.parseNum(raw)); if (key === "runs") h.runs = Math.max(1, v); else if (key === "net") h.net = v; else if (key === "tier") h.tier = raw; this.saveLogs(); this.bump(); };
@@ -1149,7 +1178,10 @@ export default class Almanac extends React.Component {
       const watch = !all && gates.every((g) => g[0] || g[1]);
       return { i, manualIdx: usingMarket ? -1 : i, name: it.name, buy: this.fmt(it.buy), sell: this.fmt(it.sell), margin: margin.toFixed(1) + "%", marginColor: cMargin ? C.green : C.red, vol: this.short(it.vol || 0), age: (it.age || 0) + "m", profit4h: this.short(profit4h), profit4hN: profit4h, all, watch, verdict: all ? "FLIP NOW" : watch ? "WATCH" : "SKIP", vColor: all ? C.green : watch ? "#9a7530" : C.red, vBg: all ? "rgba(92,110,53,.18)" : watch ? "rgba(201,162,74,.16)" : "rgba(150,58,44,.1)", rowBg: all ? "rgba(92,110,53,.10)" : watch ? "rgba(201,162,74,.07)" : "transparent" };
     });
+    const avoidByName = this.flipAvoidList().byName;
+    allRows.forEach((r) => { r.avoid = avoidByName.get((r.name || "").toLowerCase()) || null; });
     const flipNowN = allRows.filter((r) => r.all).length, watchN = allRows.filter((r) => r.watch).length;
+    const avoidShown = allRows.filter((r) => (r.all || (this.state.flipShowWatch && r.watch)) && r.avoid).length;
     const showWatch = this.state.flipShowWatch;
     const rows = allRows.filter((r) => r.all || (showWatch && r.watch)).sort((a, b) => b.profit4hN - a.profit4hN).slice(0, 150);
     const chartRows = allRows.filter((r) => r.all || r.watch).sort((a, b) => b.profit4hN - a.profit4hN).slice(0, 8).map((r) => ({ label: r.name, v: r.profit4hN, color: r.all ? C.green : "#9a7530" }));
@@ -1206,8 +1238,8 @@ export default class Almanac extends React.Component {
             <table className="sheet">
               <thead><tr>{["Item", "Buy", "Sell", "Margin", "Daily vol", "Age", "Profit / 4h", "Verdict", ""].map((h, i) => <th key={i} className={i > 0 && i < 7 ? "num" : ""}>{h}</th>)}</tr></thead>
               <tbody>{rows.map((r) => (
-                <tr key={r.i}>
-                  <td style={cinzel({ fontWeight: 600, fontSize: 14 })}>{r.name}</td>
+                <tr key={r.i} style={r.avoid ? { background: "rgba(150,58,44,.10)" } : undefined}>
+                  <td style={cinzel({ fontWeight: 600, fontSize: 14 })}>{r.name}{r.avoid && <span title={r.avoid.reason} style={{ marginLeft: 7, ...mono({ fontSize: 9, fontWeight: 600, color: r.avoid.tier === "dead" ? "#9a7530" : C.red, background: r.avoid.tier === "dead" ? "rgba(201,162,74,.16)" : "rgba(150,58,44,.14)", padding: "2px 6px", borderRadius: 4 }) }}>⚑ {r.avoid.tier === "dead" ? "DEAD CAP" : "AVOID"}</span>}</td>
                   <td className="num" style={mono({ fontSize: 12 })}>{r.buy}</td>
                   <td className="num" style={mono({ fontSize: 12 })}>{r.sell}</td>
                   <td className="num" style={mono({ fontSize: 12, color: r.marginColor })}>{r.margin}</td>
@@ -1221,7 +1253,7 @@ export default class Almanac extends React.Component {
               {rows.length === 0 && <tr><td colSpan={9} style={serif({ fontStyle: "italic", color: C.muted, padding: 18 })}>{!usingMarket && this.logs.scan.length === 0 ? "Hit ⟳ Live prices to scan the market, or add items manually." : watchN > 0 ? `Nothing clears every gate. ${watchN} item${watchN > 1 ? "s are" : " is"} close — tick “Show watch items”.` : `Nothing clears the gates among ${scanned.toLocaleString()} items${failTop ? ` (${failTop})` : ""}. Loosen the control panel or hit Reset.`}</td></tr>}</tbody>
             </table>
           </div>
-          <div style={serif({ fontSize: 12, fontStyle: "italic", color: C.muted, marginTop: 8 })}>By default only <strong>FLIP NOW</strong> (clears every gate at your bankroll) shows. Watch items sit within the tolerance % of qualifying. Hit ⟳ Live prices to refresh from the OSRS Wiki.</div>
+          <div style={serif({ fontSize: 12, fontStyle: "italic", color: C.muted, marginTop: 8 })}>By default only <strong>FLIP NOW</strong> (clears every gate at your bankroll) shows. Watch items sit within the tolerance % of qualifying.{avoidShown ? ` ${avoidShown} shown ${avoidShown > 1 ? "are" : "is"} on your avoid list (⚑) — flagged from past performance.` : ""} Hit ⟳ Live prices to refresh from the OSRS Wiki.</div>
         </Card>
       </div>
     );
@@ -1282,6 +1314,8 @@ export default class Almanac extends React.Component {
     const byDate = fc.slice().sort((a, b) => new Date(a.sellDate || a.buyDate) - new Date(b.sellDate || b.buyDate));
     let cum = 0; const cumPts = byDate.map((f) => { cum += f.net; return { v: cum, label: this.dShort(f.sellDate || f.buyDate) }; });
     const itemBars = rows.slice(0, 8).map((r) => ({ label: r.item, v: r.net }));
+    const av = this.flipAvoidList();
+    const pill = { watch: { c: C.teal, bg: "rgba(60,107,107,.14)", label: "WATCH" }, avoid: { c: C.red, bg: "rgba(150,58,44,.14)", label: "AVOID" }, dead: { c: "#9a7530", bg: "rgba(201,162,74,.16)", label: "DEAD CAP" } };
     return (
       <div>
         {fc.length > 0 && (
@@ -1326,6 +1360,53 @@ export default class Almanac extends React.Component {
           </div>
         </Card>
       </div>
+        <Card style={{ marginTop: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+            <Kicker color={C.goldDeep}>Watchlist &amp; Avoid {av.auto.length ? `· ${av.auto.length} auto-flagged from your history` : ""}</Kicker>
+            <Btn tone="gold" onClick={() => this.toggleForm("watch")}>+ Add item</Btn>
+          </div>
+          {this.state.openForm === "watch" && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
+              {this.field("watch_item", "Item", { w: 180, list: "tradeItems" })}
+              <datalist id="tradeItems">{this.itemNames.map((n) => <option key={n} value={n} />)}</datalist>
+              <select className="led" id="watch_type" style={{ width: 130 }}><option value="watch">Watch</option><option value="avoid">Avoid</option></select>
+              {this.field("watch_note", "Note / why", { w: 200 })}
+              <Btn tone="gold" onClick={this.addWatch}>Save</Btn>
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 14 }}>
+            <div>
+              <div style={mono({ fontSize: 9, letterSpacing: ".16em", color: C.muted, textTransform: "uppercase", marginBottom: 8 })}>Watching</div>
+              {av.manual.filter((m) => m.type === "watch").map((m) => (
+                <div key={m.i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: C.cardLight, borderRadius: 6, marginBottom: 6, borderLeft: `3px solid ${C.teal}` }}>
+                  <Tag color={pill.watch.c} bg={pill.watch.bg}>WATCH</Tag>
+                  <div style={{ flex: 1 }}><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{m.item}</div>{m.note && <div style={serif({ fontSize: 11.5, fontStyle: "italic", color: C.muted })}>{m.note}</div>}</div>
+                  <span onClick={() => this.delLog("watch", m.i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span>
+                </div>
+              ))}
+              {av.manual.filter((m) => m.type === "watch").length === 0 && <div style={serif({ fontSize: 12.5, fontStyle: "italic", color: C.muted })}>Nothing on your watchlist — add items you're hunting.</div>}
+            </div>
+            <div>
+              <div style={mono({ fontSize: 9, letterSpacing: ".16em", color: C.muted, textTransform: "uppercase", marginBottom: 8 })}>Avoid &amp; dead capital</div>
+              {av.manual.filter((m) => m.type === "avoid").map((m) => (
+                <div key={"m" + m.i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: C.cardLight, borderRadius: 6, marginBottom: 6, borderLeft: `3px solid ${C.red}` }}>
+                  <Tag color={pill.avoid.c} bg={pill.avoid.bg}>AVOID</Tag>
+                  <div style={{ flex: 1 }}><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{m.item}</div>{m.note && <div style={serif({ fontSize: 11.5, fontStyle: "italic", color: C.muted })}>{m.note}</div>}</div>
+                  <span onClick={() => this.delLog("watch", m.i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span>
+                </div>
+              ))}
+              {av.auto.map((x) => { const p = pill[x.flag.tier]; return (
+                <div key={"a" + x.p.item} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: C.cardLight, borderRadius: 6, marginBottom: 6, borderLeft: `3px solid ${p.c}` }}>
+                  <Tag color={p.c} bg={p.bg}>⚑ {p.label}</Tag>
+                  <div style={{ flex: 1 }}><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{x.p.item}</div><div style={serif({ fontSize: 11.5, fontStyle: "italic", color: C.muted })}>{x.flag.reason}</div></div>
+                  <span onClick={() => this.dismissAvoid(x.p.item)} title="Dismiss this auto-flag" style={{ cursor: "pointer", ...mono({ fontSize: 10, color: C.muted2 }) }}>dismiss</span>
+                </div>
+              ); })}
+              {av.manual.filter((m) => m.type === "avoid").length === 0 && av.auto.length === 0 && <div style={serif({ fontSize: 12.5, fontStyle: "italic", color: C.muted })}>No items flagged. Poor performers from your flip log auto-appear here.</div>}
+            </div>
+          </div>
+          <div style={serif({ fontSize: 11.5, fontStyle: "italic", color: C.muted, marginTop: 12 })}>Auto-flagged: net-negative or ≤33% win over ≥3 flips, or a single flip ≤ −10% ROI → <strong style={{ color: C.red }}>Avoid</strong>; ≥3 flips that barely clear tax (avg ROI &lt; 1%) → <strong style={{ color: "#9a7530" }}>Dead capital</strong>. Flagged items show a ⚑ in the scanner. Dismiss to ignore.</div>
+        </Card>
       </div>
     );
   }
