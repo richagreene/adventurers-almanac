@@ -49,7 +49,7 @@ export default class Almanac extends React.Component {
     flipView: "scanner", fillResult: null, fillMsg: "", bossView: "compendium", bossFocus: "", dropFormBoss: "",
     slayView: "planner", slayMaster: "Duradel", gearStyle: "melee",
     questMethod: "optimal", qsortCol: "", qsortDir: 1, qFilterOpen: "", qfSeries: [], qfType: [], qfStatus: [], qName: "", qGate: "",
-    tSort: {}, tFilt: {}, tOpen: "", flipPrefill: null, objType: "bank", objBoss: "", flipShowWatch: false, _v: 0,
+    tSort: {}, tFilt: {}, tOpen: "", flipPrefill: null, objType: "bank", objBoss: "", flipShowWatch: false, flipCfgVer: 0, _v: 0,
   };
 
   // ---- static reference tables (ported from the workbook / design) ----
@@ -207,6 +207,7 @@ export default class Almanac extends React.Component {
     this.objectives = this._load("almanac.objectives.v1", null) || this.defaultObjectives();
     this.gearPrices = {};
     this.itemNames = [];
+    this.priceRows = null;
     this.bump();
     // Background: pull the full tradeable-item list (for flip autocomplete) and
     // the live nature-rune price. Both degrade silently if the network is blocked.
@@ -330,14 +331,17 @@ export default class Almanac extends React.Component {
   setMode = (m) => { this.stats.mode = m; this._save("almanac.stats.v1", this.stats); this.bump(); };
   refreshPrices = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
-    this.setState({ priceStatus: "Fetching live prices…" });
+    this.setState({ priceStatus: "Scanning the live market…" });
     try {
-      const { byName } = await fetchPrices({ maxAgeMs: 0 }); const now = Date.now() / 1000; let n = 0;
+      const { byName, byId } = await fetchPrices({ maxAgeMs: 0 }); const now = Date.now() / 1000; let n = 0;
       this.logs.scan.forEach((it) => { const m = byName[(it.name || "").toLowerCase()]; if (m) { if (m.low) it.buy = m.low; if (m.high) it.sell = m.high; if (m.limit) it.limit = m.limit; if (m.volume) it.vol = m.volume; const tt = Math.max(m.highTime, m.lowTime); if (tt) it.age = Math.max(0, Math.round(now - tt) / 60 | 0); n++; } });
       this.alchItems.forEach((a) => { const m = byName[a.item.toLowerCase()]; if (m) { if (m.high) a.buy = m.high; if (m.highalch) a.alch = m.highalch; if (m.limit) a.limit = m.limit; } });
       const nat = byName["nature rune"]; if (nat && (nat.high || nat.low)) { this.alchcfg.natRune = nat.high || nat.low; this._save("almanac.alchcfg.v1", this.alchcfg); }
-      this.saveLogs(); this.setState({ priceStatus: `Updated ${n} items · ${new Date().toLocaleTimeString()}` });
-    } catch (err) { this.setState({ priceStatus: "Live prices unavailable right now — manual entry still works." }); }
+      // Keep the whole tradeable market so the scanner ranks real flips, not just
+      // a handful of seed items. Drop items with no live buy & sell.
+      this.priceRows = Object.values(byId).filter((m) => m.high > 0 && m.low > 0).map((m) => ({ name: m.name, buy: m.low, sell: m.high, vol: m.volume || 0, limit: m.limit || 0, age: Math.max(0, (now - Math.max(m.highTime || 0, m.lowTime || 0)) / 60 | 0) }));
+      this.saveLogs(); this.setState({ priceStatus: `Scanned ${this.priceRows.length.toLocaleString()} items · ${new Date().toLocaleTimeString()}` });
+    } catch (err) { this.setState({ priceStatus: "Live market unavailable right now — using your manual list." }); }
   };
   refreshGearPrices = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
@@ -359,7 +363,8 @@ export default class Almanac extends React.Component {
   };
 
   // ---------- handlers: navigation & forms ----------
-  go = (s) => this.setState({ section: s, openForm: null });
+  go = (s) => { this.setState({ section: s, openForm: null }); if (s === "flipping" && !this.priceRows && !this._marketLoading) { this._marketLoading = true; this.refreshPrices(); } };
+  resetFlipCfg = () => { this.flipcfg = { ...this.flipDefaults }; this._save("almanac.flipcfg.v1", this.flipcfg); this.setState((s) => ({ flipCfgVer: s.flipCfgVer + 1 })); };
   toggleForm = (f) => this.setState((s) => ({ openForm: s.openForm === f ? null : f, fillResult: null }));
   setCfg = (cfg, key, raw, opts = {}) => { let v = opts.str ? raw : Math.max(0, Math.round(this.parseNum(raw) || 0)); this[cfg][key] = v; this._save("almanac." + cfg + ".v1", this[cfg]); this.bump(); };
 
@@ -1008,39 +1013,50 @@ export default class Almanac extends React.Component {
     const controls = [
       { key: "capital", label: "Flip capital", suffix: "gp", hint: "split across 8 GE slots" },
       { key: "minMargin", label: "Min margin %", suffix: "%", hint: "floor after the 2% tax" },
-      { key: "maxMargin", label: "Max margin %", suffix: "%", hint: "ceiling — above is likely stale/manip" },
+      { key: "maxMargin", label: "Max margin %", suffix: "%", hint: "ceiling (stale/manip) · 0 = no limit" },
       { key: "minProfit4h", label: "Min profit / 4h", suffix: "gp", hint: "the 'worth a GE slot' bar" },
       { key: "minVolume", label: "Min daily volume", suffix: "", hint: "liquidity gate" },
       { key: "minBuy", label: "Min buy price", suffix: "gp", hint: "cuts penny junk" },
-      { key: "maxAge", label: "Max price age", suffix: "min", hint: "freshness gate" },
+      { key: "maxAge", label: "Max price age", suffix: "min", hint: "freshness gate · 0 = no limit" },
       { key: "watchTol", label: "Watch tolerance", suffix: "%", hint: "how close a near-miss counts as Watch" },
     ];
     const tol = Math.max(0, (cfg.watchTol != null ? cfg.watchTol : 15)) / 100;
-    const allRows = this.logs.scan.map((it, i) => {
+    // Ceilings of 0 = "no limit" so lowering a max field can't silently hide everything.
+    const maxMargin = cfg.maxMargin > 0 ? cfg.maxMargin : Infinity;
+    const maxAge = cfg.maxAge > 0 ? cfg.maxAge : Infinity;
+    // Scan the whole live market when we have it; otherwise the manual list.
+    const usingMarket = this.priceRows && this.priceRows.length > 0;
+    const source = usingMarket ? this.priceRows : this.logs.scan;
+    const fail = { margin: 0, vol: 0, age: 0, profit: 0, buy: 0 };
+    const allRows = source.map((it, i) => {
       const tax = this.flipTax(it.sell, 1); const margin = it.buy > 0 ? ((it.sell - tax - it.buy) / it.buy) * 100 : 0;
       const qty = Math.min(it.limit || 1, Math.floor(capPer / Math.max(1, it.buy)));
       const profit4h = qty * (it.sell - tax - it.buy);
-      const cMargin = margin >= cfg.minMargin && margin <= cfg.maxMargin, cVol = (it.vol || 0) >= cfg.minVolume, cAge = (it.age || 0) <= cfg.maxAge, cProfit = profit4h >= cfg.minProfit4h, cBuy = it.buy >= cfg.minBuy;
+      const cMargin = margin >= cfg.minMargin && margin <= maxMargin, cVol = (it.vol || 0) >= cfg.minVolume, cAge = (it.age || 0) <= maxAge, cProfit = profit4h >= cfg.minProfit4h, cBuy = it.buy >= cfg.minBuy;
+      if (!cMargin) fail.margin++; if (!cVol) fail.vol++; if (!cAge) fail.age++; if (!cProfit) fail.profit++; if (!cBuy) fail.buy++;
       // "near" = within the watch tolerance of clearing a gate it currently fails.
-      const nMargin = margin >= cfg.minMargin * (1 - tol) && margin <= cfg.maxMargin * (1 + tol);
-      const nVol = (it.vol || 0) >= cfg.minVolume * (1 - tol), nAge = (it.age || 0) <= cfg.maxAge * (1 + tol);
+      const nMargin = margin >= cfg.minMargin * (1 - tol) && margin <= maxMargin * (1 + tol);
+      const nVol = (it.vol || 0) >= cfg.minVolume * (1 - tol), nAge = (it.age || 0) <= maxAge * (1 + tol);
       const nProfit = profit4h >= cfg.minProfit4h * (1 - tol), nBuy = it.buy >= cfg.minBuy * (1 - tol);
       const gates = [[cMargin, nMargin], [cVol, nVol], [cAge, nAge], [cProfit, nProfit], [cBuy, nBuy]];
       const all = gates.every((g) => g[0]);
       const watch = !all && gates.every((g) => g[0] || g[1]);
-      return { i, name: it.name, buy: this.fmt(it.buy), sell: this.fmt(it.sell), margin: margin.toFixed(1) + "%", marginColor: cMargin ? C.green : C.red, vol: this.short(it.vol || 0), age: (it.age || 0) + "m", profit4h: this.short(profit4h), profit4hN: profit4h, all, watch, verdict: all ? "FLIP NOW" : watch ? "WATCH" : "SKIP", vColor: all ? C.green : watch ? "#9a7530" : C.red, vBg: all ? "rgba(92,110,53,.18)" : watch ? "rgba(201,162,74,.16)" : "rgba(150,58,44,.1)", rowBg: all ? "rgba(92,110,53,.10)" : watch ? "rgba(201,162,74,.07)" : "transparent" };
-    }).sort((a, b) => b.profit4hN - a.profit4hN);
+      return { i, manualIdx: usingMarket ? -1 : i, name: it.name, buy: this.fmt(it.buy), sell: this.fmt(it.sell), margin: margin.toFixed(1) + "%", marginColor: cMargin ? C.green : C.red, vol: this.short(it.vol || 0), age: (it.age || 0) + "m", profit4h: this.short(profit4h), profit4hN: profit4h, all, watch, verdict: all ? "FLIP NOW" : watch ? "WATCH" : "SKIP", vColor: all ? C.green : watch ? "#9a7530" : C.red, vBg: all ? "rgba(92,110,53,.18)" : watch ? "rgba(201,162,74,.16)" : "rgba(150,58,44,.1)", rowBg: all ? "rgba(92,110,53,.10)" : watch ? "rgba(201,162,74,.07)" : "transparent" };
+    });
     const flipNowN = allRows.filter((r) => r.all).length, watchN = allRows.filter((r) => r.watch).length;
     const showWatch = this.state.flipShowWatch;
-    const rows = allRows.filter((r) => r.all || (showWatch && r.watch));
-    const chartRows = allRows.filter((r) => r.all || r.watch).slice(0, 8).map((r) => ({ label: r.name, v: r.profit4hN, color: r.all ? C.green : "#9a7530" }));
+    const rows = allRows.filter((r) => r.all || (showWatch && r.watch)).sort((a, b) => b.profit4hN - a.profit4hN).slice(0, 150);
+    const chartRows = allRows.filter((r) => r.all || r.watch).sort((a, b) => b.profit4hN - a.profit4hN).slice(0, 8).map((r) => ({ label: r.name, v: r.profit4hN, color: r.all ? C.green : "#9a7530" }));
+    const scanned = source.length;
+    const failTop = Object.entries(fail).sort((a, b) => b[1] - a[1]).filter(([, v]) => v > 0).slice(0, 2).map(([k, v]) => `${v} fail ${({ margin: "margin band", vol: "min volume", age: "freshness", profit: "min profit/4h", buy: "min buy" })[k]}`).join(" · ");
     return (
       <div>
         <Card style={{ marginBottom: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <Kicker color={C.goldDeep}>Control panel · tune what counts as worth-it</Kicker>
             <div style={{ display: "flex", gap: 8 }}>
-              <Btn onClick={this.refreshPrices}>⟳ Live prices</Btn>
+              <Btn onClick={this.refreshPrices}>⟳ Scan market</Btn>
+              <Btn tone="quiet" onClick={this.resetFlipCfg}>Reset</Btn>
               <Btn tone="quiet" onClick={() => this.toggleForm("scan")}>+ Item</Btn>
             </div>
           </div>
@@ -1049,7 +1065,7 @@ export default class Almanac extends React.Component {
               <div key={c.key} style={{ background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)", display: "flex", flexDirection: "column", minHeight: 108 }}>
                 <Kicker style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.label}</Kicker>
                 <div style={{ position: "relative", marginTop: 6 }}>
-                  <input className="led" defaultValue={this.fmt(cfg[c.key])} onBlur={(e) => this.setCfg("flipcfg", c.key, e.target.value)} style={{ width: "100%", fontWeight: 600, paddingRight: c.suffix ? 34 : 9 }} />
+                  <input key={c.key + "-" + this.state.flipCfgVer} className="led" defaultValue={this.fmt(cfg[c.key])} onBlur={(e) => this.setCfg("flipcfg", c.key, e.target.value)} style={{ width: "100%", fontWeight: 600, paddingRight: c.suffix ? 34 : 9 }} />
                   {c.suffix && <span style={{ position: "absolute", right: 9, top: "50%", transform: "translateY(-50%)", ...mono({ fontSize: 10, color: C.muted }) }}>{c.suffix}</span>}
                 </div>
                 <div style={serif({ fontSize: 11, fontStyle: "italic", color: C.muted, marginTop: 6, lineHeight: 1.3, flex: 1 })}>{c.hint}</div>
@@ -1074,7 +1090,7 @@ export default class Almanac extends React.Component {
         )}
         <Card>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
-            <Kicker color={C.goldDeep}>{flipNowN} flip now{watchN ? ` · ${watchN} on watch (within ${Math.round(tol * 100)}% of the gates)` : ""}</Kicker>
+            <Kicker color={C.goldDeep}>{flipNowN} flip now{watchN ? ` · ${watchN} on watch (within ${Math.round(tol * 100)}% of the gates)` : ""} · {usingMarket ? scanned.toLocaleString() + " market items scanned" : scanned + " in your list"}</Kicker>
             <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", ...mono({ fontSize: 11, color: C.muted2 }) }}>
               <input type="checkbox" checked={showWatch} onChange={(e) => this.setState({ flipShowWatch: e.target.checked })} style={{ accentColor: C.gold, width: 15, height: 15 }} />
               Show watch items
@@ -1093,10 +1109,10 @@ export default class Almanac extends React.Component {
                   <td className="num" style={mono({ fontSize: 12 })}>{r.age}</td>
                   <td className="num" style={mono({ fontSize: 12 })}>{r.profit4h}</td>
                   <td><Tag color={r.vColor} bg={r.vBg}>{r.verdict}</Tag></td>
-                  <td><span onClick={() => this.delLog("scan", r.i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td>
+                  <td>{r.manualIdx >= 0 ? <span onClick={() => this.delLog("scan", r.manualIdx)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span> : null}</td>
                 </tr>
               ))}
-              {rows.length === 0 && <tr><td colSpan={9} style={serif({ fontStyle: "italic", color: C.muted, padding: 18 })}>{this.logs.scan.length === 0 ? "Add items (or hit ⟳ Live prices) to scan." : watchN > 0 ? `Nothing clears every gate right now. ${watchN} item${watchN > 1 ? "s are" : " is"} close — tick “Show watch items”.` : "Nothing clears the gates right now. Loosen the control panel or wait for prices to move."}</td></tr>}</tbody>
+              {rows.length === 0 && <tr><td colSpan={9} style={serif({ fontStyle: "italic", color: C.muted, padding: 18 })}>{!usingMarket && this.logs.scan.length === 0 ? "Hit ⟳ Live prices to scan the market, or add items manually." : watchN > 0 ? `Nothing clears every gate. ${watchN} item${watchN > 1 ? "s are" : " is"} close — tick “Show watch items”.` : `Nothing clears the gates among ${scanned.toLocaleString()} items${failTop ? ` (${failTop})` : ""}. Loosen the control panel or hit Reset.`}</td></tr>}</tbody>
             </table>
           </div>
           <div style={serif({ fontSize: 12, fontStyle: "italic", color: C.muted, marginTop: 8 })}>By default only <strong>FLIP NOW</strong> (clears every gate at your bankroll) shows. Watch items sit within the tolerance % of qualifying. Hit ⟳ Live prices to refresh from the OSRS Wiki.</div>
