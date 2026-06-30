@@ -46,7 +46,7 @@ const TITLES = {
 export default class Almanac extends React.Component {
   state = {
     section: "dashboard", openForm: null, fetching: false, fetchMsg: "", priceStatus: "", gearPriceStatus: "",
-    flipView: "scanner", fillResult: null, fillMsg: "", bossView: "compendium", bossFocus: "", dropFormBoss: "",
+    flipView: "scanner", fillResult: null, fillMsg: "", bossView: "compendium", bossFocus: "", bossGearStyle: "", dropFormBoss: "",
     slayView: "planner", slayMaster: "Duradel", gearStyle: "melee",
     questMethod: "optimal", qsortCol: "", qsortDir: 1, qFilterOpen: "", qfSeries: [], qfType: [], qfStatus: [], qName: "", qGate: "",
     tSort: {}, tFilt: {}, tOpen: "", flipPrefill: null, objType: "bank", objBoss: "", flipShowWatch: false, flipCfgVer: 0, _v: 0,
@@ -126,21 +126,54 @@ export default class Almanac extends React.Component {
     Trolls: { loc: "Trollheim / Death Plateau", drops: "Low value — block candidate" },
     Dagannoth: { loc: "Lighthouse / Waterbirth", drops: "Mixed; DKS on Kings only" },
   };
+  // Comprehensive drop tables keyed to the exact boss names in D.bosses. Each
+  // entry: { n, rate (1/N), v (approx gp; live-repriced by name for tradeables),
+  // cat: "unique" | "common" | "tertiary" }. Rates/uniques follow the OSRS Wiki.
   bossDrops = {
-    Vorkath: [{ n: "Skeletal visage", rate: 5000, v: 1700000 }, { n: "Dragonbone necklace", rate: 1000, v: 180000 }, { n: "Jar of decay", rate: 3000, v: 60000 }, { n: "Vorki (pet)", rate: 3000, v: 0 }],
-    Zulrah: [{ n: "Tanzanite fang", rate: 512, v: 2700000 }, { n: "Magic fang", rate: 512, v: 2300000 }, { n: "Serpentine visage", rate: 512, v: 1100000 }, { n: "Tanzanite mutagen", rate: 13106, v: 4500000 }, { n: "Pet snakeling", rate: 4000, v: 0 }],
-    Cerberus: [{ n: "Primordial crystal", rate: 512, v: 6000000 }, { n: "Pegasian crystal", rate: 512, v: 2900000 }, { n: "Eternal crystal", rate: 512, v: 2800000 }, { n: "Smouldering stone", rate: 512, v: 380000 }, { n: "Hellpuppy (pet)", rate: 3000, v: 0 }],
-    "Dagannoth Kings": [{ n: "Berserker ring", rate: 128, v: 2700000 }, { n: "Archer ring", rate: 128, v: 1000000 }, { n: "Warrior ring", rate: 128, v: 55000 }, { n: "Seers ring", rate: 128, v: 50000 }, { n: "Dragon axe", rate: 128, v: 55000 }, { n: "Pet DK", rate: 5000, v: 0 }],
-    "Abyssal Sire": [{ n: "Bludgeon piece", rate: 516, v: 9000000 }, { n: "Abyssal dagger", rate: 256, v: 3600000 }, { n: "Unsired→items", rate: 100, v: 1000000 }, { n: "Abyssal orphan (pet)", rate: 2560, v: 0 }],
-    Kraken: [{ n: "Trident of the seas", rate: 512, v: 130000 }, { n: "Kraken tentacle", rate: 300, v: 500000 }, { n: "Pet kraken", rate: 3000, v: 0 }],
-    "Alchemical Hydra": [{ n: "Hydra's claw", rate: 1000, v: 80000000 }, { n: "Hydra leather", rate: 514, v: 1200000 }, { n: "Hydra's tail", rate: 512, v: 300000 }, { n: "Dragon hunter lance", rate: 2000, v: 30000000 }, { n: "Ikkle hydra (pet)", rate: 3000, v: 0 }],
-    "General Graardor": [{ n: "Bandos chestplate", rate: 381, v: 18000000 }, { n: "Bandos tassets", rate: 381, v: 24000000 }, { n: "Bandos hilt", rate: 508, v: 9000000 }, { n: "Pet general", rate: 5000, v: 0 }],
-    "Commander Zilyana": [{ n: "Saradomin sword", rate: 127, v: 240000 }, { n: "Armadyl crossbow", rate: 508, v: 25000000 }, { n: "Saradomin hilt", rate: 508, v: 4500000 }, { n: "Pet zilyana", rate: 5000, v: 0 }],
-    "Kree'arra (Armadyl)": [{ n: "Armadyl helmet", rate: 381, v: 18000000 }, { n: "Armadyl chestplate", rate: 381, v: 21000000 }, { n: "Armadyl chainskirt", rate: 381, v: 23000000 }, { n: "Armadyl hilt", rate: 508, v: 1300000 }],
-    "K'ril Tsutsaroth": [{ n: "Staff of the dead", rate: 508, v: 8000000 }, { n: "Zamorakian spear", rate: 127, v: 160000 }, { n: "Steam staff upgrade", rate: 512, v: 400000 }, { n: "Zamorak hilt", rate: 508, v: 3500000 }],
-    "Kalphite Queen": [{ n: "Dragon chainbody", rate: 128, v: 280000 }, { n: "Dragon 2h sword", rate: 256, v: 120000 }, { n: "Kq head", rate: 256, v: 90000 }, { n: "Pet kalphite", rate: 3000, v: 0 }],
-    Sarachnis: [{ n: "Sarachnis cudgel", rate: 384, v: 1500000 }, { n: "Jar of eyes", rate: 2000, v: 200000 }, { n: "Sraracha (pet)", rate: 3000, v: 0 }],
-    "Giant Mole": [{ n: "Baby mole (pet)", rate: 3000, v: 0 }, { n: "Mole claw", rate: 1, v: 480 }, { n: "Mole skin", rate: 1, v: 540 }],
+    "Giant Mole": [{ n: "Baby mole", rate: 3000, v: 0, cat: "tertiary" }, { n: "Clue scroll (hard)", rate: 25, v: 0, cat: "tertiary" }, { n: "Mole claw", rate: 1, v: 460, cat: "common" }, { n: "Mole skin", rate: 1, v: 540, cat: "common" }, { n: "Numulite", rate: 6, v: 30, cat: "common" }],
+    "Obor": [{ n: "Hill giant club", rate: 118, v: 110000, cat: "unique" }, { n: "Giant key", rate: 1, v: 0, cat: "common" }, { n: "Big bones", rate: 1, v: 280, cat: "common" }, { n: "Clue scroll (medium)", rate: 32, v: 0, cat: "tertiary" }],
+    "Bryophyta": [{ n: "Bryophyta's essence", rate: 118, v: 240000, cat: "unique" }, { n: "Mossy key", rate: 1, v: 0, cat: "common" }, { n: "Nature rune", rate: 4, v: 90, cat: "common" }, { n: "Clue scroll (medium)", rate: 32, v: 0, cat: "tertiary" }],
+    "Scurrius": [{ n: "Scurrius' spine", rate: 3, v: 0, cat: "unique" }, { n: "Scurry", rate: 3000, v: 0, cat: "tertiary" }, { n: "Clue scroll (hard)", rate: 200, v: 0, cat: "tertiary" }, { n: "Bones", rate: 1, v: 110, cat: "common" }],
+    "Deranged Archaeologist": [{ n: "Clue scroll (elite)", rate: 400, v: 0, cat: "tertiary" }, { n: "Death rune", rate: 4, v: 180, cat: "common" }, { n: "Ancient page", rate: 35, v: 0, cat: "unique" }, { n: "Snapdragon seed", rate: 30, v: 50000, cat: "common" }],
+    "Sarachnis": [{ n: "Sarachnis cudgel", rate: 384, v: 1500000, cat: "unique" }, { n: "Jar of eyes", rate: 2000, v: 180000, cat: "tertiary" }, { n: "Sraracha", rate: 3000, v: 0, cat: "tertiary" }, { n: "Giant egg sac(full)", rate: 80, v: 0, cat: "common" }, { n: "Grimy ranarr weed", rate: 12, v: 7000, cat: "common" }, { n: "Clue scroll (elite)", rate: 256, v: 0, cat: "tertiary" }],
+    "The Barrows Brothers": [{ n: "Dharok's set piece", rate: 2448, v: 3000000, cat: "unique" }, { n: "Ahrim's set piece", rate: 2448, v: 1500000, cat: "unique" }, { n: "Karil's set piece", rate: 2448, v: 700000, cat: "unique" }, { n: "Guthan's set piece", rate: 2448, v: 350000, cat: "unique" }, { n: "Torag's set piece", rate: 2448, v: 150000, cat: "unique" }, { n: "Verac's set piece", rate: 2448, v: 200000, cat: "unique" }, { n: "Bolt rack", rate: 1, v: 90, cat: "common" }],
+    "Dagannoth Kings": [{ n: "Berserker ring", rate: 128, v: 2700000, cat: "unique" }, { n: "Archers ring", rate: 128, v: 950000, cat: "unique" }, { n: "Seers ring", rate: 128, v: 55000, cat: "unique" }, { n: "Warrior ring", rate: 128, v: 50000, cat: "unique" }, { n: "Dragon axe", rate: 128, v: 55000, cat: "unique" }, { n: "Seercull", rate: 128, v: 90000, cat: "unique" }, { n: "Pet dagannoth prime", rate: 5000, v: 0, cat: "tertiary" }],
+    "Kalphite Queen": [{ n: "Dragon chainbody", rate: 128, v: 270000, cat: "unique" }, { n: "Dragon 2h sword", rate: 256, v: 110000, cat: "unique" }, { n: "Kq head", rate: 256, v: 90000, cat: "unique" }, { n: "Jar of sand", rate: 2000, v: 100000, cat: "tertiary" }, { n: "Kalphite princess", rate: 3000, v: 0, cat: "tertiary" }, { n: "Clue scroll (elite)", rate: 128, v: 0, cat: "tertiary" }],
+    "King Black Dragon": [{ n: "Draconic visage", rate: 5000, v: 1700000, cat: "unique" }, { n: "Kbd heads", rate: 128, v: 5000, cat: "unique" }, { n: "Prince black dragon", rate: 3000, v: 0, cat: "tertiary" }, { n: "Dragon rune drops", rate: 4, v: 5000, cat: "common" }, { n: "Black dragonhide", rate: 6, v: 7000, cat: "common" }, { n: "Clue scroll (elite)", rate: 1500, v: 0, cat: "tertiary" }],
+    "Zulrah": [{ n: "Tanzanite fang", rate: 512, v: 2700000, cat: "unique" }, { n: "Magic fang", rate: 512, v: 2300000, cat: "unique" }, { n: "Serpentine visage", rate: 512, v: 1100000, cat: "unique" }, { n: "Uncut onyx", rate: 1024, v: 2500000, cat: "unique" }, { n: "Tanzanite mutagen", rate: 13106, v: 4500000, cat: "tertiary" }, { n: "Magma mutagen", rate: 13106, v: 3000000, cat: "tertiary" }, { n: "Jar of swamp", rate: 3000, v: 120000, cat: "tertiary" }, { n: "Pet snakeling", rate: 4000, v: 0, cat: "tertiary" }, { n: "Zulrah's scales", rate: 1, v: 150, cat: "common" }],
+    "Vorkath": [{ n: "Skeletal visage", rate: 5000, v: 1700000, cat: "unique" }, { n: "Dragonbone necklace", rate: 1000, v: 180000, cat: "unique" }, { n: "Vorkath's head", rate: 50, v: 0, cat: "unique" }, { n: "Jar of decay", rate: 3000, v: 60000, cat: "tertiary" }, { n: "Vorki", rate: 3000, v: 0, cat: "tertiary" }, { n: "Superior dragon bones", rate: 1, v: 8500, cat: "common" }, { n: "Blue dragonhide", rate: 3, v: 1500, cat: "common" }],
+    "Cerberus": [{ n: "Primordial crystal", rate: 512, v: 4500000, cat: "unique" }, { n: "Pegasian crystal", rate: 512, v: 2900000, cat: "unique" }, { n: "Eternal crystal", rate: 512, v: 2700000, cat: "unique" }, { n: "Smouldering stone", rate: 512, v: 350000, cat: "unique" }, { n: "Jar of souls", rate: 2000, v: 150000, cat: "tertiary" }, { n: "Hellpuppy", rate: 3000, v: 0, cat: "tertiary" }, { n: "Key master teleport", rate: 64, v: 8000, cat: "common" }],
+    "Abyssal Sire": [{ n: "Abyssal bludgeon piece", rate: 516, v: 9000000, cat: "unique" }, { n: "Abyssal dagger", rate: 256, v: 3600000, cat: "unique" }, { n: "Abyssal whip", rate: 256, v: 2000000, cat: "unique" }, { n: "Unsired", rate: 100, v: 0, cat: "unique" }, { n: "Jar of miasma", rate: 1500, v: 130000, cat: "tertiary" }, { n: "Abyssal orphan", rate: 2560, v: 0, cat: "tertiary" }],
+    "Kraken": [{ n: "Trident of the seas (full)", rate: 512, v: 150000, cat: "unique" }, { n: "Kraken tentacle", rate: 200, v: 500000, cat: "unique" }, { n: "Pet kraken", rate: 3000, v: 0, cat: "tertiary" }, { n: "Sanfew serum(4)", rate: 100, v: 9000, cat: "common" }, { n: "Dragonstone", rate: 60, v: 12000, cat: "common" }],
+    "Thermonuclear Smoke Devil": [{ n: "Smoke battlestaff", rate: 512, v: 130000, cat: "unique" }, { n: "Occult necklace", rate: 350, v: 700000, cat: "unique" }, { n: "Pet smoke devil", rate: 3000, v: 0, cat: "tertiary" }, { n: "Dragon chainbody", rate: 1000, v: 270000, cat: "unique" }, { n: "Mystic robe top (dark)", rate: 40, v: 3500, cat: "common" }],
+    "Grotesque Guardians": [{ n: "Black tourmaline core", rate: 1000, v: 2000000, cat: "unique" }, { n: "Granite gloves", rate: 500, v: 130000, cat: "unique" }, { n: "Granite ring", rate: 500, v: 70000, cat: "unique" }, { n: "Granite hammer", rate: 750, v: 700000, cat: "unique" }, { n: "Jar of stone", rate: 5000, v: 200000, cat: "tertiary" }, { n: "Noon", rate: 3000, v: 0, cat: "tertiary" }],
+    "Alchemical Hydra": [{ n: "Hydra's claw", rate: 1000, v: 90000000, cat: "unique" }, { n: "Dragon hunter lance", rate: 2000, v: 28000000, cat: "unique" }, { n: "Hydra leather", rate: 514, v: 1300000, cat: "unique" }, { n: "Hydra's eye", rate: 180, v: 200000, cat: "unique" }, { n: "Hydra's fang", rate: 180, v: 180000, cat: "unique" }, { n: "Hydra's heart", rate: 180, v: 220000, cat: "unique" }, { n: "Hydra tail", rate: 512, v: 300000, cat: "unique" }, { n: "Jar of chemicals", rate: 2000, v: 150000, cat: "tertiary" }, { n: "Ikkle hydra", rate: 3000, v: 0, cat: "tertiary" }],
+    "Skotizo": [{ n: "Skotos", rate: 65, v: 0, cat: "tertiary" }, { n: "Jar of darkness", rate: 200, v: 250000, cat: "tertiary" }, { n: "Dark claw", rate: 200, v: 0, cat: "unique" }, { n: "Ancient shard", rate: 8, v: 0, cat: "common" }, { n: "Uncut diamond", rate: 8, v: 2700, cat: "common" }, { n: "Clue scroll (hard)", rate: 8, v: 0, cat: "tertiary" }],
+    "Phantom Muspah": [{ n: "Venator shard", rate: 100, v: 30000000, cat: "unique" }, { n: "Ancient icon", rate: 200, v: 5000000, cat: "unique" }, { n: "Charged ice", rate: 25, v: 0, cat: "common" }, { n: "Frozen cache", rate: 25, v: 0, cat: "common" }, { n: "Muphin", rate: 2500, v: 0, cat: "tertiary" }, { n: "Ancient essence", rate: 1, v: 30, cat: "common" }],
+    "General Graardor (Bandos)": [{ n: "Bandos chestplate", rate: 381, v: 18000000, cat: "unique" }, { n: "Bandos tassets", rate: 381, v: 24000000, cat: "unique" }, { n: "Bandos boots", rate: 381, v: 350000, cat: "unique" }, { n: "Bandos hilt", rate: 508, v: 9000000, cat: "unique" }, { n: "Pet general graardor", rate: 5000, v: 0, cat: "tertiary" }, { n: "Godsword shard 1", rate: 762, v: 100000, cat: "common" }, { n: "Super restore(4)", rate: 30, v: 10000, cat: "common" }],
+    "Commander Zilyana (Saradomin)": [{ n: "Armadyl crossbow", rate: 508, v: 25000000, cat: "unique" }, { n: "Saradomin hilt", rate: 508, v: 4500000, cat: "unique" }, { n: "Saradomin sword", rate: 127, v: 230000, cat: "unique" }, { n: "Saradomin's light", rate: 254, v: 250000, cat: "unique" }, { n: "Pet zilyana", rate: 5000, v: 0, cat: "tertiary" }, { n: "Shark", rate: 20, v: 800, cat: "common" }],
+    "Kree'arra (Armadyl)": [{ n: "Armadyl helmet", rate: 381, v: 6000000, cat: "unique" }, { n: "Armadyl chestplate", rate: 381, v: 21000000, cat: "unique" }, { n: "Armadyl chainskirt", rate: 381, v: 23000000, cat: "unique" }, { n: "Armadyl hilt", rate: 508, v: 1300000, cat: "unique" }, { n: "Pet kree'arra", rate: 5000, v: 0, cat: "tertiary" }, { n: "Ranarr seed", rate: 100, v: 35000, cat: "common" }],
+    "K'ril Tsutsaroth (Zamorak)": [{ n: "Staff of the dead", rate: 508, v: 8000000, cat: "unique" }, { n: "Zamorakian spear", rate: 127, v: 160000, cat: "unique" }, { n: "Steam battlestaff", rate: 512, v: 400000, cat: "unique" }, { n: "Zamorak hilt", rate: 508, v: 3500000, cat: "unique" }, { n: "Pet k'ril tsutsaroth", rate: 5000, v: 0, cat: "tertiary" }, { n: "Super restore(4)", rate: 30, v: 10000, cat: "common" }],
+    "Nex": [{ n: "Torva full helm", rate: 516, v: 90000000, cat: "unique" }, { n: "Torva platebody", rate: 516, v: 200000000, cat: "unique" }, { n: "Torva platelegs", rate: 516, v: 180000000, cat: "unique" }, { n: "Nihil horn", rate: 172, v: 60000000, cat: "unique" }, { n: "Zaryte vambraces", rate: 258, v: 50000000, cat: "unique" }, { n: "Ancient hilt", rate: 516, v: 90000000, cat: "unique" }, { n: "Nexling", rate: 500, v: 0, cat: "tertiary" }, { n: "Nihil shard", rate: 1, v: 0, cat: "common" }],
+    "Callisto / Artio": [{ n: "Tyrannical ring", rate: 700, v: 600000, cat: "unique" }, { n: "Voidwaker hilt", rate: 2400, v: 25000000, cat: "unique" }, { n: "Dragon pickaxe", rate: 350, v: 1100000, cat: "unique" }, { n: "Claws of callisto", rate: 1000, v: 60000, cat: "unique" }, { n: "Callisto cub", rate: 2000, v: 0, cat: "tertiary" }, { n: "Dragon 2h sword", rate: 256, v: 110000, cat: "common" }],
+    "Venenatis / Spindel": [{ n: "Treasonous ring", rate: 700, v: 400000, cat: "unique" }, { n: "Voidwaker blade", rate: 2400, v: 25000000, cat: "unique" }, { n: "Dragon pickaxe", rate: 350, v: 1100000, cat: "unique" }, { n: "Fangs of venenatis", rate: 1000, v: 60000, cat: "unique" }, { n: "Venenatis spiderling", rate: 2000, v: 0, cat: "tertiary" }],
+    "Vet'ion / Calvar'ion": [{ n: "Ring of the gods", rate: 700, v: 1100000, cat: "unique" }, { n: "Voidwaker gem", rate: 2400, v: 25000000, cat: "unique" }, { n: "Skull of vet'ion", rate: 1000, v: 60000, cat: "unique" }, { n: "Dragon pickaxe", rate: 350, v: 1100000, cat: "unique" }, { n: "Vet'ion jr.", rate: 2000, v: 0, cat: "tertiary" }],
+    "Chaos Elemental": [{ n: "Dragon pickaxe", rate: 256, v: 1100000, cat: "unique" }, { n: "Dragon 2h sword", rate: 128, v: 110000, cat: "unique" }, { n: "Pet chaos elemental", rate: 300, v: 0, cat: "tertiary" }, { n: "Rune platebody", rate: 30, v: 38000, cat: "common" }],
+    "Scorpia": [{ n: "Odium shard 3", rate: 256, v: 100000, cat: "unique" }, { n: "Malediction shard 3", rate: 256, v: 100000, cat: "unique" }, { n: "Scorpia's offspring", rate: 2016, v: 0, cat: "tertiary" }, { n: "Grimy toadflax", rate: 10, v: 2500, cat: "common" }],
+    "Crazy Archaeologist": [{ n: "Fedora", rate: 128, v: 0, cat: "unique" }, { n: "Odium shard 2", rate: 256, v: 60000, cat: "unique" }, { n: "Malediction shard 2", rate: 256, v: 60000, cat: "unique" }, { n: "Clue scroll (elite)", rate: 128, v: 0, cat: "tertiary" }, { n: "Death rune", rate: 4, v: 180, cat: "common" }],
+    "Vardorvis": [{ n: "Ultor vestige", rate: 539, v: 90000000, cat: "unique" }, { n: "Executioner's axe head", rate: 1088, v: 12000000, cat: "unique" }, { n: "Virtus mask", rate: 1083, v: 25000000, cat: "unique" }, { n: "Blood quartz", rate: 2200, v: 4000000, cat: "unique" }, { n: "Awakener's orb", rate: 50, v: 0, cat: "common" }, { n: "Butch", rate: 3000, v: 0, cat: "tertiary" }],
+    "Duke Sucellus": [{ n: "Magus vestige", rate: 590, v: 90000000, cat: "unique" }, { n: "Eye of the duke", rate: 1040, v: 8000000, cat: "unique" }, { n: "Virtus robe top", rate: 1083, v: 25000000, cat: "unique" }, { n: "Magus icon", rate: 2200, v: 4000000, cat: "unique" }, { n: "Chromium ingot", rate: 27, v: 4000000, cat: "common" }, { n: "Baron", rate: 2500, v: 0, cat: "tertiary" }],
+    "The Leviathan": [{ n: "Venator vestige", rate: 590, v: 90000000, cat: "unique" }, { n: "Leviathan's lure", rate: 1040, v: 9000000, cat: "unique" }, { n: "Virtus robe legs", rate: 1083, v: 25000000, cat: "unique" }, { n: "Smol heredit", rate: 2500, v: 0, cat: "tertiary" }, { n: "Lil'viathan", rate: 2500, v: 0, cat: "tertiary" }],
+    "The Whisperer": [{ n: "Bellator vestige", rate: 590, v: 90000000, cat: "unique" }, { n: "Siren's staff", rate: 1040, v: 8000000, cat: "unique" }, { n: "Virtus mask", rate: 1083, v: 25000000, cat: "unique" }, { n: "Wisp", rate: 2000, v: 0, cat: "tertiary" }],
+    "The Nightmare": [{ n: "Inquisitor's armour piece", rate: 600, v: 15000000, cat: "unique" }, { n: "Nightmare staff", rate: 600, v: 12000000, cat: "unique" }, { n: "Harmonised orb", rate: 1800, v: 20000000, cat: "unique" }, { n: "Volatile orb", rate: 1800, v: 4000000, cat: "unique" }, { n: "Eldritch orb", rate: 1800, v: 6000000, cat: "unique" }, { n: "Inquisitor's mace", rate: 1800, v: 5000000, cat: "unique" }, { n: "Slepey tablet", rate: 25, v: 70000, cat: "common" }, { n: "Little nightmare", rate: 4000, v: 0, cat: "tertiary" }, { n: "Jar of dreams", rate: 2000, v: 200000, cat: "tertiary" }],
+    "Phosani's Nightmare": [{ n: "Inquisitor's armour piece", rate: 480, v: 15000000, cat: "unique" }, { n: "Nightmare staff", rate: 480, v: 12000000, cat: "unique" }, { n: "Harmonised orb", rate: 1440, v: 20000000, cat: "unique" }, { n: "Volatile orb", rate: 1440, v: 4000000, cat: "unique" }, { n: "Eldritch orb", rate: 1440, v: 6000000, cat: "unique" }, { n: "Slepey tablet", rate: 12, v: 70000, cat: "common" }, { n: "Parasitic egg", rate: 200, v: 0, cat: "common" }, { n: "Little nightmare", rate: 1000, v: 0, cat: "tertiary" }],
+    "The Gauntlet": [{ n: "Crystal weapon seed", rate: 120, v: 100000, cat: "unique" }, { n: "Crystal armour seed", rate: 120, v: 90000, cat: "unique" }, { n: "Enhanced crystal weapon seed", rate: 2000, v: 0, cat: "unique" }, { n: "Youngllef", rate: 2000, v: 0, cat: "tertiary" }, { n: "Crystal shard", rate: 1, v: 0, cat: "common" }, { n: "Raw paddlefish", rate: 1, v: 100, cat: "common" }],
+    "Corrupted Gauntlet": [{ n: "Enhanced crystal weapon seed", rate: 400, v: 0, cat: "unique" }, { n: "Crystal weapon seed", rate: 50, v: 100000, cat: "unique" }, { n: "Crystal armour seed", rate: 50, v: 90000, cat: "unique" }, { n: "Gauntlet cape", rate: 1, v: 0, cat: "common" }, { n: "Youngllef", rate: 800, v: 0, cat: "tertiary" }],
+    "Zalcano": [{ n: "Crystal tool seed", rate: 200, v: 1800000, cat: "unique" }, { n: "Crystal armour seed", rate: 150, v: 90000, cat: "unique" }, { n: "Zalcano shard", rate: 750, v: 0, cat: "unique" }, { n: "Uncut onyx", rate: 200, v: 2500000, cat: "unique" }, { n: "Smolcano", rate: 2250, v: 0, cat: "tertiary" }, { n: "Crystal shard", rate: 1, v: 0, cat: "common" }],
+    "TzTok-Jad (Fight Caves)": [{ n: "Fire cape", rate: 1, v: 0, cat: "unique" }, { n: "Tzrek-jad", rate: 200, v: 0, cat: "tertiary" }, { n: "Tokkul", rate: 1, v: 1, cat: "common" }],
+    "TzKal-Zuk (Inferno)": [{ n: "Infernal cape", rate: 1, v: 0, cat: "unique" }, { n: "Jal-nib-rek", rate: 100, v: 0, cat: "tertiary" }, { n: "Tokkul", rate: 1, v: 1, cat: "common" }],
+    "Chambers of Xeric (CoX)": [{ n: "Twisted bow", rate: 691, v: 1700000000, cat: "unique" }, { n: "Kodai insignia", rate: 691, v: 80000000, cat: "unique" }, { n: "Elder maul", rate: 691, v: 90000000, cat: "unique" }, { n: "Dragon claws", rate: 691, v: 70000000, cat: "unique" }, { n: "Dinh's bulwark", rate: 691, v: 18000000, cat: "unique" }, { n: "Ancestral hat", rate: 691, v: 35000000, cat: "unique" }, { n: "Twisted buckler", rate: 691, v: 22000000, cat: "unique" }, { n: "Dragon hunter crossbow", rate: 691, v: 65000000, cat: "unique" }, { n: "Olmlet", rate: 3000, v: 0, cat: "tertiary" }],
+    "Theatre of Blood (ToB)": [{ n: "Scythe of vitur", rate: 86, v: 850000000, cat: "unique" }, { n: "Ghrazi rapier", rate: 86, v: 130000000, cat: "unique" }, { n: "Sanguinesti staff", rate: 86, v: 90000000, cat: "unique" }, { n: "Justiciar faceguard", rate: 86, v: 12000000, cat: "unique" }, { n: "Justiciar chestguard", rate: 86, v: 16000000, cat: "unique" }, { n: "Justiciar legguards", rate: 86, v: 14000000, cat: "unique" }, { n: "Avernic defender hilt", rate: 19, v: 100000000, cat: "unique" }, { n: "Lil' zik", rate: 650, v: 0, cat: "tertiary" }],
   };
   bossWhy = {
     Vorkath: "Elite money + great Ranged XP · AFK-ish rotation, dragonbone/visage uniques",
@@ -619,6 +652,31 @@ export default class Almanac extends React.Component {
     return { logs, nwSorted, netWorth, cash, items, nwStart, gpDay, totalLevel, totalXp, count99, qDone, qTotal, qPct, qRemaining };
   }
 
+  // Parse the OSRS-Wiki recommended combat style(s) out of a boss's style text.
+  // Primary = first style the wiki lists; "Any"/"All 3" → all three viable.
+  bossStyles(b) {
+    const s = (b.style || "").toLowerCase();
+    const found = [];
+    const mi = s.indexOf("melee"); if (mi >= 0) found.push(["Melee", mi]);
+    const ri = s.indexOf("range"); if (ri >= 0) found.push(["Ranged", ri]);
+    const gi = s.indexOf("mag"); if (gi >= 0) found.push(["Magic", gi]);
+    found.sort((a, b) => a[1] - b[1]);
+    let all = found.map((f) => f[0]);
+    if (!all.length) all = ["Melee", "Ranged", "Magic"];
+    return { primary: all[0], all, note: b.style };
+  }
+  // Best gear the player can actually use for a style, one piece per slot, drawn
+  // from GEAR_DATA (highest tier whose stat requirement is met).
+  bestGearForStyle(styleName) {
+    const key = { Melee: "melee", Ranged: "ranged", Magic: "magic" }[styleName] || "melee";
+    const lvlFor = { att: "Attack", str: "Strength", def: "Defence", range: "Ranged", mage: "Magic", pray: "Prayer", hp: "Hitpoints" };
+    const sm = this.skillMap;
+    return (GEAR_DATA[key] || []).map((s) => {
+      const usable = (s.items || []).filter((it) => { const sk = lvlFor[it.gs]; const lv = sk ? (sm[sk] || { l: 1 }).l : 99; return (it.lvl || 1) <= lv; });
+      const best = usable.slice().sort((a, b) => (b.lvl || 0) - (a.lvl || 0))[0];
+      return best ? { slot: s.slot, key, ...best } : null;
+    }).filter(Boolean);
+  }
   // best boss GP/hr respecting per-boss overrides + accessibility gate
   bossEff(b) {
     const o = this.bossOv[b.n] || {};
@@ -1463,12 +1521,15 @@ export default class Almanac extends React.Component {
     const kc = Math.max(killKc, dropKc);
     const drops = this.bossDrops[name] || [];
     const dropCount = {}; this.logs.drop.forEach((dd) => { if (dd.boss === name) dropCount[dd.drop] = (dropCount[dd.drop] || 0) + 1; });
+    const catColor = { unique: C.gold, common: C.muted2, tertiary: C.purple };
+    const catRank = { unique: 0, tertiary: 1, common: 2 };
     let luck = 0;
-    const dropRows = drops.map((dr) => { const exp = kc / dr.rate; const got = dropCount[dr.n] || 0; luck += got * dr.v; const v = this.luckVerdict(kc, dr.rate, got); return { name: dr.n, rate: "1/" + this.fmt(dr.rate), exp: exp >= 1 ? exp.toFixed(2) : exp > 0 ? exp.toPrecision(2) : "0", got, verdict: v.t, vc: v.c, value: dr.v > 0 ? this.short(dr.v) : "pet" }; });
-    // gear recs from GEAR_DATA
-    const keys = name.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length >= 4);
-    const recs = []; const seen = {};
-    ["melee", "ranged", "magic"].forEach((st) => (GEAR_DATA[st] || []).forEach((s) => s.items.forEach((it) => { const hay = ((it.bestFor || "") + " " + (it.get || "")).toLowerCase(); if (keys.length && keys.some((k) => hay.indexOf(k) >= 0) && !seen[it.n]) { seen[it.n] = 1; const price = this.gearPrices[it.n] != null ? this.gearPrices[it.n] : it.gp; recs.push({ style: st, slot: s.slot, n: it.n, req: it.req, price: price > 0 ? this.short(price) : "obtain", c: st === "melee" ? C.red : st === "ranged" ? C.green : C.purple }); } })));
+    const dropRows = drops.slice().sort((a, b) => (catRank[a.cat] ?? 3) - (catRank[b.cat] ?? 3) || a.rate - b.rate).map((dr) => { const exp = kc / dr.rate; const got = dropCount[dr.n] || 0; luck += got * dr.v; const v = this.luckVerdict(kc, dr.rate, got); return { name: dr.n, cat: dr.cat || "common", rate: dr.rate <= 1 ? "common" : "1/" + this.fmt(dr.rate), exp: exp >= 1 ? exp.toFixed(2) : exp > 0 ? exp.toPrecision(2) : "0", got, verdict: v.t, vc: v.c, value: dr.v > 0 ? this.short(dr.v) : dr.cat === "tertiary" ? "—" : "0" }; });
+    // Wiki-aligned recommended style + best gear the player can use for it.
+    const styles = this.bossStyles(b);
+    const gearStyle = styles.all.includes(this.state.bossGearStyle) ? this.state.bossGearStyle : styles.primary;
+    const styleColor = { Melee: C.red, Ranged: C.green, Magic: C.purple };
+    const recs = this.bestGearForStyle(gearStyle).map((it) => { const price = this.gearPrices[it.n] != null ? this.gearPrices[it.n] : it.gp; return { slot: it.slot, n: it.n, req: it.req, price: price > 0 ? this.short(price) : "obtain", c: styleColor[gearStyle] }; });
     return (
       <div>
         <Card style={{ marginBottom: 14 }}>
@@ -1480,10 +1541,15 @@ export default class Almanac extends React.Component {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           <Card>
             <div style={cinzel({ fontWeight: 700, fontSize: 22 })}>{b.n}</div>
-            <div style={mono({ fontSize: 11, color: C.muted, marginTop: 2 })}>{b.tier} · {b.style}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+              <span style={mono({ fontSize: 11, color: C.muted })}>{b.tier}</span>
+              <Tag color={styleColor[styles.primary]} bg="rgba(44,32,19,.06)">Best: {styles.primary}</Tag>
+              {styles.all.length > 1 && <span style={mono({ fontSize: 10, color: C.muted })}>· also {styles.all.slice(1).join(", ")}</span>}
+            </div>
+            <div style={serif({ fontSize: 13.5, fontStyle: "italic", color: C.muted, marginTop: 3 })}>Wiki: {styles.note}</div>
             <div style={serif({ fontSize: 14, color: C.ink, marginTop: 10 })}>{this.bossWhy[b.n] || (e.estGp > 0 ? this.short(e.estGp) + "/h · " + b.unique : b.unique)}</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginTop: 14 }}>
-              {[["GP/hr", e.estGp > 0 ? this.short(e.estGp) : "—"], ["Kills/hr", e.kills > 0 ? e.kills : "—"], ["Your KC", this.fmt(kc)], ["Combat req", "Cb " + b.minCb], ["Slayer", b.slay > 0 ? b.slay : "none"], ["Loot value", this.short(luck)]].map(([l, v], i) => (
+              {[["GP/hr", e.estGp > 0 ? this.short(e.estGp) : "—"], ["Kills/hr", e.kills > 0 ? e.kills : "—"], ["Your KC", this.fmt(kc)], ["Combat req", "Cb " + b.minCb], ["Slayer", b.slay > 0 ? b.slay : "none"], ["Loot logged", this.short(luck)]].map(([l, v], i) => (
                 <div key={i}><Kicker>{l}</Kicker><div style={cinzel({ fontWeight: 700, fontSize: 16, marginTop: 4 })}>{v}</div></div>
               ))}
             </div>
@@ -1501,22 +1567,37 @@ export default class Almanac extends React.Component {
                 {this.field("drop_kc", "At KC", { w: 90 })}<Btn tone="gold" onClick={this.addDrop}>Save</Btn>
               </div>
             )}
-            <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 10 }}>
-              <thead><tr>{["Unique", "Rate", "Expected", "Got", "Value", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i > 0 && i < 5 ? "right" : "left", padding: "6px 7px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
-              <tbody>{dropRows.map((r, k) => (
-                <tr key={k}><td style={{ ...serif({ fontSize: 13 }), padding: "6px 7px" }}>{r.name}</td><td style={{ ...mono({ fontSize: 11 }), padding: "6px 7px", textAlign: "right" }}>{r.rate}</td><td style={{ ...mono({ fontSize: 11 }), padding: "6px 7px", textAlign: "right" }}>{r.exp}</td><td style={{ ...mono({ fontSize: 12, color: r.vc }), padding: "6px 7px", textAlign: "right" }}>{r.got}</td><td style={{ ...mono({ fontSize: 11 }), padding: "6px 7px", textAlign: "right" }}>{r.value}</td><td style={{ padding: "6px 7px" }}><Tag color={r.vc} bg="transparent">{r.verdict}</Tag></td></tr>
-              ))}{drops.length === 0 && <tr><td colSpan={6} style={serif({ fontStyle: "italic", color: C.muted, padding: 14 })}>No drop table tracked for this boss.</td></tr>}</tbody>
-            </table>
+            <div className="sheetwrap" style={{ marginTop: 10 }}>
+              <table className="sheet">
+                <thead><tr>{["Drop", "Type", "Rate", "Exp.", "Got", "Value", ""].map((h, i) => <th key={i} className={i > 2 && i < 6 ? "num" : ""}>{h}</th>)}</tr></thead>
+                <tbody>{dropRows.map((r, k) => (
+                  <tr key={k}>
+                    <td style={serif({ fontSize: 13 })}>{r.name}</td>
+                    <td><Tag color={catColor[r.cat]} bg="transparent">{r.cat}</Tag></td>
+                    <td className="num" style={mono({ fontSize: 11 })}>{r.rate}</td>
+                    <td className="num" style={mono({ fontSize: 11 })}>{r.exp}</td>
+                    <td className="num" style={mono({ fontSize: 12, color: r.vc })}>{r.got}</td>
+                    <td className="num" style={mono({ fontSize: 11 })}>{r.value}</td>
+                    <td><Tag color={r.vc} bg="transparent">{r.verdict}</Tag></td>
+                  </tr>
+                ))}{drops.length === 0 && <tr><td colSpan={7} style={serif({ fontStyle: "italic", color: C.muted, padding: 14 })}>No drop table tracked for this boss.</td></tr>}</tbody>
+              </table>
+            </div>
           </Card>
         </div>
         {recs.length > 0 && (
           <Card style={{ marginTop: 14 }}>
-            <Kicker color={C.goldDeep}>Suggested gear for {b.n}</Kicker>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 10, marginTop: 10 }}>
-              {recs.slice(0, 8).map((r, i) => (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+              <Kicker color={C.goldDeep}>Best {gearStyle.toLowerCase()} gear you can use for {b.n}</Kicker>
+              <Seg options={styles.all.map((s) => ({ key: s, label: s.toUpperCase() }))} active={gearStyle} onPick={(v) => this.setState({ bossGearStyle: v })} size={9} />
+            </div>
+            <div style={serif({ fontSize: 12, fontStyle: "italic", color: C.muted, marginTop: 6 })}>Recommended style is <strong style={{ color: styleColor[styles.primary] }}>{styles.primary}</strong> per the OSRS Wiki. Pieces below are the highest tier your stats currently allow.</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(210px,1fr))", gap: 10, marginTop: 12 }}>
+              {recs.map((r, i) => (
                 <div key={i} style={{ background: C.cardLight, padding: "9px 11px", borderRadius: 6, borderLeft: "3px solid " + r.c }}>
-                  <div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{r.n}</div>
-                  <div style={mono({ fontSize: 9.5, color: C.muted })}>{r.slot} · {r.req}</div>
+                  <div style={mono({ fontSize: 8.5, letterSpacing: ".12em", color: C.muted, textTransform: "uppercase" })}>{r.slot}</div>
+                  <div style={cinzel({ fontWeight: 600, fontSize: 13, marginTop: 2 })}>{r.n}</div>
+                  <div style={mono({ fontSize: 9.5, color: C.muted })}>{r.req}</div>
                   <div style={mono({ fontSize: 11, color: r.c, marginTop: 3 })}>{r.price}</div>
                 </div>
               ))}
