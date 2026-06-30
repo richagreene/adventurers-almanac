@@ -131,6 +131,78 @@ export function StatCards({ items, cols }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Charts — lightweight themed SVG, axis-labelled, built for insight not flash.
+// ---------------------------------------------------------------------------
+
+// Line/area chart over time. points: [{ v:number, label:string }].
+export function LineChart({ points, theme, height = 220, yFmt = (v) => v, valueLabel }) {
+  const t = theme || THEME.dashboard;
+  const pts = (points || []).filter((p) => p && isFinite(p.v));
+  const n = pts.length;
+  if (n < 2) return <div style={serif({ fontStyle: "italic", color: C.muted, padding: 18 })}>Not enough data yet — log a couple of points and the curve draws here.</div>;
+  const vals = pts.map((p) => p.v);
+  const W = 760, H = height, padL = 66, padR = 70, padT = 24, padB = 30, iw = W - padL - padR, ih = H - padT - padB;
+  let min = Math.min(...vals), max = Math.max(...vals);
+  const head = (max - min) * 0.1 || Math.abs(max) * 0.1 || 1;
+  const lo = min - head, hi = max + head;
+  const X = (i) => (n <= 1 ? padL + iw / 2 : padL + (i * iw) / (n - 1));
+  const Y = (v) => padT + (1 - (v - lo) / Math.max(1e-9, hi - lo)) * ih;
+  const line = vals.map((v, i) => (i === 0 ? "M" : "L") + X(i).toFixed(1) + "," + Y(v).toFixed(1)).join(" ");
+  const area = "M" + X(0).toFixed(1) + "," + (padT + ih) + " " + vals.map((v, i) => "L" + X(i).toFixed(1) + "," + Y(v).toFixed(1)).join(" ") + " L" + X(n - 1).toFixed(1) + "," + (padT + ih) + " Z";
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((tk) => { const val = lo + tk * (hi - lo); return { val, y: padT + (1 - tk) * ih }; });
+  const k = Math.min(6, n);
+  const xIdx = [...new Set(Array.from({ length: k }, (_, j) => Math.round((j * (n - 1)) / (k - 1))))];
+  const lastY = Math.max(padT + 8, Math.min(padT + ih - 4, Y(vals[n - 1])));
+  const gid = "lc" + Math.round(X(1));
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: height + 12 }}>
+      <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={t.accent} stopOpacity="0.30" /><stop offset="100%" stopColor={t.accent} stopOpacity="0" /></linearGradient></defs>
+      {yTicks.map((tk, i) => (
+        <g key={i}>
+          <line x1={padL} y1={tk.y} x2={W - padR} y2={tk.y} stroke="rgba(44,32,19,.13)" strokeWidth="1" strokeDasharray={i === 0 ? "" : "3 3"} />
+          <text x={padL - 9} y={tk.y + 3.5} textAnchor="end" style={mono({ fontSize: 10, fill: C.muted })}>{yFmt(tk.val)}</text>
+        </g>
+      ))}
+      {xIdx.map((idx, i) => (<text key={i} x={X(idx)} y={H - 10} textAnchor="middle" style={mono({ fontSize: 10, fill: C.muted })}>{pts[idx].label}</text>))}
+      <path d={area} fill={`url(#${gid})`} />
+      <path d={line} fill="none" stroke={t.accent} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+      {vals.map((v, i) => (<circle key={i} cx={X(i)} cy={Y(v)} r={i === n - 1 ? 4.5 : 2.3} fill={i === n - 1 ? t.lite : t.accent} stroke="#f2e9d2" strokeWidth={i === n - 1 ? 2 : 1} />))}
+      <text x={X(n - 1) + 9} y={lastY + 4} textAnchor="start" style={cinzel({ fontSize: 13, fontWeight: 700, fill: C.ink })}>{valueLabel != null ? valueLabel : yFmt(vals[n - 1])}</text>
+    </svg>
+  );
+}
+
+// Horizontal bar chart — great for ranked item lists (names fit). data: [{ label, v, color? }].
+export function BarChartH({ data, theme, valueFmt = (v) => v, barH = 22, gap = 8 }) {
+  const t = theme || THEME.dashboard;
+  const rows = (data || []).filter((d) => d && isFinite(d.v));
+  if (!rows.length) return <div style={serif({ fontStyle: "italic", color: C.muted, padding: 16 })}>No data to chart yet.</div>;
+  const maxAbs = Math.max(1, ...rows.map((r) => Math.abs(r.v)));
+  const labelW = 150, valW = 78, H = rows.length * (barH + gap);
+  const hasNeg = rows.some((r) => r.v < 0);
+  const zeroX = hasNeg ? labelW + (760 - labelW - valW) / 2 : labelW;
+  const fullW = 760 - labelW - valW;
+  return (
+    <svg viewBox={`0 0 760 ${H}`} style={{ width: "100%", height: H }}>
+      {rows.map((r, i) => {
+        const y = i * (barH + gap);
+        const col = r.color || (r.v >= 0 ? t.accent : C.red);
+        const w = (Math.abs(r.v) / maxAbs) * (hasNeg ? fullW / 2 : fullW);
+        const x = r.v >= 0 ? zeroX : zeroX - w;
+        return (
+          <g key={i}>
+            <text x={labelW - 10} y={y + barH * 0.72} textAnchor="end" style={{ ...serif({ fontSize: 13, fill: C.ink }) }}>{r.label}</text>
+            <rect x={labelW} y={y} width={hasNeg ? fullW : fullW} height={barH} fill="rgba(44,32,19,.05)" rx="3" />
+            <rect x={x} y={y} width={Math.max(1, w)} height={barH} fill={col} rx="3" opacity="0.88" />
+            <text x={760 - valW + 8} y={y + barH * 0.72} textAnchor="start" style={mono({ fontSize: 11.5, fill: col, fontWeight: 600 })}>{valueFmt(r.v)}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 // Progress bar.
 export function Bar({ pct, c1 = C.gold, c2 = C.goldBright, h = 8 }) {
   const w = typeof pct === "string" ? pct : Math.max(0, Math.min(100, pct)) + "%";

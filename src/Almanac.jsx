@@ -13,7 +13,7 @@ import { LEDGER_DATA } from "./data/ledgerData.js";
 import { QUEST_ORDER } from "./data/questOrder.js";
 import { GEAR_DATA } from "./data/gearData.js";
 import { fetchPlayer, fetchPrices, priceById, combatLevel, fetchItemNames, natureRunePrice } from "./lib/api.js";
-import { C, mono, serif, cinzel, Card, Kicker, SectionTitle, StatCards, Bar, Seg, Tag, Btn, DataTable, Hero, themeFor } from "./lib/ui.jsx";
+import { C, mono, serif, cinzel, Card, Kicker, SectionTitle, StatCards, Bar, Seg, Tag, Btn, DataTable, Hero, themeFor, LineChart, BarChartH } from "./lib/ui.jsx";
 
 const D = LEDGER_DATA;
 
@@ -49,7 +49,7 @@ export default class Almanac extends React.Component {
     flipView: "scanner", fillResult: null, fillMsg: "", bossView: "compendium", bossFocus: "", dropFormBoss: "",
     slayView: "planner", slayMaster: "Duradel", gearStyle: "melee",
     questMethod: "optimal", qsortCol: "", qsortDir: 1, qFilterOpen: "", qfSeries: [], qfType: [], qfStatus: [], qName: "", qGate: "",
-    tSort: {}, tFilt: {}, tOpen: "", flipPrefill: null, objType: "bank", objBoss: "", _v: 0,
+    tSort: {}, tFilt: {}, tOpen: "", flipPrefill: null, objType: "bank", objBoss: "", flipShowWatch: false, _v: 0,
   };
 
   // ---- static reference tables (ported from the workbook / design) ----
@@ -65,12 +65,14 @@ export default class Almanac extends React.Component {
     { tier: "Snapdragon", lvl: 62, unlocked: true, seed: 53508, herb: 8393, net: 80260 },
     { tier: "Torstol", lvl: 85, unlocked: false, seed: 15900, herb: 3155, net: 143793 },
   ];
+  // growHrs = real grow time; caps how many runs/day are actually possible
+  // (24h ÷ growHrs). Herbs ~80 min, fruit trees 16h, trees ~hours, hardwoods slow.
   farmRunDefs = [
-    { name: "Herb run", crop: "Snapdragon", type: "Herb", req: 62, xpRun: 6981, gpRun: 80260, timeMin: 6, patches: 6, teles: "Ectophial · Explorer ring · Ardy cloak · Catherby · Hosidius", seeds: "6× Snapdragon seed + compost" },
-    { name: "Fruit tree run", crop: "Palm", type: "Fruit", req: 68, xpRun: 51303, gpRun: -32000, timeMin: 13, patches: 6, teles: "Gnome Stronghold · Tree Gnome Village · Brimhaven · Catherby · Lletya · Farming Guild", seeds: "6× Palm sapling" },
-    { name: "Tree run", crop: "Yew", type: "Tree", req: 60, xpRun: 35755, gpRun: -14000, timeMin: 14, patches: 5, teles: "Lumbridge · Varrock · Falador · Gnome Stronghold · Farming Guild", seeds: "5× Yew sapling" },
-    { name: "Hardwood run", crop: "Mahogany", type: "Hardwood", req: 55, xpRun: 31500, gpRun: -9000, timeMin: 6, patches: 2, teles: "Fossil Island · Mushroom forest", seeds: "2× Mahogany sapling" },
-    { name: "Tree run", crop: "Magic", type: "Tree", req: 75, xpRun: 69569, gpRun: -58000, timeMin: 14, patches: 5, teles: "unlocks at Farming 75", seeds: "5× Magic sapling" },
+    { name: "Herb run", crop: "Snapdragon", type: "Herb", req: 62, xpRun: 6981, gpRun: 80260, timeMin: 6, growHrs: 1.33, patches: 6, teles: "Ectophial · Explorer ring · Ardy cloak · Catherby · Hosidius", seeds: "6× Snapdragon seed + compost" },
+    { name: "Fruit tree run", crop: "Palm", type: "Fruit", req: 68, xpRun: 51303, gpRun: -32000, timeMin: 13, growHrs: 16, patches: 6, teles: "Gnome Stronghold · Tree Gnome Village · Brimhaven · Catherby · Lletya · Farming Guild", seeds: "6× Palm sapling" },
+    { name: "Tree run", crop: "Yew", type: "Tree", req: 60, xpRun: 35755, gpRun: -14000, timeMin: 14, growHrs: 8, patches: 5, teles: "Lumbridge · Varrock · Falador · Gnome Stronghold · Farming Guild", seeds: "5× Yew sapling" },
+    { name: "Hardwood run", crop: "Mahogany", type: "Hardwood", req: 55, xpRun: 31500, gpRun: -9000, timeMin: 6, growHrs: 24, patches: 2, teles: "Fossil Island · Mushroom forest", seeds: "2× Mahogany sapling" },
+    { name: "Tree run", crop: "Magic", type: "Tree", req: 75, xpRun: 69569, gpRun: -58000, timeMin: 14, growHrs: 8, patches: 5, teles: "Lumbridge · Varrock · Falador · Gnome Stronghold · Farming Guild", seeds: "5× Magic sapling" },
   ];
   farmMilestones = [
     { lvl: 72, label: "Snapdragons · Mahogany hardwoods", tag: "CURRENT" },
@@ -156,7 +158,7 @@ export default class Almanac extends React.Component {
     Sarachnis: "Early-game GP + cudgel · no quest reqs, great starter boss",
     "Giant Mole": "Easy clue/pet hunting · trivial mechanics, Falador access only",
   };
-  flipDefaults = { minMargin: 5, maxMargin: 20, minProfit4h: 150000, minVolume: 10000, minBuy: 250, maxAge: 15, capital: 14828291 };
+  flipDefaults = { minMargin: 5, maxMargin: 20, minProfit4h: 150000, minVolume: 10000, minBuy: 250, maxAge: 15, capital: 14828291, watchTol: 15 };
   scanSeed = [
     { name: "Dagannoth bones", buy: 2400, sell: 2520, vol: 42000, limit: 7500, age: 6 },
     { name: "Cannonball", buy: 185, sell: 196, vol: 9000000, limit: 9600, age: 3 },
@@ -387,6 +389,7 @@ export default class Almanac extends React.Component {
   addWatch = () => { const item = this.val("watch_item"); if (!item) return; this.logs.watch.unshift({ item, target: this.num("watch_target"), note: this.val("watch_note") }); this.saveLogs(); this.setState({ openForm: null }); };
   addAlch = () => { const casts = this.num("alch_casts"); if (casts <= 0) return; const item = this.val("alch_item") || "High alch", alchVal = this.num("alch_alch"), buy = this.num("alch_buy"); this.logs.alch.unshift({ date: this.today(), item, casts, alchVal, buy, net: (alchVal - buy - this.alchCost()) * casts, xp: casts * 65 }); this.saveLogs(); this.setState({ openForm: null }); };
   addHerb = () => { const tier = this.val("herb_tier") || "Snapdragon", runs = this.num("herb_runs") || 1, netOv = this.num("herb_net"); const def = this.farmDefs.find((f) => f.tier === tier); this.logs.herb.unshift({ date: this.today(), tier, runs, net: netOv > 0 ? netOv : def ? def.net * runs : 0 }); this.saveLogs(); this.setState({ openForm: null }); };
+  editHerb = (i, key, raw) => { const h = this.logs.herb[i]; if (!h) return; const v = Math.round(this.parseNum(raw)); if (key === "runs") h.runs = Math.max(1, v); else if (key === "net") h.net = v; else if (key === "tier") h.tier = raw; this.saveLogs(); this.bump(); };
   addBoss = () => { const boss = this.val("boss_name") || D.bosses[0].n, kills = this.num("boss_kills") || 1; this.logs.boss.unshift({ date: this.today(), boss, kills, note: this.val("boss_note") }); this.saveLogs(); this.setState({ openForm: null }); };
   addSlay = () => { const task = this.val("slay_task") || D.slayer[0].task; this.logs.slayerLog.unshift({ date: this.today(), task, xp: this.num("slay_xp"), gp: this.num("slay_gp") }); this.saveLogs(); this.setState({ openForm: null }); };
   addDrop = () => { const boss = this.val("drop_boss") || this.state.bossFocus, drop = this.val("drop_name"); if (!boss || !drop) return; this.logs.drop.unshift({ date: this.today(), boss, drop, kc: this.num("drop_kc") }); this.saveLogs(); this.setState({ openForm: null }); };
@@ -905,21 +908,18 @@ export default class Almanac extends React.Component {
     const d = this.derive();
     const TH = themeFor("networth");
     const vals = d.nwSorted.map((s) => s.cash + s.items);
-    const peak = Math.max(1, ...vals), min = vals.length ? Math.min(...vals) : 0;
     const n = vals.length;
-    const W = 760, H = 232, padL = 62, padR = 18, padT = 18, padB = 34, iw = W - padL - padR, ih = H - padT - padB;
-    const X = (i) => (n <= 1 ? padL + iw / 2 : padL + (i * iw) / (n - 1));
-    const Y = (v) => padT + (1 - (v - min) / Math.max(1, peak - min)) * ih;
-    const line = vals.map((v, i) => (i === 0 ? "M" : "L") + X(i).toFixed(1) + "," + Y(v).toFixed(1)).join(" ");
-    const area = n >= 2 ? "M" + X(0).toFixed(1) + "," + (padT + ih) + " " + vals.map((v, i) => "L" + X(i).toFixed(1) + "," + Y(v).toFixed(1)).join(" ") + " L" + X(n - 1).toFixed(1) + "," + (padT + ih) + " Z" : "";
-    const yTicks = [0, 0.25, 0.5, 0.75, 1].map((tk) => { const val = min + tk * (peak - min); return { val, y: Y(val) }; });
-    const xTickIdx = n <= 1 ? [0] : [...new Set(Array.from({ length: Math.min(6, n) }, (_, j) => Math.round((j * (n - 1)) / (Math.min(6, n) - 1))))];
+    const points = d.nwSorted.map((s) => ({ v: s.cash + s.items, label: this.dShort(s.date) }));
+    const deltaBars = d.nwSorted.map((s, i) => ({ label: this.dShort(s.date), v: i > 0 ? (s.cash + s.items) - vals[i - 1] : 0 })).filter((_, i) => i > 0).slice(-8);
     const rows = d.nwSorted.map((s, i) => { const v = s.cash + s.items; const prev = i > 0 ? vals[i - 1] : v; return { i: this.logs.nw.indexOf(s), date: this.dShort(s.date), total: this.short(v), cash: this.fmt(s.cash), items: this.fmt(s.items), note: s.note || "", delta: i > 0 ? this.signed(v - prev) : "—", dc: v - prev >= 0 ? C.green : C.red }; }).reverse();
     const lastDelta = vals.length > 1 ? vals[vals.length - 1] - vals[vals.length - 2] : 0;
     return (
       <div>
         <SectionTitle kicker="The Treasury" title="Net Worth" accent={TH.accent}
           right={<Btn tone="gold" onClick={() => this.toggleForm("nw")}>+ Log snapshot</Btn>} />
+        <Hero theme={TH} kicker="Treasury ledger" title={this.short(d.netWorth)}
+          blurb={n > 1 ? `${this.signed(d.netWorth - d.nwStart)} since your first snapshot · ${this.signed(lastDelta)} on the last log` : "Log snapshots to chart your wealth over time"}
+          statLabel="Avg / day" statValue={this.short(d.gpDay)} statSub={n > 1 ? n + " snapshots" : "—"} />
         <StatCards cols={4} items={[
           { label: "Net Worth", value: this.short(d.netWorth) },
           { label: "Δ vs last log", value: this.signed(lastDelta), color: lastDelta >= 0 ? C.green : C.red },
@@ -938,40 +938,31 @@ export default class Almanac extends React.Component {
             </div>
           </Card>
         )}
-        <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
-          <Kicker color={TH.accent}>Wealth curve</Kicker>
-          {n >= 2 ? (
-            <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 248, marginTop: 6 }}>
-              <defs><linearGradient id="nwg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={TH.accent} stopOpacity="0.32" /><stop offset="100%" stopColor={TH.accent} stopOpacity="0" /></linearGradient></defs>
-              {yTicks.map((tk, i) => (
-                <g key={i}>
-                  <line x1={padL} y1={tk.y} x2={W - padR} y2={tk.y} stroke="rgba(44,32,19,.13)" strokeWidth="1" strokeDasharray={i === 0 ? "" : "3 3"} />
-                  <text x={padL - 9} y={tk.y + 3.5} textAnchor="end" style={mono({ fontSize: 10, fill: C.muted })}>{this.short(tk.val)}</text>
-                </g>
-              ))}
-              {xTickIdx.map((idx, i) => (
-                <text key={i} x={X(idx)} y={H - 11} textAnchor="middle" style={mono({ fontSize: 10, fill: C.muted })}>{this.dShort(d.nwSorted[idx].date)}</text>
-              ))}
-              <path d={area} fill="url(#nwg)" />
-              <path d={line} fill="none" stroke={TH.accent} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-              {vals.map((v, i) => (<circle key={i} cx={X(i)} cy={Y(v)} r={i === n - 1 ? 4.5 : 2.4} fill={i === n - 1 ? C.goldBright : TH.accent} stroke="#f2e9d2" strokeWidth={i === n - 1 ? 2 : 1} />))}
-              <text x={X(n - 1) - 6} y={Y(vals[n - 1]) - 10} textAnchor="end" style={cinzel({ fontSize: 13, fontWeight: 700, fill: C.ink })}>{this.short(vals[n - 1])}</text>
-            </svg>
-          ) : <div style={serif({ fontStyle: "italic", color: C.muted, padding: 20 })}>Log at least two snapshots and your wealth curve draws here.</div>}
-        </Card>
+        <div style={{ display: "grid", gridTemplateColumns: n >= 2 ? "1.7fr 1fr" : "1fr", gap: 16, marginBottom: 14 }}>
+          <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
+            <Kicker color={TH.accent}>Wealth curve</Kicker>
+            <div style={{ marginTop: 6 }}><LineChart points={points} theme={TH} yFmt={(v) => this.short(v)} valueLabel={this.short(d.netWorth)} /></div>
+          </Card>
+          {n >= 2 && (
+            <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
+              <Kicker color={TH.accent}>Change per snapshot</Kicker>
+              <div style={{ marginTop: 10 }}><BarChartH data={deltaBars} theme={TH} valueFmt={(v) => this.signed(v)} barH={18} /></div>
+            </Card>
+          )}
+        </div>
         <Card>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead><tr>{["Date", "Total", "Cash", "Items", "Δ", "Note", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i > 0 && i < 5 ? "right" : "left", padding: "7px 9px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
+          <div className="sheetwrap">
+            <table className="sheet">
+              <thead><tr>{["Date", "Total", "Cash", "Items", "Δ", "Note", ""].map((h, i) => <th key={i} className={i > 0 && i < 5 ? "num" : ""}>{h}</th>)}</tr></thead>
               <tbody>{rows.map((r, k) => (
                 <tr key={k}>
-                  <td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px" }}>{r.date}</td>
-                  <td style={{ ...cinzel({ fontWeight: 600 }), padding: "7px 9px", textAlign: "right" }}>{r.total}</td>
-                  <td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{r.cash}</td>
-                  <td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{r.items}</td>
-                  <td style={{ ...mono({ fontSize: 12, color: r.dc }), padding: "7px 9px", textAlign: "right" }}>{r.delta}</td>
-                  <td style={{ ...serif({ fontSize: 13, fontStyle: r.note ? "italic" : "normal", color: C.muted }), padding: "7px 9px" }}>{r.note || "—"}</td>
-                  <td style={{ padding: "7px 9px" }}><span onClick={() => this.delLog("nw", r.i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td>
+                  <td style={mono({ fontSize: 12 })}>{r.date}</td>
+                  <td className="num" style={cinzel({ fontWeight: 600 })}>{r.total}</td>
+                  <td className="num" style={mono({ fontSize: 12 })}>{r.cash}</td>
+                  <td className="num" style={mono({ fontSize: 12 })}>{r.items}</td>
+                  <td className="num" style={mono({ fontSize: 12, color: r.dc })}>{r.delta}</td>
+                  <td style={serif({ fontSize: 13, fontStyle: r.note ? "italic" : "normal", color: C.muted })}>{r.note || "—"}</td>
+                  <td><span onClick={() => this.delLog("nw", r.i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td>
                 </tr>
               ))}</tbody>
             </table>
@@ -994,9 +985,13 @@ export default class Almanac extends React.Component {
       { label: "Win rate", value: fc.length ? Math.round((wins / fc.length) * 100) + "%" : "—" },
       { label: "Capital / flip", value: this.short(capPer), color: C.gold },
     ];
+    const FTH = themeFor("flipping");
     return (
       <div>
-        <SectionTitle kicker="Grand Exchange" title="Flipping Desk" accent={themeFor("flipping").accent} />
+        <SectionTitle kicker="Grand Exchange" title="Flipping Desk" accent={FTH.accent} />
+        <Hero theme={FTH} icon="⚖" kicker="Grand Exchange ledger" title={this.signed(flipNetN) + " realized"}
+          blurb={fc.length ? `${fc.length} flips · ${Math.round((wins / fc.length) * 100)}% win rate · ${this.short(capPer)} working each of 8 GE slots` : "Log flips and tune the scanner — your realized P&L tracks here"}
+          statLabel="Capital / flip" statValue={this.short(capPer)} statSub="per GE slot" />
         <StatCards cols={4} items={stats} />
         <div style={{ marginBottom: 16 }}>
           <Seg options={[{ key: "scanner", label: "SCANNER" }, { key: "ledger", label: "LEDGER" }, { key: "perf", label: "PERFORMANCE" }, { key: "calc", label: "FILL CALC" }]} active={view} onPick={(v) => this.setState({ flipView: v, openForm: null })} />
@@ -1009,6 +1004,7 @@ export default class Almanac extends React.Component {
     );
   }
   renderFlipScanner(cfg, capPer) {
+    const TH = themeFor("flipping");
     const controls = [
       { key: "capital", label: "Flip capital", suffix: "gp", hint: "split across 8 GE slots" },
       { key: "minMargin", label: "Min margin %", suffix: "%", hint: "floor after the 2% tax" },
@@ -1017,15 +1013,27 @@ export default class Almanac extends React.Component {
       { key: "minVolume", label: "Min daily volume", suffix: "", hint: "liquidity gate" },
       { key: "minBuy", label: "Min buy price", suffix: "gp", hint: "cuts penny junk" },
       { key: "maxAge", label: "Max price age", suffix: "min", hint: "freshness gate" },
+      { key: "watchTol", label: "Watch tolerance", suffix: "%", hint: "how close a near-miss counts as Watch" },
     ];
-    const rows = this.logs.scan.map((it, i) => {
+    const tol = Math.max(0, (cfg.watchTol != null ? cfg.watchTol : 15)) / 100;
+    const allRows = this.logs.scan.map((it, i) => {
       const tax = this.flipTax(it.sell, 1); const margin = it.buy > 0 ? ((it.sell - tax - it.buy) / it.buy) * 100 : 0;
       const qty = Math.min(it.limit || 1, Math.floor(capPer / Math.max(1, it.buy)));
       const profit4h = qty * (it.sell - tax - it.buy);
       const cMargin = margin >= cfg.minMargin && margin <= cfg.maxMargin, cVol = (it.vol || 0) >= cfg.minVolume, cAge = (it.age || 0) <= cfg.maxAge, cProfit = profit4h >= cfg.minProfit4h, cBuy = it.buy >= cfg.minBuy;
-      const passN = [cMargin, cVol, cAge, cProfit, cBuy].filter(Boolean).length, all = passN === 5;
-      return { i, name: it.name, buy: this.fmt(it.buy), sell: this.fmt(it.sell), margin: margin.toFixed(1) + "%", marginColor: cMargin ? C.green : C.red, vol: this.short(it.vol || 0), age: (it.age || 0) + "m", profit4h: this.short(profit4h), profit4hN: profit4h, verdict: all ? "FLIP NOW" : passN >= 3 ? "WATCH" : "SKIP", vColor: all ? C.green : passN >= 3 ? "#9a7530" : C.red, vBg: all ? "rgba(92,110,53,.18)" : passN >= 3 ? "rgba(201,162,74,.16)" : "rgba(150,58,44,.1)", rowBg: all ? "rgba(92,110,53,.07)" : "transparent" };
+      // "near" = within the watch tolerance of clearing a gate it currently fails.
+      const nMargin = margin >= cfg.minMargin * (1 - tol) && margin <= cfg.maxMargin * (1 + tol);
+      const nVol = (it.vol || 0) >= cfg.minVolume * (1 - tol), nAge = (it.age || 0) <= cfg.maxAge * (1 + tol);
+      const nProfit = profit4h >= cfg.minProfit4h * (1 - tol), nBuy = it.buy >= cfg.minBuy * (1 - tol);
+      const gates = [[cMargin, nMargin], [cVol, nVol], [cAge, nAge], [cProfit, nProfit], [cBuy, nBuy]];
+      const all = gates.every((g) => g[0]);
+      const watch = !all && gates.every((g) => g[0] || g[1]);
+      return { i, name: it.name, buy: this.fmt(it.buy), sell: this.fmt(it.sell), margin: margin.toFixed(1) + "%", marginColor: cMargin ? C.green : C.red, vol: this.short(it.vol || 0), age: (it.age || 0) + "m", profit4h: this.short(profit4h), profit4hN: profit4h, all, watch, verdict: all ? "FLIP NOW" : watch ? "WATCH" : "SKIP", vColor: all ? C.green : watch ? "#9a7530" : C.red, vBg: all ? "rgba(92,110,53,.18)" : watch ? "rgba(201,162,74,.16)" : "rgba(150,58,44,.1)", rowBg: all ? "rgba(92,110,53,.10)" : watch ? "rgba(201,162,74,.07)" : "transparent" };
     }).sort((a, b) => b.profit4hN - a.profit4hN);
+    const flipNowN = allRows.filter((r) => r.all).length, watchN = allRows.filter((r) => r.watch).length;
+    const showWatch = this.state.flipShowWatch;
+    const rows = allRows.filter((r) => r.all || (showWatch && r.watch));
+    const chartRows = allRows.filter((r) => r.all || r.watch).slice(0, 8).map((r) => ({ label: r.name, v: r.profit4hN, color: r.all ? C.green : "#9a7530" }));
     return (
       <div>
         <Card style={{ marginBottom: 14 }}>
@@ -1047,11 +1055,6 @@ export default class Almanac extends React.Component {
                 <div style={serif({ fontSize: 11, fontStyle: "italic", color: C.muted, marginTop: 6, lineHeight: 1.3, flex: 1 })}>{c.hint}</div>
               </div>
             ))}
-            <div style={{ background: "linear-gradient(160deg, rgba(201,162,74,.20), rgba(201,162,74,.04))", padding: "11px 13px", borderRadius: 6, border: "1px solid " + C.gold, display: "flex", flexDirection: "column", justifyContent: "center", minHeight: 108 }}>
-              <Kicker color={C.goldDeep}>Capital / flip</Kicker>
-              <div style={cinzel({ fontWeight: 800, fontSize: 23, color: C.ink, marginTop: 4 })}>{this.short(capPer)}</div>
-              <div style={serif({ fontSize: 11, fontStyle: "italic", color: C.muted, marginTop: 3 })}>each of 8 GE slots</div>
-            </div>
           </div>
           {this.state.priceStatus && <div style={{ marginTop: 10, ...mono({ fontSize: 11, color: C.muted2 }) }}>{this.state.priceStatus}</div>}
         </Card>
@@ -1063,26 +1066,40 @@ export default class Almanac extends React.Component {
             </div>
           </Card>
         )}
+        {chartRows.length > 0 && (
+          <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
+            <Kicker color={TH.accent}>Best opportunities · projected profit / 4h</Kicker>
+            <div style={{ marginTop: 10 }}><BarChartH data={chartRows} theme={TH} valueFmt={(v) => this.short(v)} /></div>
+          </Card>
+        )}
         <Card>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead><tr>{["Item", "Buy", "Sell", "Margin", "Daily vol", "Age", "Profit / 4h", "Verdict", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i > 0 && i < 7 ? "right" : "left", padding: "7px 9px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+            <Kicker color={C.goldDeep}>{flipNowN} flip now{watchN ? ` · ${watchN} on watch (within ${Math.round(tol * 100)}% of the gates)` : ""}</Kicker>
+            <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", ...mono({ fontSize: 11, color: C.muted2 }) }}>
+              <input type="checkbox" checked={showWatch} onChange={(e) => this.setState({ flipShowWatch: e.target.checked })} style={{ accentColor: C.gold, width: 15, height: 15 }} />
+              Show watch items
+            </label>
+          </div>
+          <div className="sheetwrap">
+            <table className="sheet">
+              <thead><tr>{["Item", "Buy", "Sell", "Margin", "Daily vol", "Age", "Profit / 4h", "Verdict", ""].map((h, i) => <th key={i} className={i > 0 && i < 7 ? "num" : ""}>{h}</th>)}</tr></thead>
               <tbody>{rows.map((r) => (
-                <tr key={r.i} style={{ background: r.rowBg }}>
-                  <td style={{ ...cinzel({ fontWeight: 600, fontSize: 14 }), padding: "7px 9px" }}>{r.name}</td>
-                  <td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{r.buy}</td>
-                  <td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{r.sell}</td>
-                  <td style={{ ...mono({ fontSize: 12, color: r.marginColor }), padding: "7px 9px", textAlign: "right" }}>{r.margin}</td>
-                  <td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{r.vol}</td>
-                  <td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{r.age}</td>
-                  <td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{r.profit4h}</td>
-                  <td style={{ padding: "7px 9px" }}><Tag color={r.vColor} bg={r.vBg}>{r.verdict}</Tag></td>
-                  <td style={{ padding: "7px 9px" }}><span onClick={() => this.delLog("scan", r.i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td>
+                <tr key={r.i}>
+                  <td style={cinzel({ fontWeight: 600, fontSize: 14 })}>{r.name}</td>
+                  <td className="num" style={mono({ fontSize: 12 })}>{r.buy}</td>
+                  <td className="num" style={mono({ fontSize: 12 })}>{r.sell}</td>
+                  <td className="num" style={mono({ fontSize: 12, color: r.marginColor })}>{r.margin}</td>
+                  <td className="num" style={mono({ fontSize: 12 })}>{r.vol}</td>
+                  <td className="num" style={mono({ fontSize: 12 })}>{r.age}</td>
+                  <td className="num" style={mono({ fontSize: 12 })}>{r.profit4h}</td>
+                  <td><Tag color={r.vColor} bg={r.vBg}>{r.verdict}</Tag></td>
+                  <td><span onClick={() => this.delLog("scan", r.i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td>
                 </tr>
-              ))}</tbody>
+              ))}
+              {rows.length === 0 && <tr><td colSpan={9} style={serif({ fontStyle: "italic", color: C.muted, padding: 18 })}>{this.logs.scan.length === 0 ? "Add items (or hit ⟳ Live prices) to scan." : watchN > 0 ? `Nothing clears every gate right now. ${watchN} item${watchN > 1 ? "s are" : " is"} close — tick “Show watch items”.` : "Nothing clears the gates right now. Loosen the control panel or wait for prices to move."}</td></tr>}</tbody>
             </table>
           </div>
-          <div style={serif({ fontSize: 12, fontStyle: "italic", color: C.muted, marginTop: 8 })}>FLIP NOW = clears every gate at your bankroll. Hit ⟳ Live prices to refresh buy/sell/volume from the OSRS Wiki.</div>
+          <div style={serif({ fontSize: 12, fontStyle: "italic", color: C.muted, marginTop: 8 })}>By default only <strong>FLIP NOW</strong> (clears every gate at your bankroll) shows. Watch items sit within the tolerance % of qualifying. Hit ⟳ Live prices to refresh from the OSRS Wiki.</div>
         </Card>
       </div>
     );
@@ -1139,7 +1156,24 @@ export default class Almanac extends React.Component {
     fc.forEach((f) => { if (!perf[f.item]) perf[f.item] = { item: f.item, flips: 0, net: 0, roiSum: 0, holdSum: 0, wins: 0 }; const p = perf[f.item]; p.flips++; p.net += f.net; p.roiSum += f.roi; p.holdSum += f.hold; if (f.net > 0) p.wins++; });
     const rows = Object.values(perf).map((p) => ({ ...p, roi: (p.roiSum / p.flips).toFixed(1) + "%", hold: (p.holdSum / p.flips).toFixed(1) + "d", win: Math.round((p.wins / p.flips) * 100) + "%" })).sort((a, b) => b.net - a.net);
     const wins = fc.filter((f) => f.net > 0).sort((a, b) => b.net - a.net).slice(0, 5);
+    const TH = themeFor("flipping");
+    const byDate = fc.slice().sort((a, b) => new Date(a.sellDate || a.buyDate) - new Date(b.sellDate || b.buyDate));
+    let cum = 0; const cumPts = byDate.map((f) => { cum += f.net; return { v: cum, label: this.dShort(f.sellDate || f.buyDate) }; });
+    const itemBars = rows.slice(0, 8).map((r) => ({ label: r.item, v: r.net }));
     return (
+      <div>
+        {fc.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16, marginBottom: 16 }}>
+            <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
+              <Kicker color={TH.accent}>Cumulative realized P&L</Kicker>
+              <div style={{ marginTop: 6 }}><LineChart points={cumPts} theme={TH} yFmt={(v) => this.short(v)} valueLabel={this.signed(cum)} /></div>
+            </Card>
+            <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
+              <Kicker color={TH.accent}>Net by item</Kicker>
+              <div style={{ marginTop: 10 }}><BarChartH data={itemBars} theme={TH} valueFmt={(v) => this.signed(v)} barH={18} /></div>
+            </Card>
+          </div>
+        )}
       <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
         <Card>
           <Kicker color={C.goldDeep}>Performance by item</Kicker>
@@ -1169,6 +1203,7 @@ export default class Almanac extends React.Component {
             {wins.length === 0 && <div style={serif({ fontStyle: "italic", color: C.muted })}>No winning flips logged yet.</div>}
           </div>
         </Card>
+      </div>
       </div>
     );
   }
@@ -1217,7 +1252,15 @@ export default class Almanac extends React.Component {
   // ===================== HIGH ALCHEMY =====================
   renderAlchemy() {
     const d = this.derive(); const aCost = this.alchCost(), cphr = this.alchcfg.castsPerHour || 1200;
-    const rows = this.alchItems.map((a) => { const profit = a.alch - a.buy - aCost; const need2h = cphr * 2; const sustain = a.limit >= need2h && d.cash >= a.buy * need2h; return { item: a.item, alch: a.alch, buy: a.buy, profit, p4h: profit * a.limit, phr: profit * cphr, limit: a.limit, gpxp: (profit / 65).toFixed(2), sustain }; }).sort((a, b) => b.phr - a.phr);
+    const rows = this.alchItems.map((a) => {
+      const profit = a.alch - a.buy - aCost;
+      // How many you can actually buy = min(buy limit, what your cash affords);
+      // sustain hours = that stock divided by your casts/hr input.
+      const qtyAfford = Math.min(a.limit || 0, Math.floor(d.cash / Math.max(1, a.buy)));
+      const sustainHrs = cphr > 0 ? qtyAfford / cphr : 0;
+      const sustain = sustainHrs >= 2;
+      return { item: a.item, alch: a.alch, buy: a.buy, profit, qtyAfford, sustainHrs, phr: profit * cphr, limit: a.limit, gpxp: (profit / 65).toFixed(2), sustain };
+    }).sort((a, b) => b.phr - a.phr);
     const best = rows.filter((r) => r.sustain && r.profit > 0)[0] || rows.filter((r) => r.profit > 0)[0] || rows[0];
     const log = this.logs.alch;
     const TH = themeFor("alchemy");
@@ -1228,7 +1271,7 @@ export default class Almanac extends React.Component {
         <SectionTitle kicker="Arcane Profit · Staff of Fire assumed" title="High Alchemy" accent={TH.accent}
           right={<div style={{ display: "flex", gap: 8 }}><Btn onClick={this.refreshPrices}>⟳ Live prices</Btn><Btn tone="gold" onClick={() => this.toggleForm("alch")}>+ Log session</Btn></div>} />
         {best && <Hero theme={TH} kicker="Verdict · best sustainable alch (2h+)" title={best.item}
-          blurb={`+${best.profit} gp/cast · ${best.sustain ? "enough buy-limit & cash to sustain ≥2 hours" : "limited stock — tops out before 2h"}`}
+          blurb={`+${best.profit} gp/cast · ${best.sustain ? `${this.fmt(best.qtyAfford)} buyable → ${best.sustainHrs.toFixed(1)}h sustainable` : best.qtyAfford > 0 ? `only ${this.fmt(best.qtyAfford)} affordable → ${best.sustainHrs.toFixed(1)}h before restock` : "log your cash to size affordability"}`}
           statLabel="Profit / hr" statValue={this.short(best.phr)} statSub={this.short(best.phr * 2) + " over 2h"} />}
         <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -1259,22 +1302,25 @@ export default class Almanac extends React.Component {
           </Card>
         )}
         <Card>
-          <Kicker color={C.goldDeep}>Item profitability · live</Kicker>
-          <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 10 }}>
-            <thead><tr>{["Item", "Alch", "GE buy", "Profit/cast", "Profit/hr", "Limit", "gp/xp", "Sustain"].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i > 0 && i < 7 ? "right" : "left", padding: "7px 9px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
-            <tbody>{rows.map((r, k) => (
-              <tr key={k} style={{ background: k === 0 ? "rgba(201,162,74,.12)" : "transparent" }}>
-                <td style={{ ...cinzel({ fontWeight: 600, fontSize: 14 }), padding: "7px 9px" }}>{r.item}</td>
-                <td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{this.fmt(r.alch)}</td>
-                <td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{this.fmt(r.buy)}</td>
-                <td style={{ ...mono({ fontSize: 12, color: r.profit >= 0 ? C.green : C.red }), padding: "7px 9px", textAlign: "right" }}>{r.profit >= 0 ? "+" : ""}{r.profit}</td>
-                <td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{this.short(r.phr)}</td>
-                <td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{this.fmt(r.limit)}</td>
-                <td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{r.gpxp}</td>
-                <td style={{ padding: "7px 9px", textAlign: "right" }}><Tag color={r.sustain ? C.green : C.red} bg={r.sustain ? "rgba(92,110,53,.16)" : "rgba(150,58,44,.12)"}>{r.sustain ? "2h+ ✓" : "limited"}</Tag></td>
-              </tr>
-            ))}</tbody>
-          </table>
+          <Kicker color={C.goldDeep}>Item profitability · live · qty afford uses your logged cash {this.short(d.cash)}</Kicker>
+          <div className="sheetwrap" style={{ marginTop: 10 }}>
+            <table className="sheet">
+              <thead><tr>{["Item", "Alch", "GE buy", "Profit/cast", "Profit/hr", "Limit", "Qty afford", "Sustain", "Verdict"].map((h, i) => <th key={i} className={i > 0 && i < 8 ? "num" : ""}>{h}</th>)}</tr></thead>
+              <tbody>{rows.map((r, k) => (
+                <tr key={k}>
+                  <td style={cinzel({ fontWeight: 600, fontSize: 14 })}>{r.item}</td>
+                  <td className="num" style={mono({ fontSize: 12 })}>{this.fmt(r.alch)}</td>
+                  <td className="num" style={mono({ fontSize: 12 })}>{this.fmt(r.buy)}</td>
+                  <td className="num" style={mono({ fontSize: 12, color: r.profit >= 0 ? C.green : C.red })}>{r.profit >= 0 ? "+" : ""}{r.profit}</td>
+                  <td className="num" style={mono({ fontSize: 12 })}>{this.short(r.phr)}</td>
+                  <td className="num" style={mono({ fontSize: 12 })}>{this.fmt(r.limit)}</td>
+                  <td className="num" style={mono({ fontSize: 12, color: r.qtyAfford > 0 ? C.ink : C.muted })}>{r.qtyAfford > 0 ? this.fmt(r.qtyAfford) : "—"}</td>
+                  <td className="num" style={mono({ fontSize: 12, color: r.sustain ? C.green : C.muted2 })}>{r.qtyAfford > 0 ? r.sustainHrs.toFixed(1) + "h" : "—"}</td>
+                  <td><Tag color={r.sustain ? C.green : C.red} bg={r.sustain ? "rgba(92,110,53,.16)" : "rgba(150,58,44,.12)"}>{r.sustain ? "2h+ ✓" : "limited"}</Tag></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
         </Card>
         {log.length > 0 && (
           <Card style={{ marginTop: 14 }}>
@@ -1635,29 +1681,37 @@ export default class Almanac extends React.Component {
   renderFarming() {
     const sm = this.skillMap; const farmLvl = (sm.Farming || { l: 1 }).l, farmXp = (sm.Farming || { x: 0 }).x;
     const goal = (this.goals.find((g) => g.skill === "Farming") || { tgt: 85 }).tgt;
-    const runMax = Math.max(1, ...this.farmRunDefs.map((r) => r.xpRun));
-    const runRows = this.farmRunDefs.map((r) => ({ ...r, unlocked: r.req <= farmLvl, bar: Math.min(100, (r.xpRun / runMax) * 100) }));
-    const unlocked = this.farmRunDefs.filter((r) => r.req <= farmLvl);
-    const xpCircuit = unlocked.reduce((a, r) => a + r.xpRun, 0);
     const laps = this.farmcfg.lapsPerDay || 1;
-    const xpDay = xpCircuit * laps;
+    // Per run-type realistic daily cap = 24h ÷ grow time; effective = min(your laps, cap).
+    const runDefs = this.farmRunDefs.map((r) => {
+      const unlocked = r.req <= farmLvl;
+      const maxRunsDay = Math.max(1, Math.floor(24 / (r.growHrs || 1)));
+      const effRuns = Math.min(laps, maxRunsDay);
+      return { ...r, unlocked, maxRunsDay, effRuns };
+    });
+    const unlockedRuns = runDefs.filter((r) => r.unlocked);
+    const lockedRuns = runDefs.filter((r) => !r.unlocked);
+    const runMax = Math.max(1, ...unlockedRuns.map((r) => r.xpRun));
+    const xpCircuit = unlockedRuns.reduce((a, r) => a + r.xpRun, 0);
+    const xpDay = unlockedRuns.reduce((a, r) => a + r.xpRun * r.effRuns, 0);
+    const gpDay = unlockedRuns.reduce((a, r) => a + r.gpRun * r.effRuns, 0);
     const xpLeft = Math.max(0, this.xpFor(goal) - farmXp);
     const days = xpDay > 0 ? Math.ceil(xpLeft / xpDay) : 0;
     const agg = {}; this.logs.herb.forEach((h) => { if (!agg[h.tier]) agg[h.tier] = { runs: 0, net: 0 }; agg[h.tier].runs += h.runs || 1; agg[h.tier].net += h.net; });
     const TH = themeFor("farming");
-    const bestFarm = this.farmDefs.filter((f) => f.unlocked).slice().sort((a, b) => b.net - a.net)[0] || this.farmDefs[0];
+    const bestFarm = this.farmDefs.filter((f) => farmLvl >= f.lvl).slice().sort((a, b) => b.net - a.net)[0] || this.farmDefs[0];
     const loggedNet = this.logs.herb.reduce((a, h) => a + h.net, 0), loggedRuns = this.logs.herb.reduce((a, h) => a + (h.runs || 1), 0);
     return (
       <div>
         <SectionTitle kicker="The Allotments · grow-time, not play-time" title="Farming Engine" accent={TH.accent}
           right={<Btn tone="gold" onClick={() => this.toggleForm("herb")}>+ Log herb run</Btn>} />
-        {bestFarm && <Hero theme={TH} kicker="Herb-run verdict · best this account can grow" title={`Plant ${bestFarm.tier}`}
-          blurb={`${this.short(bestFarm.net)} net per run at your current Farming level — ${days > 0 ? days + " days to Farming " + goal : "goal reached"}`}
+        {bestFarm && <Hero theme={TH} icon="🌱" kicker={`Farming ${farmLvl} · herb-run verdict`} title={`Plant ${bestFarm.tier}`}
+          blurb={`${this.short(bestFarm.net)} net per run at Farming ${farmLvl} — ${days > 0 ? days + " days to " + goal + " at " + this.short(xpDay) + " xp/day" : "goal reached"}`}
           statLabel="Logged net" statValue={loggedRuns ? this.signed(loggedNet) : "—"} statSub={loggedRuns ? loggedRuns + " runs" : "no runs yet"} />}
         <StatCards cols={4} items={[
+          { label: "Farming level", value: "" + farmLvl, sub: "→ goal " + goal, color: TH.accent },
           { label: "XP to Farming " + goal, value: this.short(xpLeft) },
-          { label: "XP / circuit", value: this.short(xpCircuit) },
-          { label: "XP / day", value: this.short(xpDay), sub: laps + " laps/day" },
+          { label: "XP / day (capped)", value: this.short(xpDay), sub: this.signed(gpDay) + " gp/day" },
           { label: "Days to target", value: days > 0 ? "" + days : "—", color: C.green },
         ]} />
         {this.state.openForm === "herb" && (
@@ -1668,27 +1722,32 @@ export default class Almanac extends React.Component {
             </div>
           </Card>
         )}
-        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}>
-          <span style={mono({ fontSize: 11, color: C.muted2 })}>LAPS PER DAY</span>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
+          <span style={mono({ fontSize: 11, color: C.muted2 })}>TARGET RUNS / DAY</span>
           <input className="led" defaultValue={laps} onBlur={(e) => this.setCfg("farmcfg", "lapsPerDay", e.target.value)} style={{ width: 70 }} />
-          <span style={serif({ fontSize: 12, fontStyle: "italic", color: C.muted })}>Estimate assumes your current best unlocked runs the whole way — it drops as you unlock higher tiers.</span>
+          <span style={serif({ fontSize: 12, fontStyle: "italic", color: C.muted })}>Each run type is capped to what its grow time actually allows — fruit trees (16h) max one a day, herbs (~80m) many more.</span>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
           <Card>
-            <Kicker color={C.goldDeep}>Daily run circuit · XP engine</Kicker>
-            <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 10 }}>
-              <thead><tr>{["Run", "Crop", "XP/run", "GP/run", "Time", "Status"].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i > 1 && i < 5 ? "right" : "left", padding: "6px 8px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
-              <tbody>{runRows.map((r, k) => (
-                <tr key={k}>
-                  <td style={{ ...cinzel({ fontWeight: 600, fontSize: 13 }), padding: "6px 8px" }}>{r.name}</td>
-                  <td style={{ ...serif({ fontSize: 13 }), padding: "6px 8px" }}>{r.crop}</td>
-                  <td style={{ padding: "6px 8px", textAlign: "right" }}><div style={mono({ fontSize: 12 })}>{this.fmt(r.xpRun)}</div><Bar pct={r.bar} h={3} /></td>
-                  <td style={{ ...mono({ fontSize: 12, color: r.gpRun >= 0 ? C.green : C.red }), padding: "6px 8px", textAlign: "right" }}>{r.gpRun >= 0 ? "+" + this.short(r.gpRun) : this.signed(r.gpRun)}</td>
-                  <td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{r.timeMin}m</td>
-                  <td style={{ padding: "6px 8px" }}><Tag color={r.unlocked ? C.green : C.red} bg={r.unlocked ? "rgba(92,110,53,.16)" : "rgba(150,58,44,.12)"}>{r.unlocked ? "open" : "lvl " + r.req}</Tag></td>
-                </tr>
-              ))}</tbody>
-            </table>
+            <Kicker color={C.goldDeep}>Daily run circuit · unlocked at Farming {farmLvl}</Kicker>
+            <div className="sheetwrap" style={{ marginTop: 10 }}>
+              <table className="sheet">
+                <thead><tr>{["Run", "Crop", "Patches", "XP/run", "GP/run", "Runs/day", "Grow"].map((h, i) => <th key={i} className={i > 2 ? "num" : ""}>{h}</th>)}</tr></thead>
+                <tbody>{unlockedRuns.map((r, k) => (
+                  <tr key={k}>
+                    <td><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{r.name}</div><div style={serif({ fontSize: 10.5, fontStyle: "italic", color: C.muted })}>{r.teles}</div></td>
+                    <td style={serif({ fontSize: 13 })}>{r.crop}</td>
+                    <td className="num" style={mono({ fontSize: 12 })}>{r.patches}</td>
+                    <td className="num"><div style={mono({ fontSize: 12 })}>{this.fmt(r.xpRun)}</div><Bar pct={Math.min(100, (r.xpRun / runMax) * 100)} h={3} /></td>
+                    <td className="num" style={mono({ fontSize: 12, color: r.gpRun >= 0 ? C.green : C.red })}>{r.gpRun >= 0 ? "+" + this.short(r.gpRun) : this.signed(r.gpRun)}</td>
+                    <td className="num" style={mono({ fontSize: 12 })}>{r.effRuns}<span style={{ color: C.muted }}>/{r.maxRunsDay}</span></td>
+                    <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{r.growHrs < 1.5 ? Math.round(r.growHrs * 60) + "m" : r.growHrs + "h"}</td>
+                  </tr>
+                ))}
+                {unlockedRuns.length === 0 && <tr><td colSpan={7} style={serif({ fontStyle: "italic", color: C.muted, padding: 14 })}>No runs unlocked yet at Farming {farmLvl}.</td></tr>}</tbody>
+              </table>
+            </div>
+            {lockedRuns.length > 0 && <div style={{ marginTop: 10, ...serif({ fontSize: 12, color: C.muted }) }}>Upcoming: {lockedRuns.map((r) => `${r.crop} ${r.name.toLowerCase()} (lvl ${r.req})`).join(" · ")}</div>}
           </Card>
           <Card>
             <Kicker color={C.goldDeep}>Milestones</Kicker>
@@ -1703,16 +1762,36 @@ export default class Almanac extends React.Component {
           </Card>
         </div>
         <Card style={{ marginTop: 14 }}>
-          <Kicker color={C.goldDeep}>Herb-run P&L · {this.short(this.logs.herb.reduce((a, h) => a + h.net, 0))} logged over {this.logs.herb.reduce((a, h) => a + (h.runs || 1), 0)} runs</Kicker>
-          <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
-            <thead><tr>{["Tier", "Plant lvl", "Net/run", "Runs logged", "Total net", "Status"].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i > 1 && i < 5 ? "right" : "left", padding: "6px 8px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
-            <tbody>{this.farmDefs.map((f, k) => { const a = agg[f.tier] || { runs: 0, net: 0 }; return (
-              <tr key={k} style={{ background: f.tier === "Snapdragon" ? "rgba(201,162,74,.1)" : "transparent" }}>
-                <td style={{ ...cinzel({ fontWeight: 600, fontSize: 13 }), padding: "6px 8px" }}>{f.tier}</td><td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px" }}>Lv {f.lvl}</td><td style={{ ...mono({ fontSize: 12, color: C.green }), padding: "6px 8px", textAlign: "right" }}>{this.short(f.net)}</td><td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{a.runs}</td><td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{a.net > 0 ? this.short(a.net) : "—"}</td>
-                <td style={{ padding: "6px 8px" }}><Tag color={f.unlocked ? C.green : C.red} bg={f.unlocked ? "rgba(92,110,53,.16)" : "rgba(150,58,44,.12)"}>{f.unlocked ? "unlocked" : "locked"}</Tag></td>
-              </tr>
-            ); })}</tbody>
-          </table>
+          <Kicker color={C.goldDeep}>Herb tiers · net/run by plant level</Kicker>
+          <div className="sheetwrap" style={{ marginTop: 8 }}>
+            <table className="sheet">
+              <thead><tr>{["Tier", "Plant lvl", "Net/run", "Runs logged", "Total net", "Status"].map((h, i) => <th key={i} className={i > 1 && i < 5 ? "num" : ""}>{h}</th>)}</tr></thead>
+              <tbody>{this.farmDefs.map((f, k) => { const a = agg[f.tier] || { runs: 0, net: 0 }; const fU = farmLvl >= f.lvl; return (
+                <tr key={k}>
+                  <td style={cinzel({ fontWeight: 600, fontSize: 13 })}>{f.tier}</td><td className="num" style={mono({ fontSize: 12 })}>Lv {f.lvl}</td><td className="num" style={mono({ fontSize: 12, color: C.green })}>{this.short(f.net)}</td><td className="num" style={mono({ fontSize: 12 })}>{a.runs}</td><td className="num" style={mono({ fontSize: 12 })}>{a.net > 0 ? this.short(a.net) : "—"}</td>
+                  <td><Tag color={fU ? C.green : C.red} bg={fU ? "rgba(92,110,53,.16)" : "rgba(150,58,44,.12)"}>{fU ? "unlocked" : "locked"}</Tag></td>
+                </tr>
+              ); })}</tbody>
+            </table>
+          </div>
+        </Card>
+        <Card style={{ marginTop: 14 }}>
+          <Kicker color={C.goldDeep}>Herb-run log · {this.short(loggedNet)} over {loggedRuns} runs · edit or delete entries</Kicker>
+          <div className="sheetwrap" style={{ marginTop: 8 }}>
+            <table className="sheet">
+              <thead><tr>{["Date", "Tier", "Runs", "Net", ""].map((h, i) => <th key={i} className={i > 1 && i < 4 ? "num" : ""}>{h}</th>)}</tr></thead>
+              <tbody>{this.logs.herb.map((h, i) => (
+                <tr key={i}>
+                  <td style={mono({ fontSize: 12 })}>{this.dShort(h.date)}</td>
+                  <td><select className="led" defaultValue={h.tier} onChange={(e) => this.editHerb(i, "tier", e.target.value)} style={{ width: 130, padding: "4px 6px" }}>{this.farmDefs.map((f) => <option key={f.tier} value={f.tier}>{f.tier}</option>)}</select></td>
+                  <td className="num"><input className="led" defaultValue={h.runs || 1} onBlur={(e) => this.editHerb(i, "runs", e.target.value)} style={{ width: 56, padding: "4px 6px", textAlign: "right" }} /></td>
+                  <td className="num"><input className="led" defaultValue={h.net} onBlur={(e) => this.editHerb(i, "net", e.target.value)} style={{ width: 96, padding: "4px 6px", textAlign: "right" }} /></td>
+                  <td><span onClick={() => this.delLog("herb", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 12 }) }}>✕</span></td>
+                </tr>
+              ))}
+              {this.logs.herb.length === 0 && <tr><td colSpan={5} style={serif({ fontStyle: "italic", color: C.muted, padding: 14 })}>No runs logged yet — hit “+ Log herb run”.</td></tr>}</tbody>
+            </table>
+          </div>
         </Card>
       </div>
     );
