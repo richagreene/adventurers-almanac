@@ -19,7 +19,7 @@ Twelve interlinked sections, mirroring (and extending) the workbook:
 | **Skills** | All 23 skills with XP-to-next / XP-to-99, pulled live from your hiscores |
 | **Goals** | Per-skill time-to-goal (EHP) with editable XP/hr & GP/hr, funding timeline |
 | **Net Worth** | Weekly snapshots, wealth curve, change tracking |
-| **GE Flipping** | Live "worth-it" flip scanner (margin/tax/volume/affordability gates), a flip ledger, and per-item performance |
+| **GE Flipping** | Live "worth-it" flip scanner (margin/tax/volume/affordability gates), a flip ledger, per-item performance, and a **Fill Calculator** that weighted-averages a multi-fill trade (copy / send straight to the ledger) |
 | **High Alchemy** | Profit/cast from live alch value − GE buy − nature rune; best sustainable pick |
 | **Bossing** | Boss database with live-priced drop tables, accessibility gated by your combat/Slayer, **per-boss editable kills/hr & GP/hr**, KC tracker, drop-rate luck |
 | **Slayer** | Weighted-XP block calculator, EV/hr per task, monster DB, point-unlock priorities |

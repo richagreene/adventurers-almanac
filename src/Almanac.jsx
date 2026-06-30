@@ -46,7 +46,7 @@ const TITLES = {
 export default class Almanac extends React.Component {
   state = {
     section: "dashboard", openForm: null, fetching: false, fetchMsg: "", priceStatus: "", gearPriceStatus: "",
-    flipView: "scanner", fillResult: null, bossView: "compendium", bossFocus: "", dropFormBoss: "",
+    flipView: "scanner", fillResult: null, fillMsg: "", bossView: "compendium", bossFocus: "", dropFormBoss: "",
     slayView: "planner", slayMaster: "Duradel", gearStyle: "melee",
     questMethod: "optimal", qsortCol: "", qsortDir: 1, qFilterOpen: "", qfSeries: [], qfType: [], qfStatus: [], qName: "", qGate: "",
     tSort: {}, tFilt: {}, tOpen: "", flipPrefill: null, _v: 0,
@@ -328,6 +328,26 @@ export default class Almanac extends React.Component {
 
   addNw = () => { const cash = this.num("nw_cash"), items = this.num("nw_items"); if (cash + items <= 0) return; this.logs.nw.push({ date: this.val("nw_date") || this.today(), cash, items, note: this.val("nw_note") }); this.saveLogs(); this.setState({ openForm: null }); };
   addFlip = () => { const item = this.val("flip_item") || "Item", qty = this.num("flip_qty") || 1, avgBuy = this.num("flip_buy"), avgSell = this.num("flip_sell"); if (avgBuy <= 0 || avgSell <= 0) return; this.logs.flips.unshift({ buyDate: this.val("flip_bdate") || this.today(), sellDate: this.val("flip_sdate") || this.today(), item, qty, avgBuy, avgSell, notes: this.val("flip_notes") }); this.saveLogs(); this.setState({ openForm: null, flipPrefill: null }); };
+  // Fill calculator: weighted-average a multi-fill flip whose price moved across partials.
+  calcFill = () => {
+    let bq = 0, bc = 0, sq = 0, sr = 0;
+    for (let i = 1; i <= 5; i++) {
+      const q = this.num("fill_bq" + i), p = this.num("fill_bp" + i); if (q > 0 && p > 0) { bq += q; bc += q * p; }
+      const q2 = this.num("fill_sq" + i), p2 = this.num("fill_sp" + i); if (q2 > 0 && p2 > 0) { sq += q2; sr += q2 * p2; }
+    }
+    const avgBuy = bq > 0 ? Math.round(bc / bq) : 0, avgSell = sq > 0 ? Math.round(sr / sq) : 0, qty = bq || sq;
+    this.setState({ fillResult: { qty, avgBuy, avgSell, bq, sq }, fillMsg: "" });
+  };
+  copyFill = () => {
+    const r = this.state.fillResult; if (!r) return;
+    const text = r.qty + "\t" + r.avgBuy + "\t" + r.avgSell;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => this.setState({ fillMsg: `Copied (tab-separated): ${r.qty}  ${r.avgBuy}  ${r.avgSell}` })).catch(() => this.setState({ fillMsg: `Copy blocked — values: ${r.qty}, ${r.avgBuy}, ${r.avgSell}` }));
+    } else {
+      this.setState({ fillMsg: `Clipboard unavailable — values: ${r.qty}, ${r.avgBuy}, ${r.avgSell}` });
+    }
+  };
+  fillToLedger = () => { const r = this.state.fillResult; if (!r) return; this.setState({ flipView: "ledger", openForm: "flip", flipPrefill: { qty: r.qty, avgBuy: r.avgBuy, avgSell: r.avgSell } }); };
   addScan = () => { const name = this.val("scan_name"); if (!name) return; this.logs.scan.unshift({ name, buy: this.num("scan_buy"), sell: this.num("scan_sell"), vol: this.num("scan_vol"), limit: this.num("scan_limit") || 1, age: this.num("scan_age") }); this.saveLogs(); this.setState({ openForm: null }); };
   addWatch = () => { const item = this.val("watch_item"); if (!item) return; this.logs.watch.unshift({ item, target: this.num("watch_target"), note: this.val("watch_note") }); this.saveLogs(); this.setState({ openForm: null }); };
   addAlch = () => { const casts = this.num("alch_casts"); if (casts <= 0) return; const item = this.val("alch_item") || "High alch", alchVal = this.num("alch_alch"), buy = this.num("alch_buy"); this.logs.alch.unshift({ date: this.today(), item, casts, alchVal, buy, net: (alchVal - buy - this.alchCost()) * casts, xp: casts * 65 }); this.saveLogs(); this.setState({ openForm: null }); };
@@ -771,11 +791,12 @@ export default class Almanac extends React.Component {
         <SectionTitle kicker="Grand Exchange" title="Flipping Desk" />
         <StatCards cols={4} items={stats} />
         <div style={{ marginBottom: 16 }}>
-          <Seg options={[{ key: "scanner", label: "SCANNER" }, { key: "ledger", label: "LEDGER" }, { key: "perf", label: "PERFORMANCE" }]} active={view} onPick={(v) => this.setState({ flipView: v, openForm: null })} />
+          <Seg options={[{ key: "scanner", label: "SCANNER" }, { key: "ledger", label: "LEDGER" }, { key: "perf", label: "PERFORMANCE" }, { key: "calc", label: "FILL CALC" }]} active={view} onPick={(v) => this.setState({ flipView: v, openForm: null })} />
         </div>
         {view === "scanner" && this.renderFlipScanner(cfg, capPer)}
         {view === "ledger" && this.renderFlipLedger(fc)}
         {view === "perf" && this.renderFlipPerf(fc)}
+        {view === "calc" && this.renderFillCalc()}
       </div>
     );
   }
@@ -930,6 +951,47 @@ export default class Almanac extends React.Component {
             ))}
             {wins.length === 0 && <div style={serif({ fontStyle: "italic", color: C.muted })}>No winning flips logged yet.</div>}
           </div>
+        </Card>
+      </div>
+    );
+  }
+  renderFillCalc() {
+    const r = this.state.fillResult;
+    const col = (side, label, color) => (
+      <div>
+        <Kicker color={color}>{label} — qty × price</Kicker>
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 7 }}>
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} style={{ display: "flex", gap: 8 }}>
+              <input className="led" id={`fill_${side}q${i}`} type="number" placeholder="qty" style={{ flex: 1, minWidth: 0 }} />
+              <input className="led" id={`fill_${side}p${i}`} type="number" placeholder="price" style={{ flex: 1, minWidth: 0 }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+    return (
+      <div>
+        <Card>
+          <Kicker color={C.goldDeep}>Fill calculator · weighted-average a multi-fill flip</Kicker>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 12 }}>
+            {col("b", "Buy fills", C.green)}
+            {col("s", "Sell fills", C.red)}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginTop: 16 }}>
+            <Btn tone="gold" onClick={this.calcFill}>Calculate</Btn>
+            {r && (
+              <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", background: C.cardLight, border: "1px solid rgba(44,32,19,.2)", borderRadius: 6, padding: "10px 16px" }}>
+                {[["Qty", r.qty], ["Avg buy", r.avgBuy], ["Avg sell", r.avgSell]].map(([k, v]) => (
+                  <div key={k}><div style={mono({ fontSize: 9, color: C.muted })}>{k.toUpperCase()}</div><div style={cinzel({ fontWeight: 700, fontSize: 18 })}>{this.fmt(v)}</div></div>
+                ))}
+                <Btn tone="gold" onClick={this.fillToLedger}>→ Send to Ledger</Btn>
+                <Btn onClick={this.copyFill}>⎘ Copy</Btn>
+              </div>
+            )}
+          </div>
+          {this.state.fillMsg && <div style={{ marginTop: 10, ...mono({ fontSize: 11, color: C.muted2 }) }}>{this.state.fillMsg}</div>}
+          <div style={serif({ fontSize: 12.5, fontStyle: "italic", color: C.muted, marginTop: 12 })}>Enter each partial fill as the price moved — the weighted <strong>Qty, Avg buy, Avg sell</strong> come out. Copy it (tab-separated, paste-ready) or send it straight to the Flip Ledger.</div>
         </Card>
       </div>
     );
