@@ -1,0 +1,15 @@
+{
+  "name": "The Adventurer's Almanac",
+  "short_name": "Almanac",
+  "description": "A live Old School RuneScape planner — money-making, skilling, quests, bossing and more, wired to live GE prices and your hiscores.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1c130c",
+  "theme_color": "#1c130c",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
