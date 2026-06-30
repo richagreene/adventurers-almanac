@@ -217,16 +217,46 @@ export default class Almanac extends React.Component {
 
   // ---------- persistence ----------
   _load(k, fb) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fb; } catch (e) { return fb; } }
-  _save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  _save(k, v) {
+    try {
+      // Capture one undo point per synchronous action, before the first write.
+      if (!this._undoSuspended && this._undoKeys.includes(k) && !this._undoTxn) {
+        (this._undoStack = this._undoStack || []).push(this._snap());
+        if (this._undoStack.length > 100) this._undoStack.shift();
+        this._redoStack = [];
+        this._undoTxn = true; Promise.resolve().then(() => { this._undoTxn = false; });
+      }
+      localStorage.setItem(k, JSON.stringify(v));
+    } catch (e) {}
+  }
   saveLogs() { this._save("almanac.logs.v1", this.logs); }
   bump() { this.setState((s) => ({ _v: s._v + 1 })); }
 
   componentDidMount() {
+    this._undoSuspended = true;
+    this.loadState();
+    this._undoSuspended = false;
+    this._undoStack = []; this._redoStack = [];
+    this.gearPrices = {};
+    this.itemNames = [];
+    this.priceRows = null;
+    this.bump();
+    // Background: pull the full tradeable-item list (for flip autocomplete) and
+    // the live nature-rune price. Both degrade silently if the network is blocked.
+    fetchItemNames().then((names) => { this.itemNames = names; this.bump(); }).catch(() => {});
+    this.refreshNatRune();
+  }
+
+  // Load every persisted collection from localStorage into instance fields.
+  // Reused on first mount, on undo/redo, and after a clear. `firstRun` (no saved
+  // logs) seeds the demo scan list; a deliberate clear leaves logs empty.
+  loadState() {
     this.stats = this._load("almanac.stats.v1", null) || { rsn: "Lumbridge Local", skills: DEMO_SKILLS, mode: "main", source: "demo", qpApi: null, at: 0, demo: true };
     this.skillsRaw = this.stats.skills;
-    this.logs = this._load("almanac.logs.v1", null) || JSON.parse(JSON.stringify(D.seeds || {}));
+    const savedLogs = this._load("almanac.logs.v1", null);
+    this.logs = savedLogs || JSON.parse(JSON.stringify(D.seeds || {}));
     ["nw", "flips", "alch", "herb", "boss", "slayerLog", "watch", "scan", "drop"].forEach((k) => { if (!this.logs[k]) this.logs[k] = []; });
-    if (!this.logs.scan.length) this.logs.scan = JSON.parse(JSON.stringify(this.scanSeed));
+    if (!savedLogs && !this.logs.scan.length) this.logs.scan = JSON.parse(JSON.stringify(this.scanSeed));
     this.goals = this._load("almanac.goals.v1", null) || this.defaultGoals.map((x) => ({ ...x }));
     this.questOv = this._load("almanac.questdone.v1", null);
     if (!this.questOv) { this.questOv = {}; (D.quests || []).forEach((q) => { if (q.status === "Done") this.questOv[q.n] = true; }); this._save("almanac.questdone.v1", this.questOv); }
@@ -238,15 +268,28 @@ export default class Almanac extends React.Component {
     if (!this.blocks) { this.blocks = {}; (D.slayer || []).forEach((t) => { if (t.verdict === "Block") this.blocks[t.task] = true; }); }
     this.bossOv = this._load("almanac.bossov.v1", null) || {};
     this.objectives = this._load("almanac.objectives.v1", null) || this.defaultObjectives();
-    this.gearPrices = {};
-    this.itemNames = [];
-    this.priceRows = null;
-    this.bump();
-    // Background: pull the full tradeable-item list (for flip autocomplete) and
-    // the live nature-rune price. Both degrade silently if the network is blocked.
-    fetchItemNames().then((names) => { this.itemNames = names; this.bump(); }).catch(() => {});
-    this.refreshNatRune();
   }
+
+  // ---------- undo / redo ----------
+  // Every persisted key. _save snapshots the *pre-mutation* state of these keys
+  // (localStorage lags the in-memory mutation by one write), grouped per
+  // synchronous action, so any add/edit/delete/config change is one undo step.
+  _undoKeys = ["almanac.logs.v1", "almanac.goals.v1", "almanac.objectives.v1", "almanac.flipcfg.v1", "almanac.alchcfg.v1", "almanac.farmcfg.v1", "almanac.gcfg.v1", "almanac.blocks.v1", "almanac.bossov.v1", "almanac.questdone.v1", "almanac.stats.v1"];
+  _snap() { const s = {}; this._undoKeys.forEach((k) => { s[k] = localStorage.getItem(k); }); return s; }
+  _restore(snap) {
+    this._undoSuspended = true;
+    this._undoKeys.forEach((k) => { const v = snap[k]; if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); });
+    this.loadState();
+    this._undoSuspended = false;
+    this.bump();
+  }
+  undo = () => { if (!this._undoStack || !this._undoStack.length) return; (this._redoStack = this._redoStack || []).push(this._snap()); this._restore(this._undoStack.pop()); };
+  redo = () => { if (!this._redoStack || !this._redoStack.length) return; (this._undoStack = this._undoStack || []).push(this._snap()); this._restore(this._redoStack.pop()); };
+  clearAllLogs = () => {
+    if (typeof window !== "undefined" && !window.confirm("Clear every logged entry (flips, kills, snapshots, herb runs, drops…)? You can undo this.")) return;
+    const empty = {}; ["nw", "flips", "alch", "herb", "boss", "slayerLog", "watch", "scan", "drop"].forEach((k) => (empty[k] = []));
+    this.logs = empty; this.saveLogs(); this.bump();
+  };
 
   // Pull the live nature-rune price (GE id 561) for the High Alchemy maths.
   refreshNatRune = async () => {
@@ -597,6 +640,11 @@ export default class Almanac extends React.Component {
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <div style={{ display: "flex", gap: 4, paddingRight: 6, marginRight: 2, borderRight: "1px solid rgba(44,32,19,.2)" }}>
+                <Btn tone="quiet" onClick={this.undo} style={{ opacity: (this._undoStack || []).length ? 1 : 0.4 }}>↶ Undo</Btn>
+                <Btn tone="quiet" onClick={this.redo} style={{ opacity: (this._redoStack || []).length ? 1 : 0.4 }}>↷ Redo</Btn>
+                <Btn tone="quiet" onClick={this.clearAllLogs} style={{ color: C.red }}>⌫ Clear all</Btn>
+              </div>
               <input className="led" id="rsn_input" defaultValue={this.stats && !this.stats.demo ? rsn : ""} placeholder="RuneScape name…" onKeyDown={(e) => { if (e.key === "Enter") this.fetchStats(e); }} style={{ width: 168 }} />
               <Btn tone="gold" onClick={this.fetchStats}>{this.state.fetching ? "…" : "Fetch stats"}</Btn>
               <Seg options={[{ key: "main", label: "MAIN" }, { key: "iron", label: "IRONMAN" }]} active={this.mode} onPick={this.setMode} size={9.5} />
@@ -1417,9 +1465,10 @@ export default class Almanac extends React.Component {
     return (
       <div>
         <SectionTitle kicker="Command Centre · live drop pricing" title="Bossing Compendium" accent={themeFor("bossing").accent}
-          right={<Seg options={[{ key: "compendium", label: "DATABASE" }, { key: "tracker", label: "TRACKER" }, { key: "focus", label: "FOCUS" }]} active={view} onPick={(v) => this.setState({ bossView: v, openForm: null })} />} />
+          right={<Seg options={[{ key: "compendium", label: "DATABASE" }, { key: "tracker", label: "KILL LOG" }, { key: "rates", label: "SESSION RATES" }, { key: "focus", label: "FOCUS" }]} active={view} onPick={(v) => this.setState({ bossView: v, openForm: null })} />} />
         {view === "compendium" && this.renderBossDb()}
         {view === "tracker" && this.renderBossTracker()}
+        {view === "rates" && this.renderBossRates()}
         {view === "focus" && this.renderBossFocus()}
       </div>
     );
@@ -1454,27 +1503,44 @@ export default class Almanac extends React.Component {
       <div>
         <Card style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={serif({ fontSize: 13, fontStyle: "italic", color: C.muted })}>Est GP/hr = base loot + your kills/hr × live rare-drop value. "Open now" = your combat ({this.account.combat}) & Slayer clear the gate. Edit any boss's kills/hr & GP/hr below to dial in your real session rates.</div>
+            <div style={serif({ fontSize: 13, fontStyle: "italic", color: C.muted })}>Est GP/hr = base loot + your kills/hr × live rare-drop value. "Open now" = your combat ({this.account.combat}) & Slayer clear the gate. Tune your real kills/hr & GP/hr in the <strong>Session Rates</strong> tab.</div>
             <Btn onClick={this.refreshDropPrices}>⟳ Price drops</Btn>
           </div>
           {this.state.priceStatus && <div style={{ marginTop: 8, ...mono({ fontSize: 11, color: C.muted2 }) }}>{this.state.priceStatus}</div>}
         </Card>
-        <Card style={{ marginBottom: 14 }}><DataTable tableKey="boss" model={model} cols={cols} open={this.state.tOpen} on={this.tableHandlers()} empty="No bosses match." /></Card>
+        <Card><DataTable tableKey="boss" model={model} cols={cols} open={this.state.tOpen} on={this.tableHandlers()} empty="No bosses match." /></Card>
+      </div>
+    );
+  }
+  renderBossRates() {
+    const kcAll = {}; this.logs.boss.forEach((b) => (kcAll[b.boss] = (kcAll[b.boss] || 0) + (b.kills || 0)));
+    const rows = D.bosses.slice().sort((a, b) => (this.bossEff(b).acc ? 1 : 0) - (this.bossEff(a).acc ? 1 : 0) || this.bossEff(b).estGp - this.bossEff(a).estGp);
+    const tuned = Object.keys(this.bossOv).length;
+    return (
+      <div>
+        <Card style={{ marginBottom: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+            <Kicker color={C.goldDeep}>Session rates · your real kills/hr & GP/hr per boss</Kicker>
+            <span style={mono({ fontSize: 11, color: C.muted2 })}>{tuned} boss{tuned === 1 ? "" : "es"} tuned</span>
+          </div>
+          <div style={serif({ fontSize: 12.5, fontStyle: "italic", color: C.muted, marginTop: 6 })}>These feed the Dashboard money-meta, Goals route-finding and the Focus tab. Edit a row to override the defaults; live KC comes straight from your Kill Log.</div>
+        </Card>
         <Card>
-          <Kicker color={C.goldDeep}>Dial in your session rates (saved locally)</Kicker>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 10, marginTop: 12 }}>
-            {base.map((r) => { const e = this.bossEff(r.b); const ov = this.bossOv[r.name]; return (
-              <div key={r.name} style={{ background: C.cardLight, padding: "10px 12px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={cinzel({ fontWeight: 600, fontSize: 13 })}>{r.name}</span>
-                  {ov ? <span onClick={() => this.resetBossOv(r.name)} style={{ cursor: "pointer", ...mono({ fontSize: 9, color: C.red }) }}>reset</span> : <Tag color={r.accColor} bg={r.accBg}>{r.accLabel}</Tag>}
-                </div>
-                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                  <label style={{ flex: 1 }}><span style={mono({ fontSize: 8.5, color: C.muted })}>KILLS/HR</span><input className="led" defaultValue={e.kills} key={"k" + (ov ? 1 : 0)} onBlur={(ev) => this.setBossOv(r.name, "kills", ev.target.value)} style={{ width: "100%" }} /></label>
-                  <label style={{ flex: 1.3 }}><span style={mono({ fontSize: 8.5, color: C.muted })}>GP/HR</span><input className="led" defaultValue={e.estGp} key={"g" + (ov ? 1 : 0)} onBlur={(ev) => this.setBossOv(r.name, "gpHr", ev.target.value)} style={{ width: "100%" }} /></label>
-                </div>
-              </div>
-            ); })}
+          <div className="sheetwrap">
+            <table className="sheet">
+              <thead><tr>{["Boss", "Access", "Your KC", "Kills/hr", "GP/hr", "GP/kill", ""].map((h, i) => <th key={i} className={i > 1 && i < 6 ? "num" : ""}>{h}</th>)}</tr></thead>
+              <tbody>{rows.map((b) => { const e = this.bossEff(b); const ov = this.bossOv[b.n]; const kc = kcAll[b.n] || 0; const gpk = e.kills > 0 ? Math.round(e.estGp / e.kills) : 0; return (
+                <tr key={b.n}>
+                  <td style={cinzel({ fontWeight: 600, fontSize: 13 })}>{b.n}<div style={mono({ fontSize: 9, color: C.muted })}>{b.tier}</div></td>
+                  <td><Tag color={e.acc ? C.green : C.red} bg={e.acc ? "rgba(92,110,53,.16)" : "rgba(150,58,44,.12)"}>{e.acc ? "Open" : "Gated"}</Tag></td>
+                  <td className="num" style={mono({ fontSize: 12 })}>{kc ? this.fmt(kc) : "—"}</td>
+                  <td className="num"><input className="led" key={"k" + b.n + (ov ? 1 : 0)} defaultValue={e.kills} onBlur={(ev) => this.setBossOv(b.n, "kills", ev.target.value)} style={{ width: 70, padding: "4px 6px", textAlign: "right" }} /></td>
+                  <td className="num"><input className="led" key={"g" + b.n + (ov ? 1 : 0)} defaultValue={e.estGp} onBlur={(ev) => this.setBossOv(b.n, "gpHr", ev.target.value)} style={{ width: 100, padding: "4px 6px", textAlign: "right" }} /></td>
+                  <td className="num" style={mono({ fontSize: 12, color: C.muted2 })}>{gpk ? this.short(gpk) : "—"}</td>
+                  <td>{ov ? <span onClick={() => this.resetBossOv(b.n)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 10 }) }}>reset</span> : null}</td>
+                </tr>
+              ); })}</tbody>
+            </table>
           </div>
         </Card>
       </div>
