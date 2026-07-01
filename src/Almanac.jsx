@@ -48,7 +48,7 @@ export default class Almanac extends React.Component {
   state = {
     section: "dashboard", openForm: null, fetching: false, fetchMsg: "", priceStatus: "", gearPriceStatus: "",
     flipView: "scanner", fillResult: null, fillMsg: "", bossView: "compendium", bossFocus: "", bossGearStyle: "", dropFormBoss: "",
-    slayView: "planner", slayMaster: "Duradel", gearStyle: "melee", gearSlot: "Weapon", gearItem: null, gearStatMode: "set",
+    slayView: "planner", slayMaster: "Duradel", gearStyle: "melee", gearSlot: "Weapon", gearItem: null, gearStatMode: "set", gearDetail: null,
     questMethod: "optimal", qsortCol: "", qsortDir: 1, qFilterOpen: "", qfSeries: [], qfType: [], qfStatus: [], qName: "", qGate: "",
     tSort: {}, tFilt: {}, tOpen: "", flipPrefill: null, objType: "bank", objBoss: "", flipShowWatch: false, flipCfgVer: 0, _v: 0,
   };
@@ -1953,9 +1953,22 @@ export default class Almanac extends React.Component {
       const names = items.map((it) => it.n);
       const equippedName = lo[s.slot] && names.includes(lo[s.slot]) ? lo[s.slot] : curName;
       const best = items[items.length - 1];
-      return { slot: s.slot, items: items.map((m) => ({ ...m, current: m.n === curName, equipped: m.n === equippedName })), curName, bestName: best ? best.n : "", equippedName };
+      const bisName = best ? best.n : "";
+      return { slot: s.slot, items: items.map((m, i) => ({ ...m, order: i + 1, current: m.n === bisName, equipped: m.n === equippedName })), curName, bisName, equippedName };
     });
   }
+  // Trade-offs of `name` vs the best-in-slot item — the nuance tags in the modal.
+  gearDeltas(name, bisName) {
+    if (!name || name === bisName) return { deltas: [], cmpName: "" };
+    const a = this._normEq(name), b = this._normEq(bisName);
+    if (!a || !b) return { deltas: [], cmpName: bisName };
+    const out = [];
+    [["Stab", "astab"], ["Slash", "aslash"], ["Crush", "acrush"], ["Magic", "amagic"], ["Range", "arange"], ["Str", "mstr"], ["Rng str", "rstr"], ["Mage %", "mdmg"], ["Prayer", "pray"]].forEach(([k, key]) => { const d = a[key] - b[key]; if (d !== 0) out.push({ k, v: (d > 0 ? "+" : "") + d, c: d > 0 ? C.green : C.red }); });
+    if (a.speed && b.speed && a.speed !== b.speed) out.push({ k: "Speed", v: `${a.speed}t vs ${b.speed}t`, c: a.speed < b.speed ? C.green : C.red });
+    return { deltas: out, cmpName: bisName };
+  }
+  openGearDetail = (slot, item) => { ensureItemStats(item, () => this.bump()); this.setState({ gearDetail: { slot, item } }); };
+  closeGearDetail = () => this.setState({ gearDetail: null });
   equipItem = (slot, name) => { const st = this.state.gearStyle; if (!this.loadout[st]) this.loadout[st] = {}; this.loadout[st][slot] = name; this._save("almanac.loadout.v1", this.loadout); ensureItemStats(name, () => this.bump()); this.setState({ gearItem: name, gearSlot: slot, gearStatMode: "item" }); };
   resetLoadout = () => { const st = this.state.gearStyle; this.loadout[st] = {}; this._save("almanac.loadout.v1", this.loadout); this.bump(); };
   _normEq(name) {
@@ -2013,54 +2026,58 @@ export default class Almanac extends React.Component {
     return (
       <div>
         <SectionTitle kicker={"The Armoury · " + (mode === "iron" ? "Ironman (obtain paths)" : "Main (live GE prices)")} title="Gear Progression" accent={TH.accent}
-          right={<div style={{ display: "flex", gap: 8, alignItems: "center" }}><Seg options={[{ key: "melee", label: "MELEE" }, { key: "ranged", label: "RANGED" }, { key: "magic", label: "MAGIC" }]} active={style} onPick={(v) => this.setState({ gearStyle: v, gearSlot: "Weapon" })} /><Btn onClick={this.refreshGearPrices}>⟳ Prices</Btn></div>} />
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-          <div style={mono({ fontSize: 11, color: C.muted2 })}>{style[0].toUpperCase() + style.slice(1)} · {mode === "iron" ? "Ironman" : "Main"} · {upgrades} upgrades ahead · tap items to build a set</div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>{this.state.gearPriceStatus && <span style={mono({ fontSize: 10, color: C.muted })}>{this.state.gearPriceStatus}</span>}<Seg options={[{ key: "main", label: "MAIN" }, { key: "iron", label: "IRONMAN" }]} active={this.mode} onPick={this.setMode} size={9} /></div>
+          right={<div style={{ display: "flex", gap: 8, alignItems: "center" }}><Seg options={[{ key: "melee", label: "MELEE" }, { key: "ranged", label: "RANGED" }, { key: "magic", label: "MAGIC" }]} active={style} onPick={(v) => this.setState({ gearStyle: v, gearSlot: "Weapon" })} /><Btn onClick={this.refreshGearPrices}>↻ Refresh GE prices</Btn></div>} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+          <Seg options={[{ key: "main", label: "MAIN" }, { key: "iron", label: "IRONMAN" }]} active={this.mode} onPick={this.setMode} size={9} />
+          <div style={serif({ fontSize: 12.5, color: C.muted2 })}>{style[0].toUpperCase() + style.slice(1)} · {mode === "iron" ? "Ironman" : "Main"} · {upgrades} upgrades · gold ring = your current best</div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 16, alignItems: "start" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            {/* paperdoll */}
-            <Card pad={16} style={{ background: "linear-gradient(160deg,#2a1a10,#1c120a)", border: `1px solid ${TH.accent}55` }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <span style={mono({ fontSize: 9, letterSpacing: ".22em", color: "#bfa676", textTransform: "uppercase" })}>Equipment · {style}</span>
-                <span onClick={this.resetLoadout} style={{ cursor: "pointer", ...mono({ fontSize: 9, color: "#c89a5a" }) }}>reset</span>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {grid.map((row, ri) => (<div key={ri} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>{row.map((n, ci) => cell(n, ri + "-" + ci))}</div>))}
-              </div>
-            </Card>
-            {/* total / this-item stats */}
+        {this.state.gearPriceStatus && <div style={{ marginBottom: 14, padding: "8px 14px", background: "rgba(201,162,74,.1)", borderRadius: 5, ...mono({ fontSize: 11, color: C.green }) }}>{this.state.gearPriceStatus}</div>}
+        <div style={{ display: "flex", gap: 22, alignItems: "flex-start", flexWrap: "wrap" }}>
+          {/* paperdoll + nested stat card */}
+          <div style={{ flex: "0 0 304px", background: "linear-gradient(160deg,#2a1a10,#1a0f08)", border: "1px solid #5a4326", borderRadius: 8, padding: "18px 20px 16px", boxShadow: "0 4px 16px rgba(40,24,10,.28)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <span style={mono({ fontSize: 9, letterSpacing: ".2em", color: "#9c7c44", textTransform: "uppercase" })}>Equipment · {style}</span>
+              <span onClick={this.resetLoadout} style={{ cursor: "pointer", ...mono({ fontSize: 9, color: "#c89a5a" }) }}>reset</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {grid.map((row, ri) => (<div key={ri} style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "12px 14px", justifyItems: "center" }}>{row.map((n, ci) => cell(n, ri + "-" + ci))}</div>))}
+            </div>
+            <div style={{ marginTop: 13, paddingTop: 11, borderTop: "1px solid rgba(231,207,140,.12)", textAlign: "center", ...serif({ fontSize: 11, color: "#9c7c44", lineHeight: 1.35 }) }}>Click a slot, then pick any tier on the right to equip it here.</div>
             {this.renderGearStats(slots, selData, equippedCount)}
           </div>
           {/* upgrade ladder for selected slot */}
-          <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <Kicker color={TH.accent}>{sel} · upgrade ladder</Kicker>
-              <span style={mono({ fontSize: 10, color: C.muted })}>{selData.items.filter((it) => it.usable).length}/{selData.items.length} usable</span>
+          <div style={{ flex: "1 1 440px", minWidth: 320 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+              <span style={cinzel({ fontWeight: 700, fontSize: 21, color: C.ink })}>{sel}</span>
+              <span style={mono({ fontSize: 9, letterSpacing: ".16em", color: C.muted, textTransform: "uppercase" })}>{selData.items.length} tiers</span>
+              <span style={{ marginLeft: "auto", ...serif({ fontSize: 13, color: C.muted2 }) }}>equipped: <strong style={{ color: C.green }}>{selData.equippedName || "—"}</strong></span>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 10, marginTop: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(214px,1fr))", gap: 12 }}>
               {selData.items.map((it, i) => (
-                <div key={i} onClick={() => this.equipItem(sel, it.n)} style={{ cursor: "pointer", background: it.equipped ? "rgba(201,162,74,.2)" : it.usable ? C.cardLight : "#ece1c6", border: it.equipped ? "2px solid " + C.gold : it.current ? "1px solid " + C.gold : it.usable ? "1px solid rgba(44,32,19,.18)" : "1px dashed rgba(44,32,19,.28)", borderRadius: 8, padding: "10px 11px", display: "flex", gap: 10, opacity: it.usable ? 1 : 0.72 }}>
-                  <Icon url={itemIconUrl(it.n)} name={it.n} size={34} style={{ marginTop: 2 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
-                      <span style={cinzel({ fontWeight: 600, fontSize: 13.5, color: it.usable ? C.ink : "#9a8a6a" })}>{it.n}</span>
-                      {it.equipped ? <Tag color={C.ink} bg="rgba(201,162,74,.35)">EQUIPPED</Tag> : it.current ? <Tag color={C.goldDeep} bg="rgba(201,162,74,.16)">BEST</Tag> : null}
+                <div key={i} onClick={() => this.equipItem(sel, it.n)} style={{ position: "relative", cursor: "pointer", background: it.equipped ? "rgba(201,162,74,.16)" : it.usable ? C.cardLight : "#ece1c6", border: it.equipped ? "2px solid " + C.gold : it.usable ? "1px solid rgba(44,32,19,.18)" : "1px dashed rgba(44,32,19,.28)", borderRadius: 6, padding: "11px 12px 12px", boxShadow: it.equipped ? "0 2px 12px rgba(201,162,74,.3)" : "none", opacity: it.usable ? 1 : 0.72 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 7 }}>
+                    <div style={{ width: 40, height: 40, flex: "0 0 40px", display: "flex", alignItems: "center", justifyContent: "center", background: "#efe4c8", border: "1px solid rgba(44,32,19,.16)", borderRadius: 5 }}><Icon url={itemIconUrl(it.n)} name={it.n} size={32} /></div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={cinzel({ fontWeight: 600, fontSize: 13.5, color: it.usable ? C.ink : "#9a8a6a", lineHeight: 1.12 })}>{it.n}</div>
+                      <div style={mono({ fontSize: 9, color: C.muted, marginTop: 3 })}>{it.req}</div>
                     </div>
-                    <div style={mono({ fontSize: 9.5, color: C.muted, marginTop: 2 })}>{it.req}</div>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5 }}>
-                      <span style={mono({ fontSize: 11, color: it.price > 0 ? C.gold : C.muted })}>{it.price > 0 ? this.short(it.price) + " gp" : "obtain"}</span>
-                      {mode === "iron" && it.get && <span style={serif({ fontSize: 10, color: C.muted, textAlign: "right", maxWidth: 120 })}>{it.get}</span>}
-                    </div>
-                    {it.bestFor && <div style={serif({ fontSize: 11, color: C.muted2, marginTop: 4 })}>{it.bestFor}</div>}
+                    <span style={{ width: 18, height: 18, flex: "0 0 18px", borderRadius: "50%", background: "#2a1a10", display: "flex", alignItems: "center", justifyContent: "center", ...mono({ fontSize: 8.5, color: "#e7cf8c" }) }}>{it.order}</span>
                   </div>
+                  {it.current && <div style={{ marginBottom: 6 }}><span style={{ ...mono({ fontSize: 8, letterSpacing: ".1em", color: "#3a2410" }), background: "linear-gradient(180deg,#e3c878,#c9a24a)", borderRadius: 9, padding: "2px 8px" }}>★ BEST IN SLOT</span></div>}
+                  {it.equipped && <div style={{ marginBottom: 6 }}><span style={{ ...mono({ fontSize: 8, letterSpacing: ".1em", color: "#e7cf8c" }), background: "#2a1a10", borderRadius: 9, padding: "2px 8px" }}>✓ EQUIPPED</span></div>}
+                  {mode === "iron" ? (
+                    <div>{it.get && <div style={serif({ fontSize: 11.5, color: C.green, lineHeight: 1.25 })}>{it.get}</div>}{it.price > 0 && <div style={mono({ fontSize: 9, color: C.muted, marginTop: 4 })}>GE ≈ {this.short(it.price)} gp</div>}</div>
+                  ) : (
+                    it.price > 0 ? <div style={cinzel({ fontWeight: 700, fontSize: 15, color: C.green })}>{this.short(it.price)} <span style={mono({ fontSize: 9.5, color: C.muted })}>gp</span></div> : <div style={serif({ fontSize: 11.5, color: C.muted2, lineHeight: 1.25 })}>{it.get}</div>
+                  )}
+                  {it.bestFor && <div style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid rgba(44,32,19,.12)", ...serif({ fontSize: 11, color: C.muted2, lineHeight: 1.25 }) }}>{it.bestFor}</div>}
+                  <span onClick={(e) => { e.stopPropagation(); this.openGearDetail(sel, it.n); }} style={{ display: "block", marginTop: 9, paddingTop: 8, borderTop: "1px solid rgba(44,32,19,.12)", textAlign: "center", cursor: "pointer", ...mono({ fontSize: 8.5, letterSpacing: ".1em", color: C.muted, textTransform: "uppercase" }) }}>Full breakdown ▸</span>
                 </div>
               ))}
             </div>
-            <div style={serif({ fontSize: 12, color: C.muted, marginTop: 10 })}>Tap an item to equip it on the armour stand; the stat card sums your whole set. Switch slots from the stand.</div>
-          </Card>
+          </div>
         </div>
+        {this.state.gearDetail && this.renderGearDetail()}
       </div>
     );
   }
@@ -2071,53 +2088,90 @@ export default class Almanac extends React.Component {
     const DEF = [["Stab", "dstab"], ["Slash", "dslash"], ["Crush", "dcrush"], ["Magic", "dmagic"], ["Range", "drange"]];
     const OTH = [["Str", "mstr"], ["Rng str", "rstr"], ["Mage %", "mdmg"], ["Pray", "pray"]];
     const sv = (v) => (v > 0 ? "+" + v : "" + v);
-    const rows = (list, obj) => list.map(([l, k]) => (<div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}><span style={mono({ fontSize: 11, color: C.muted2 })}>{l}</span><span style={mono({ fontSize: 11, fontWeight: 600, color: obj[k] > 0 ? C.green : obj[k] < 0 ? C.red : C.muted })}>{sv(obj[k])}</span></div>));
+    const sub = (l) => <div style={mono({ fontSize: 8, letterSpacing: ".16em", color: "#8a6a38", textTransform: "uppercase", marginBottom: 5 })}>{l}</div>;
+    const rows = (list, obj) => list.map(([l, k]) => (<div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "1px 0" }}><span style={serif({ fontSize: 12.5, color: C.muted2 })}>{l}</span><span style={mono({ fontSize: 10.5, fontWeight: 600, color: obj[k] > 0 ? C.green : obj[k] < 0 ? C.red : C.muted })}>{sv(obj[k])}</span></div>));
     const statGrid = (obj, speed) => (
-      <div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 22px" }}>
-          <div><Kicker color={TH.accent}>Attack</Kicker>{rows(ATK, obj)}</div>
-          <div><Kicker color={TH.accent}>Defence</Kicker>{rows(DEF, obj)}</div>
+      <div style={{ padding: "12px 14px 14px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px" }}>
+          <div>{sub("Attack")}{rows(ATK, obj)}</div>
+          <div>{sub("Defence")}{rows(DEF, obj)}</div>
         </div>
-        <div style={{ marginTop: 10 }}><Kicker color={TH.accent}>Other</Kicker>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 18px", marginTop: 2 }}>
-            {OTH.map(([l, k]) => (<span key={k} style={mono({ fontSize: 11, color: C.muted2 })}>{l} <strong style={{ color: obj[k] > 0 ? C.green : C.ink }}>{sv(obj[k])}</strong></span>))}
-            {speed ? <span style={mono({ fontSize: 11, color: C.muted2 })}>Speed <strong style={{ color: C.ink }}>{(speed * 0.6).toFixed(1)}s</strong></span> : null}
-          </div>
+        <div style={{ marginTop: 10, paddingTop: 9, borderTop: "1px solid rgba(44,32,19,.14)" }}>{sub("Other")}
+          {OTH.map(([l, k]) => (<div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "1px 0" }}><span style={serif({ fontSize: 12.5, color: C.muted2 })}>{l}</span><span style={mono({ fontSize: 10.5, fontWeight: 600, color: obj[k] > 0 ? C.green : C.muted })}>{sv(obj[k])}</span></div>))}
+          {speed ? <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "1px 0" }}><span style={serif({ fontSize: 12.5, color: C.muted2 })}>Attack speed</span><span style={mono({ fontSize: 9.5, fontWeight: 600, color: C.ink })}>{(speed * 0.6).toFixed(1)}s · {speed}t</span></div> : null}
         </div>
       </div>
     );
+    const tab = (k, label) => { const on = mode === k; return <a key={k} href="#" onClick={(e) => { e.preventDefault(); this.setState({ gearStatMode: k }); }} style={{ textDecoration: "none", padding: "7px 12px", borderRadius: "5px 5px 0 0", ...mono({ fontSize: 9, letterSpacing: ".08em", color: on ? "#2a1a10" : "#bfa676" }), background: on ? "#f2e9d2" : "transparent" }}>{label}</a>; };
     let body;
     if (mode === "set") {
       const { tot, loading, counted } = this.gearTotals(slots);
-      body = (
-        <div>
-          <div style={mono({ fontSize: 9.5, color: C.muted, marginBottom: 8 })}>COMBINED · {counted}/{equippedCount} items{loading ? ` · loading ${loading}…` : ""}</div>
-          {statGrid(tot, tot.speed)}
-        </div>
-      );
+      body = (<div><div style={{ padding: "8px 13px 5px", background: "#321f12" }}><div style={mono({ fontSize: 8, letterSpacing: ".13em", color: "#9c7c44", textTransform: "uppercase" })}>Combined · {counted}/{equippedCount} items{loading ? ` · loading ${loading}` : ""}</div></div>{statGrid(tot, tot.speed)}</div>);
     } else {
       const active = this.state.gearItem && selData.items.find((x) => x.n === this.state.gearItem) ? this.state.gearItem : selData.equippedName;
       const it = selData.items.find((x) => x.n === active) || {};
       const obj = this._normEq(active);
-      const leads = obj ? this.gearLeads(selData.items, active) : [];
       body = (
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-            <Icon url={itemIconUrl(active)} name={active} size={28} />
-            <div style={{ flex: 1, minWidth: 0 }}><div style={cinzel({ fontWeight: 600, fontSize: 14 })}>{active}</div><div style={mono({ fontSize: 9, color: C.muted })}>{selData.slot} · {it.req || "—"}</div></div>
-            {!it.equipped && <Btn tone="gold" onClick={() => this.equipItem(selData.slot, active)} style={{ padding: "4px 9px" }}>Equip</Btn>}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 13px", background: "#321f12" }}>
+            <Icon url={itemIconUrl(active)} name={active} size={32} style={{ background: "rgba(201,162,74,.14)", color: "#e7cf8c" }} />
+            <div style={{ flex: 1, minWidth: 0 }}><div style={cinzel({ fontWeight: 700, fontSize: 12.5, color: "#e7cf8c", lineHeight: 1.12 })}>{active || "No item"}</div><div style={mono({ fontSize: 8, letterSpacing: ".12em", color: "#9c7c44", textTransform: "uppercase", marginTop: 3 })}>{selData.slot} · {it.equipped ? "equipped" : it.current ? "best in slot" : "your pick"}</div></div>
           </div>
-          {leads.length > 0 && <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 8 }}>{leads.map((l) => <Tag key={l} color={C.goldDeep} bg="rgba(201,162,74,.16)">leads: {l}</Tag>)}</div>}
-          {it.bestFor && <div style={serif({ fontSize: 12, color: C.muted2, marginBottom: 8 })}>{it.bestFor}</div>}
-          {obj ? statGrid(obj, obj.speed) : obj === null ? <div style={serif({ fontSize: 12.5, color: C.muted })}>No equipment stats found{it.get ? ` — obtain: ${it.get}` : ""}.</div> : <div style={serif({ fontSize: 12.5, color: C.muted })}>Loading stats…</div>}
+          {obj ? <div>{statGrid(obj, obj.speed)}<div style={{ padding: "0 14px 14px" }}><a href="#" onClick={(e) => { e.preventDefault(); this.openGearDetail(selData.slot, active); }} style={{ display: "block", textAlign: "center", textDecoration: "none", padding: 7, borderRadius: 5, background: "#ddcba6", border: "1px solid rgba(44,32,19,.25)", ...mono({ fontSize: 9, letterSpacing: ".1em", color: C.ink, textTransform: "uppercase" }) }}>Full breakdown ▸</a></div></div>
+            : obj === null ? <div style={{ padding: "12px 14px", ...serif({ fontSize: 12, color: C.muted, textAlign: "center" }) }}>Stats unavailable for this item.</div>
+              : <div style={{ padding: "12px 14px", ...serif({ fontSize: 12.5, color: C.muted, textAlign: "center" }) }}>Loading stats…</div>}
         </div>
       );
     }
     return (
-      <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
-        <div style={{ marginBottom: 12 }}><Seg options={[{ key: "set", label: "FULL SET" }, { key: "item", label: "THIS ITEM" }]} active={mode} onPick={(v) => this.setState({ gearStatMode: v })} size={9} /></div>
+      <div style={{ marginTop: 14, background: C.card, border: "1px solid rgba(231,207,140,.22)", borderRadius: 7, overflow: "hidden" }}>
+        <div style={{ display: "flex", padding: "9px 11px 0", background: "#321f12" }}>{tab("set", "FULL SET")}{tab("item", "THIS ITEM")}</div>
         {body}
-      </Card>
+      </div>
+    );
+  }
+  renderGearDetail() {
+    const TH = themeFor("gear"); const d = this.state.gearDetail;
+    const slots = this.gearSlots(); const sd = slots.find((s) => s.slot === d.slot) || slots[0];
+    const it = sd.items.find((x) => x.n === d.item) || {};
+    const name = d.item; const obj = this._normEq(name);
+    const leads = obj ? this.gearLeads(sd.items, name) : [];
+    const { deltas, cmpName } = obj ? this.gearDeltas(name, sd.bisName) : { deltas: [], cmpName: "" };
+    const sv = (v) => (v > 0 ? "+" + v : "" + v);
+    const sub = (l) => <div style={mono({ fontSize: 8, letterSpacing: ".16em", color: "#8a6a38", textTransform: "uppercase", marginBottom: 6 })}>{l}</div>;
+    const row = (l, v) => (<div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}><span style={serif({ fontSize: 13, color: C.muted2 })}>{l}</span><span style={mono({ fontSize: 11, fontWeight: 600, color: v > 0 ? C.green : v < 0 ? C.red : C.muted })}>{sv(v)}</span></div>);
+    return (
+      <div onClick={this.closeGearDetail} style={{ position: "fixed", inset: 0, zIndex: 90, background: "rgba(20,12,6,.62)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div onClick={(e) => e.stopPropagation()} style={{ width: 560, maxWidth: "94%", maxHeight: "88vh", overflowY: "auto", background: "#f4ecd6", border: "1px solid #b98f3e", borderRadius: 10, boxShadow: "0 18px 50px rgba(20,12,6,.5)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 13, padding: "16px 18px", background: "linear-gradient(160deg,#2a1a10,#1a0f08)" }}>
+            <div style={{ width: 48, height: 48, flex: "0 0 48px", display: "flex", alignItems: "center", justifyContent: "center", background: "#1c1209", border: "1px solid #5a4326", borderRadius: 7 }}><Icon url={itemIconUrl(name)} name={name} size={36} style={{ color: "#e7cf8c" }} /></div>
+            <div style={{ flex: 1, minWidth: 0 }}><div style={cinzel({ fontWeight: 700, fontSize: 19, color: "#e7cf8c", lineHeight: 1.1 })}>{name}</div><div style={mono({ fontSize: 9, letterSpacing: ".14em", color: "#9c7c44", textTransform: "uppercase", marginTop: 4 })}>{sd.slot} · {it.req || "—"}</div></div>
+            <span onClick={this.closeGearDetail} style={{ cursor: "pointer", ...mono({ fontSize: 15, color: "#9c7c44" }) }}>✕</span>
+          </div>
+          <div style={{ padding: "18px 20px 20px" }}>
+            {obj ? (
+              <div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+                  {it.current && <span style={{ ...mono({ fontSize: 8.5, letterSpacing: ".1em", color: "#3a2410" }), background: "linear-gradient(180deg,#e3c878,#c9a24a)", borderRadius: 9, padding: "3px 10px" }}>★ BEST IN SLOT</span>}
+                  {it.equipped && <span style={{ ...mono({ fontSize: 8.5, letterSpacing: ".1em", color: "#e7cf8c" }), background: "#2a1a10", borderRadius: 9, padding: "3px 10px" }}>✓ EQUIPPED</span>}
+                  {it.price > 0 && <span style={{ ...mono({ fontSize: 8.5, letterSpacing: ".1em", color: C.green }), background: "rgba(92,110,53,.12)", borderRadius: 9, padding: "3px 10px" }}>{this.short(it.price)} GP</span>}
+                </div>
+                {leads.length > 0 && <div style={{ marginBottom: 14 }}>{sub("Leads this slot in")}<div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>{leads.map((l) => <span key={l} style={{ ...mono({ fontSize: 9.5, color: C.ink }), background: "rgba(201,162,74,.22)", border: "1px solid rgba(185,143,62,.4)", borderRadius: 5, padding: "3px 9px" }}>{l}</span>)}</div></div>}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 22px", marginBottom: 14 }}>
+                  <div>{sub("Attack bonuses")}{[["Stab", "astab"], ["Slash", "aslash"], ["Crush", "acrush"], ["Magic", "amagic"], ["Range", "arange"]].map(([l, k]) => <div key={k}>{row(l, obj[k])}</div>)}</div>
+                  <div>{sub("Defence bonuses")}{[["Stab", "dstab"], ["Slash", "dslash"], ["Crush", "dcrush"], ["Magic", "dmagic"], ["Range", "drange"]].map(([l, k]) => <div key={k}>{row(l, obj[k])}</div>)}</div>
+                </div>
+                <div style={{ marginBottom: 14, paddingTop: 10, borderTop: "1px solid rgba(44,32,19,.14)" }}>{sub("Other")}<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 22px" }}>{[["Melee str", "mstr"], ["Ranged str", "rstr"], ["Magic dmg", "mdmg"], ["Prayer", "pray"]].map(([l, k]) => <div key={k}>{row(l, obj[k])}</div>)}{obj.speed ? <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}><span style={serif({ fontSize: 13, color: C.muted2 })}>Speed</span><span style={mono({ fontSize: 10, fontWeight: 600, color: C.ink })}>{(obj.speed * 0.6).toFixed(1)}s · {obj.speed}t</span></div> : null}</div></div>
+                {deltas.length > 0 && <div style={{ marginBottom: 14, paddingTop: 10, borderTop: "1px solid rgba(44,32,19,.14)" }}>{sub("Trade-offs vs best in slot · " + cmpName)}<div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>{deltas.map((dd, i) => <span key={i} style={{ ...mono({ fontSize: 9.5, color: dd.c }), background: "rgba(44,32,19,.05)", border: "1px solid rgba(44,32,19,.14)", borderRadius: 5, padding: "3px 9px" }}>{dd.k} {dd.v}</span>)}</div></div>}
+                {it.bestFor && <div style={serif({ fontSize: 13, color: C.muted2, lineHeight: 1.4, marginBottom: 8 })}>{it.bestFor}</div>}
+                {it.get && <div style={serif({ fontSize: 13, color: C.muted2, lineHeight: 1.4, marginBottom: 14 })}><strong style={{ color: C.green }}>Obtain:</strong> {it.get}</div>}
+                {!it.equipped ? <a href="#" onClick={(e) => { e.preventDefault(); this.equipItem(sd.slot, name); this.closeGearDetail(); }} style={{ display: "block", textAlign: "center", textDecoration: "none", padding: 9, borderRadius: 6, background: "linear-gradient(180deg,#caa24e,#9a7530)", border: "1px solid " + C.gold, ...mono({ fontSize: 10, letterSpacing: ".1em", color: C.ink, textTransform: "uppercase" }) }}>Equip to armour stand</a> : <div style={{ textAlign: "center", ...mono({ fontSize: 9, letterSpacing: ".1em", color: C.green, textTransform: "uppercase" }) }}>✓ Equipped on your stand</div>}
+              </div>
+            ) : obj === null ? <div style={serif({ fontSize: 13, color: C.muted, textAlign: "center", padding: "10px 0" })}>Equipment stats unavailable for this item{it.get ? ` — obtain: ${it.get}` : ""}.</div>
+              : <div style={serif({ fontSize: 13, color: C.muted, textAlign: "center", padding: "10px 0" })}>Loading equipment stats…</div>}
+          </div>
+        </div>
+      </div>
     );
   }
 
