@@ -12,6 +12,11 @@ import React from "react";
 import { LEDGER_DATA } from "./data/ledgerData.js";
 import { QUEST_ORDER } from "./data/questOrder.js";
 import { GEAR_DATA } from "./data/gearData.js";
+import { ACTIVITIES_DATA } from "./data/activitiesData.js";
+import { SKILL_MILESTONES } from "./data/skillMilestones.js";
+import { CONTENT_REQS } from "./data/contentReqs.js";
+import { QUEST_DEPS } from "./data/questDeps.js";
+import { refreshActivityGp, liveGpRate } from "./lib/activityPrices.js";
 import { fetchPlayer, fetchPrices, priceById, combatLevel, fetchItemNames, natureRunePrice } from "./lib/api.js";
 import { C, mono, serif, cinzel, Card, Kicker, SectionTitle, StatCards, Bar, Seg, Tag, Btn, DataTable, Hero, themeFor, LineChart, BarChartH, Icon, Donut, BandBar } from "./lib/ui.jsx";
 import { loadItemIndex, itemIconUrl, skillIconUrl, ensureItemStats, getItemStats } from "./lib/icons.js";
@@ -30,14 +35,14 @@ const DEMO_SKILLS = [
 ];
 
 const NAV = [
-  { label: "Overview", items: [["dashboard", "Dashboard"], ["skills", "Skills"], ["goals", "Goals"]] },
+  { label: "Overview", items: [["dashboard", "Dashboard"], ["skills", "Skills"], ["pathfinder", "Pathfinder"], ["goals", "Goals"]] },
   { label: "Treasury", items: [["networth", "Net Worth"], ["flipping", "GE Flipping"], ["alchemy", "High Alchemy"]] },
   { label: "Combat", items: [["bossing", "Bossing"], ["slayer", "Slayer"], ["gear", "Gear Path"]] },
   { label: "Skilling", items: [["farming", "Farming"], ["quests", "Quests"], ["diary", "Diary & CA"]] },
 ];
 const TITLES = {
   dashboard: ["The Adventurer's Almanac", "Account Dashboard"], skills: ["Character Progression", "Skills"],
-  goals: ["Time to Goal", "Goal Ledger"], networth: ["The Treasury", "Net Worth"],
+  goals: ["Time to Goal", "Goal Ledger"], pathfinder: ["Dependency Atlas", "The Keystone Web"], networth: ["The Treasury", "Net Worth"],
   flipping: ["Grand Exchange", "Flipping Desk"], alchemy: ["Arcane Profit", "High Alchemy"],
   bossing: ["Command Centre", "Bossing Compendium"], slayer: ["The Slayer", "Task Planner"],
   gear: ["The Armoury", "Gear Progression"], farming: ["The Allotments", "Farming Engine"],
@@ -51,6 +56,7 @@ export default class Almanac extends React.Component {
     slayView: "planner", slayMaster: "Duradel", gearStyle: "melee", gearSlot: "Weapon", gearItem: null, gearStatMode: "set", gearDetail: null,
     questMethod: "optimal", qsortCol: "", qsortDir: 1, qFilterOpen: "", qfSeries: [], qfType: [], qfStatus: [], qName: "", qGate: "",
     tSort: {}, tFilt: {}, tOpen: "", flipPrefill: null, objType: "bank", objBoss: "", flipShowWatch: false, flipCfgVer: 0, _v: 0,
+    counselLens: "balanced", goalId: "none", pfSort: "lev",
   };
 
   // ---- static reference tables (ported from the workbook / design) ----
@@ -247,6 +253,11 @@ export default class Almanac extends React.Component {
     fetchItemNames().then((names) => { this.itemNames = names; this.bump(); }).catch(() => {});
     loadItemIndex().then(() => this.bump()).catch(() => {});
     this.refreshNatRune();
+    // Restore the Oracle's chosen ambition and re-price the activities library
+    // (gp stays live; xp rates are never price-refreshed).
+    const savedGoal = this._load("almanac.counselgoal.v1", null);
+    if (savedGoal) this.setState({ goalId: savedGoal });
+    refreshActivityGp().then(() => this.bump()).catch(() => {});
   }
 
   // Load every persisted collection from localStorage into instance fields.
@@ -444,6 +455,9 @@ export default class Almanac extends React.Component {
 
   // ---------- handlers: navigation & forms ----------
   go = (s) => { this.setState({ section: s, openForm: null }); if (s === "flipping" && !this.priceRows && !this._marketLoading) { this._marketLoading = true; this.refreshPrices(); } };
+  setLens = (id) => this.setState({ counselLens: id });
+  setGoal = (id) => { this.setState({ goalId: id }); this._save("almanac.counselgoal.v1", id); };
+  setPfSort = (id) => this.setState({ pfSort: id });
   resetFlipCfg = () => { this.flipcfg = { ...this.flipDefaults }; this._save("almanac.flipcfg.v1", this.flipcfg); this.setState((s) => ({ flipCfgVer: s.flipCfgVer + 1 })); };
   toggleForm = (f) => this.setState((s) => ({ openForm: s.openForm === f ? null : f, fillResult: null }));
   setCfg = (cfg, key, raw, opts = {}) => { let v = opts.str ? raw : Math.max(0, Math.round(this.parseNum(raw) || 0)); this[cfg][key] = v; this._save("almanac." + cfg + ".v1", this[cfg]); this.bump(); };
@@ -693,6 +707,7 @@ export default class Almanac extends React.Component {
           <div style={{ padding: "24px 30px 60px" }}>
             {sec === "dashboard" && this.renderDashboard(A)}
             {sec === "skills" && this.renderSkills()}
+            {sec === "pathfinder" && this.renderPathfinder()}
             {sec === "goals" && this.renderGoals()}
             {sec === "networth" && this.renderNetWorth()}
             {sec === "flipping" && this.renderFlipping()}
@@ -776,7 +791,547 @@ export default class Almanac extends React.Component {
     return { xp: wSum > 0 ? Math.round(wxp / wSum) : 0, gp: wSum > 0 ? Math.round(wgp / wSum) : 0, blocked: D.slayer.filter((t) => this.blocks[t.task]).length };
   }
 
+  // ===================== ORACLE COUNSEL + PATHFINDER ENGINES =====================
+  // Data-driven recommendation engines over the ACTIVITIES_DATA library and the
+  // SKILL_MILESTONES ladders (ported from the prototype). gp stays LIVE (via the
+  // activityPrices service), xp stays STABLE, and the player's own logs override
+  // library estimates wherever they exist ("your data" vs "estimate").
+
+  // Skill-name -> level map (lowercase keys) + a runecrafting alias.
+  _lvMap() { const lv = {}; this.skillsRaw.forEach(([n, l]) => { lv[n.toLowerCase()] = l; }); lv.runecrafting = lv.runecraft; return lv; }
+  // Parse "70 Attack, Slayer 95"-style gate text into [{skill,lvl}].
+  gateSkills(str) {
+    const out = []; if (!str) return out;
+    const SK = this._skillSet || (this._skillSet = { attack: 1, strength: 1, defence: 1, hitpoints: 1, ranged: 1, prayer: 1, magic: 1, runecraft: 1, construction: 1, agility: 1, herblore: 1, thieving: 1, crafting: 1, fletching: 1, slayer: 1, hunter: 1, mining: 1, smithing: 1, fishing: 1, cooking: 1, firemaking: 1, woodcutting: 1, farming: 1, combat: 1 });
+    const re = /([A-Za-z][A-Za-z']+)\s+(\d+)|(\d+)\s+([A-Za-z][A-Za-z']+)/g; let m;
+    while ((m = re.exec(str))) {
+      let sk, lvl;
+      if (m[1]) { sk = m[1].toLowerCase(); lvl = +m[2]; } else { sk = m[4].toLowerCase(); lvl = +m[3]; }
+      if (sk === "runecrafting") sk = "runecraft";
+      if (SK[sk]) out.push({ skill: sk, lvl });
+    }
+    return out;
+  }
+  // Quest names mentioned in free text (word-boundary match against D.quests).
+  _canonQuests() { if (this._canonQ) return this._canonQ; this._canonQ = (D.quests || []).map((q) => q.n).sort((a, b) => b.length - a.length); return this._canonQ; }
+  questsInText(text) {
+    if (!text) return []; const t = "" + text; const out = [];
+    this._canonQuests().forEach((nm) => {
+      let idx = t.indexOf(nm);
+      while (idx >= 0) { const b = idx === 0 ? " " : t[idx - 1]; const a = idx + nm.length >= t.length ? " " : t[idx + nm.length]; if (!/[A-Za-z0-9]/.test(b) && !/[A-Za-z0-9]/.test(a)) { out.push(nm); break; } idx = t.indexOf(nm, idx + 1); }
+    });
+    return out;
+  }
+  bossReqQuestsC(b) { const M = CONTENT_REQS.bosses || {}; if (M[b.n]) return M[b.n].slice(); return this.questsInText(b.req || ""); }
+  taskReqQuestsC(name) { const M = CONTENT_REQS.tasks || {}; return (M[name] || []).slice(); }
+  questDeps(name) { return QUEST_DEPS[name] || []; }
+
+  counselLensDefs() {
+    return [
+      { id: "balanced", label: "Balanced", w: [0.30, 0.16, 0.26, 0.14, 0.14], dom: {} },
+      { id: "gold", label: "Gold", w: [0.52, 0.05, 0.22, 0.06, 0.15], dom: {} },
+      { id: "xp", label: "XP", w: [0.07, 0.48, 0.17, 0.20, 0.08], dom: {} },
+      { id: "unlock", label: "Unlock", w: [0.14, 0.09, 0.55, 0.10, 0.12], dom: {} },
+      { id: "complete", label: "Complete", w: [0.14, 0.12, 0.28, 0.18, 0.12], dom: { quest: 1.5, diary: 1.5, ca: 1.4 } },
+    ];
+  }
+  // ---- Activities library adapters (Oracle candidate source) ----
+  _actById() { if (this._actByIdCache) return this._actByIdCache; const m = {}; ACTIVITIES_DATA.forEach((a) => { m[a.id] = a; }); this._actByIdCache = m; return m; }
+  // gp normalized to hourly — daily/run loops must NOT be annualized as
+  // continuous income: hr→rate; run→rate×perDay/5; day→rate/5. Rates come from
+  // the live price service when the row is computed, else the snapshot.
+  activityGpHr(a) { if (!a || !a.gp) return 0; let r = liveGpRate(a); if (r < 0) return 0; const per = a.gp.per || "hr"; if (per === "hr") return r; const perDay = (a.loop && a.loop.perDay) || 4; if (per === "run") return Math.round((r * perDay) / 5); if (per === "day") return Math.round(r / 5); return r; }
+  activityXpHr(a) { if (!a || !a.xp || !a.xp.length) return 0; let best = 0; a.xp.forEach((x) => { let r = x.rate || 0; if ((x.per || "hr") === "run") { const dm = (a.loop && a.loop.durationMin) || 10; r = r * (60 / dm); } if (r > best) best = r; }); return Math.round(best); }
+  // 0-100 reachability: count unmet HARD reqs, then dock for the SIZE of the
+  // biggest skill/combat gap so a 94-level wall reads deeply-locked.
+  activityAccess(a, lv, combat, isDone, questByName) {
+    const r = a.reqs || {}; let unmet = 0, total = 0, worstGap = 0;
+    const sk = r.skills || {};
+    Object.keys(sk).forEach((k) => { if (sk[k] > 1) { total++; const cur = lv[k] || 1; if (cur < sk[k]) { unmet++; worstGap = Math.max(worstGap, (sk[k] - cur) / Math.max(1, sk[k])); } } });
+    if (r.combat) { total++; if (combat < r.combat) { unmet++; worstGap = Math.max(worstGap, (r.combat - combat) / Math.max(1, r.combat)); } }
+    (r.quests || []).forEach((nm) => { const q = questByName[nm]; if (!q) return; total++; if (!isDone(q)) unmet++; });
+    // NOTE (deferred): reqs.items possession isn't gated — the app doesn't track
+    // inventory. Quest-chain depth is also deferred here: a quest counts as ONE
+    // gate regardless of its prereq chain length (QUEST_DEPS could weight it;
+    // the Pathfinder's cascade already consumes that graph).
+    if (total === 0 || unmet === 0) return 100;
+    let acc = unmet === 1 ? 62 : Math.max(15, Math.round(100 - unmet * 28));
+    acc = Math.round(acc * (1 - Math.min(0.75, worstGap)));
+    return Math.max(8, acc);
+  }
+  // Personalize an activity's gp from the USER's own logs/config where they have
+  // it (their farm-run nets, their alch margins, their flip ROI × current cash).
+  // Falls back to the library snapshot otherwise. Returns {perRun}|{gpHr,metric}|null.
+  _userGp(a, lv) {
+    if (!a) return null; const id = a.id;
+    if (id === "herb-run") {
+      const fl = (lv && lv.farming) || 1;
+      const runs = (this.farmRunDefs || []).filter((f) => /herb/i.test(f.type || "") && f.gpRun > 0 && fl >= (f.req || 1)).sort((x, y) => y.gpRun - x.gpRun);
+      if (runs[0]) return { perRun: runs[0].gpRun };
+      const defs = (this.farmDefs || []).filter((d) => d.unlocked && d.net > 0).sort((x, y) => y.net - x.net);
+      if (defs[0]) return { perRun: defs[0].net };
+    } else if (id === "high-alch") {
+      const cost = this.alchCost ? this.alchCost() : 180; let best = 0;
+      (this.alchItems || []).forEach((it) => { const m = (it.alch || 0) - (it.buy || 0) - cost; if (m > best) best = m; });
+      if (best > 0) { let cph = (this.alchcfg && this.alchcfg.castsPerHour) || 1200; if (!(cph > 0) || cph > 1400) cph = 1200; /* ~1200/hr is the physical alch ceiling; guard bad config */ return { gpHr: Math.min(Math.round(best * cph), 900000) }; }
+    } else if (id === "ge-flipping") {
+      const flips = (this.logs && this.logs.flips) || []; if (!flips.length) return null;
+      let roiSum = 0, n = 0;
+      flips.forEach((f) => { try { const c = this.computeFlip(f); if (c && isFinite(c.roi)) { roiSum += c.roi; n++; } } catch (e) {} });
+      if (!n) return null; const avgRoi = roiSum / n;
+      const cash = this.logs && this.logs.nw && this.logs.nw.length ? this.logs.nw[this.logs.nw.length - 1].cash || 0 : 0;
+      if (cash > 0) { const est = Math.round((cash * avgRoi) / 100); return { gpHr: est, metric: this.short(est) + "/cycle · " + avgRoi.toFixed(1) + "% ROI" }; }
+      return { gpHr: 0, metric: avgRoi.toFixed(1) + "% ROI" };
+    }
+    return null;
+  }
+  // Build a scored counsel candidate per current activity in the library.
+  activityCandidates() {
+    const AA = ACTIVITIES_DATA; if (!AA.length) return [];
+    const lv = this._lvMap();
+    const combat = this.account.combat || 3;
+    const questByName = {}; (D.quests || []).forEach((q) => (questByName[q.n] = q));
+    const isDone = (q) => this.questDone(q);
+    const goalId = this.state.goalId || "none";
+    const cap = (s) => ("" + (s || "")).charAt(0).toUpperCase() + ("" + (s || "")).slice(1);
+    const GOTO = { pvm: "bossing", minigame: "skills", skilling: "skills", processing: "skills", gathering: "skills", passive: "farming", flip: "flipping" };
+    const out = [];
+    AA.forEach((a) => {
+      if (a.current === false) return;
+      const adv = a.advances || {};
+      const access = this.activityAccess(a, lv, combat, isDone, questByName);
+      const xpHr = this.activityXpHr(a);
+      const _ov = this._userGp(a, lv); const _perDay = (a.loop && a.loop.perDay) || 4;
+      let gpHr, source, ovMetric = "";
+      if (_ov && _ov.perRun != null) { gpHr = Math.round((_ov.perRun * _perDay) / 5); ovMetric = this.short(_ov.perRun) + "/run"; source = "your data"; }
+      else if (_ov && _ov.gpHr != null) { gpHr = _ov.gpHr; ovMetric = _ov.metric || (gpHr > 0 ? this.short(gpHr) + "/hr" : ""); source = "your data"; }
+      else { gpHr = this.activityGpHr(a); source = a.gp ? "estimate" : ""; }
+      const domain = a.subtype === "slayer" ? "slayer" : a.subtype === "boss" || a.category === "pvm" ? "boss" : a.category === "passive" ? "farm" : a.category === "flip" ? "flip" : "train";
+      const rawLev = (adv.unlockv || 0) * 10 + (adv.money || 0) * 2;
+      const onGoal = goalId !== "none" && (adv.goals || []).indexOf(goalId) >= 0;
+      const fit = Math.min(100, (onGoal ? 60 : 20) + (adv.money || 0) * 4 + (adv.xpv || 0) * 3 + (adv.unlockv || 0) * 3);
+      const metric = ovMetric || (a.gp && a.gp.per === "run" && liveGpRate(a) > 0 ? this.short(liveGpRate(a)) + "/run" : a.gp && a.gp.per === "day" && liveGpRate(a) > 0 ? this.short(liveGpRate(a)) + "/day" : gpHr > 0 ? this.short(gpHr) + "/hr" : xpHr > 0 ? this.short(xpHr) + " xp/hr" : "");
+      const px = a.xp && a.xp[0] ? this.short(a.xp[0].rate) + " " + cap(a.xp[0].skill) + " xp/hr" : "";
+      const bits = []; if (gpHr > 0) bits.push("about " + this.short(gpHr) + "/hr"); if (px) bits.push(px);
+      const lead = domain === "boss" ? "Combat money & drops" : domain === "slayer" ? "Slayer xp with income" : gpHr > 0 && xpHr > 0 ? "Money while you train" : gpHr > 0 ? "Idle-friendly income" : xpHr > 0 ? "Efficient training" : "Steady progress";
+      let why = lead + (bits.length ? " — " + bits.join(", ") + "." : ".");
+      if (onGoal) why += " Advances your " + goalId + " goal.";
+      out.push({ domain, title: a.name, gpHr, xpHr, rawLev, fit, access, metric, source, why, goto: GOTO[a.category] || "skills", adv, actId: a.id, daily: a.category === "passive" });
+    });
+    return out;
+  }
+  computeCounsel() {
+    const lv = this._lvMap();
+    const combat = this.account.combat || 3;
+    const goals = this.goals || this.defaultGoals || [];
+    const goalBy = {}; goals.forEach((g) => (goalBy[(g.skill || "").toLowerCase()] = g));
+    const cap = (s) => (s || "").charAt(0).toUpperCase() + (s || "").slice(1);
+    const isDone = (q) => this.questDone(q);
+    const questByName = {}; (D.quests || []).forEach((q) => (questByName[q.n] = q));
+    const readyNow = (q) => !isDone(q) && this.questReqsMet(q);
+    const bossReqQuests = (b) => this.bossReqQuestsC(b);
+    const bossBlockers = (b) => {
+      const reasons = [];
+      if (combat < (b.minCb || 0)) reasons.push({ type: "combat", skill: "combat", need: b.minCb, gap: b.minCb - combat });
+      if ((b.slay || 0) > 0 && (lv.slayer || 1) < b.slay) reasons.push({ type: "skill", skill: "slayer", need: b.slay, gap: b.slay - (lv.slayer || 1) });
+      this.gateSkills(b.req).forEach((g) => { if (g.skill !== "combat" && (lv[g.skill] || 1) < g.lvl) reasons.push({ type: "skill", skill: g.skill, need: g.lvl, gap: g.lvl - (lv[g.skill] || 1) }); });
+      bossReqQuests(b).forEach((nm) => { const q = questByName[nm]; if (q && !isDone(q)) reasons.push({ type: "quest", quest: nm, ready: readyNow(q) }); });
+      return reasons;
+    };
+    const bossGp = (b) => { const e = this.bossEff(b); return typeof e.estGp === "number" ? e.estGp : 0; };
+    const diaryUtil = (d) => { const r = (d.reward || "").toLowerCase(); let u = { easy: 1, medium: 1.6, hard: 2.4, elite: 3.4 }[(d.tier || "").toLowerCase()] || 1; let k = 0.4; if (/unlimited teleport|unlimited/.test(r)) k = 2.2; else if (/teleport/.test(r)) k = 1.5; else if (/xp|prayer|run energy|slayer/.test(r)) k = 1.3; else if (/cosmetic|no new benefit/.test(r)) k = 0.3; return u * k; };
+
+    // ---- bottleneck (reverse-dependency) graph ----
+    const locked = {}, cnt = {};
+    const addLock = (sk, v, kind) => { if (!sk) return; locked[sk] = (locked[sk] || 0) + v; if (!cnt[sk]) cnt[sk] = { quest: 0, diary: 0, boss: 0, task: 0 }; if (kind) cnt[sk][kind]++; };
+    (D.bosses || []).forEach((b) => { const gp = bossGp(b); if (gp <= 0) return; const rs = bossBlockers(b).filter((r) => r.type !== "quest"); if (!rs.length) return; const share = gp / 1e4 / rs.length; rs.forEach((r) => addLock(r.skill, share, "boss")); });
+    (D.slayer || []).forEach((t) => { if ((t.slay || 1) > (lv.slayer || 1)) addLock("slayer", (t.ev || t.gpHr || 0) / 4e4, "task"); });
+    (D.quests || []).forEach((q) => { if (isDone(q) || this.questReqsMet(q)) return; const gs = this.gateSkills(q.gate).filter((g) => (lv[g.skill] || 1) < g.lvl); if (!gs.length) return; const val = ((q.qp || 1) * 3) / gs.length; gs.forEach((g) => addLock(g.skill, val, "quest")); });
+    (D.diaries || []).forEach((d) => { if (this.diaryStatus(d) === "Done") return; const gs = this.gateSkills(d.gate).filter((g) => (lv[g.skill] || 1) < g.lvl); if (!gs.length) return; const val = (diaryUtil(d) * 2) / gs.length; gs.forEach((g) => addLock(g.skill, val, "diary")); });
+    const bottleneck = Object.keys(locked).filter((s) => s !== "combat").map((s) => ({ skill: s, val: locked[s], cnt: cnt[s] || {} })).sort((a, b) => b.val - a.val);
+
+    // ---- candidate generation ----
+    const lg = (v, lo, hi) => { if (v <= 0) return 0; const a = Math.log10(v); return Math.max(0, Math.min(100, ((a - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo))) * 100)); };
+    const cands = [];
+    const push = (c) => { c.gpHr = c.gpHr || 0; c.xpHr = c.xpHr || 0; c.rawLev = c.rawLev || 0; c.fit = c.fit || 0; c.access = c.access == null ? 100 : c.access; cands.push(c); };
+
+    // (Retired legacy blocks — "best boss now", "combat milestone → boss", the
+    //  hardcoded High Alchemy / farm-run / slayer-task / flip-deploy pushes.
+    //  Those methods now come from ACTIVITIES_DATA with correct goal-tags via
+    //  activityCandidates(); combat progression lives in the Pathfinder.)
+
+    // C. stat-ready quests that unlock a premier boss (chain reasoning)
+    const chain = [];
+    (D.quests || []).forEach((q) => {
+      if (!readyNow(q)) return; let best = null, bestOther = null;
+      (D.bosses || []).forEach((b) => { if (bossGp(b) <= 0) return; const rs = bossBlockers(b); if (!rs.some((r) => r.type === "quest" && r.quest === q.n)) return; const other = rs.filter((r) => !(r.type === "quest" && r.quest === q.n)); const okOther = other.every((r) => r.type === "combat" || (r.type === "quest" && r.ready)); if (okOther && (!best || bossGp(b) > bossGp(best))) { best = b; bestOther = other; } });
+      if (best) { const cbR = bestOther.find((r) => r.type === "combat"); chain.push({ q: q.n, boss: best, gp: bossGp(best), cbNeed: cbR ? cbR.need : 0, cbGap: cbR ? cbR.gap : 0 }); }
+    });
+    chain.sort((a, b) => b.gp - a.gp);
+    const chainWhy = (c, lead) => { let s = lead + " Completing it opens " + c.boss.n + " — about " + this.short(c.gp) + "/hr."; if (c.cbGap > 0) s += c.cbGap <= 3 ? " You are only ~" + c.cbGap + " combat from entry." : " Pair it with ~" + c.cbNeed + " combat to step in."; return s; };
+    if (chain[0]) { const c = chain[0]; push({ domain: "quest", title: "Complete " + c.q, gpHr: c.gp, xpHr: 0, rawLev: Math.sqrt(c.gp / 1e4) * 11, fit: 74, access: 100, metric: "unlocks " + c.boss.n, why: chainWhy(c, "A quest you can start now."), goto: "quests" }); }
+    if (chain[1]) { const c = chain[1]; push({ domain: "quest", title: "Complete " + c.q, gpHr: c.gp, xpHr: 0, rawLev: Math.sqrt(c.gp / 1e4) * 9, fit: 66, access: 100, metric: "unlocks " + c.boss.n, why: chainWhy(c, "Ready right now."), goto: "quests" }); }
+
+    // G. clear a bottleneck skill (top 2 by locked value)
+    bottleneck.slice(0, 2).forEach((bn, i) => {
+      const sk = bn.skill, cur = lv[sk] || 1, goal = goalBy[sk], tgt = goal ? goal.tgt : Math.min(70, cur + 20), c = bn.cnt || {};
+      const parts = []; if (c.boss) parts.push(c.boss + " boss" + (c.boss > 1 ? "es" : "")); if (c.task) parts.push(c.task + " slayer task" + (c.task > 1 ? "s" : "")); if (c.quest) parts.push(c.quest + " quest" + (c.quest > 1 ? "s" : "")); if (c.diary) parts.push(c.diary + " diar" + (c.diary > 1 ? "ies" : "y"));
+      const blurb = parts.join(", ") || "downstream content";
+      push({ domain: "train", skill: sk, title: "Train " + cap(sk) + " " + cur + " → " + tgt, gpHr: 0, xpHr: Math.max(0, goal ? goal.xpHr : 20000), rawLev: Math.sqrt(bn.val) * (i === 0 ? 13 : 9), fit: goal ? 100 : 60, access: 100, metric: "unblocks " + (parts[0] || "content"), why: cap(sk) + " sits at " + cur + " — " + (i === 0 ? "the single deepest lock on your account" : "a major lock") + ". It gates " + blurb + ". Nothing else you do compounds this hard.", goto: "skills" });
+    });
+
+    // H. a diary reward you can claim now
+    const doDiary = (D.diaries || []).filter((d) => this.diaryStatus(d) === "Stat-ready").map((d) => ({ d, u: diaryUtil(d) })).sort((a, b) => b.u - a.u)[0];
+    if (doDiary) { const d = doDiary.d, rw = (d.reward || "").split("—")[0].trim(); push({ domain: "diary", title: d.region + " " + d.tier + " Diary", gpHr: 0, xpHr: 0, rawLev: doDiary.u * 3, fit: 52, access: 100, metric: rw, why: "Ready to claim now. Grants " + rw + " — permanent quality-of-life you keep forever and compounds every session.", goto: "diary" }); }
+
+    // ---- inject the Activities library (money / training / daily methods, goal-tagged) ----
+    this.activityCandidates().forEach(push);
+    // dedupe by title (ledger candidates ran first, so their richer prose wins)
+    (function () { const seen = {}, uniq = []; cands.forEach((c) => { const k = (c.title || "").toLowerCase(); if (seen[k]) return; seen[k] = 1; uniq.push(c); }); cands.length = 0; Array.prototype.push.apply(cands, uniq); })();
+
+    // ---- scoring: access is a MULTIPLICATIVE gate so a locked 17M/hr boss
+    // can't out-score reachable methods ----
+    const maxLev = Math.max.apply(null, [1].concat(cands.map((c) => c.rawLev)));
+    cands.forEach((c) => { c.gpS = lg(c.gpHr, 40000, 3000000); c.xpS = lg(c.xpHr, 8000, 400000); c.levS = Math.round((c.rawLev / maxLev) * 100); c.fitS = Math.round(c.fit); c.accS = c.access; });
+    const lens = this.state.counselLens || "balanced";
+    const LD = this.counselLensDefs(), L = LD.find((x) => x.id === lens) || LD[0];
+    cands.forEach((c) => { const dm = (L.dom && L.dom[c.domain]) || 1; const accMult = Math.pow(Math.max(0, Math.min(100, c.access == null ? 100 : c.access)) / 100, 1.3); c.score = (L.w[0] * c.gpS + L.w[1] * c.xpS + L.w[2] * c.levS + L.w[3] * c.fitS + L.w[4] * c.accS) * dm * accMult; });
+    cands.sort((a, b) => b.score - a.score);
+
+    // ---- ambition engine: bias the whole queue toward a chosen end-goal ----
+    const goalId = this.state.goalId || "none";
+    const nwLast = this.logs && this.logs.nw && this.logs.nw.length ? this.logs.nw[this.logs.nw.length - 1] : { cash: 0, items: 0 };
+    const netWorth = (nwLast.cash || 0) + (nwLast.items || 0);
+    const qDone = (D.quests || []).filter((q) => isDone(q)).length, qTotal = (D.quests || []).length || 1;
+    const diTotal = (D.diaries || []).length || 1, diDone = (D.diaries || []).filter((d) => this.diaryStatus(d) === "Done").length;
+    const totalLevel = this.skillsRaw.reduce((a, s) => a + s[1], 0);
+    const skillArr = this.skillsRaw.map((s) => ({ n: s[0], nl: s[0].toLowerCase(), l: s[1] }));
+    const GS = { none: { label: "Free Counsel", icon: "🧭" }, questcape: { label: "Quest Cape", icon: "📜" }, base70: { label: "Base 70", icon: "🛡️", N: 70 }, base80: { label: "Base 80", icon: "⚔️", N: 80 }, max: { label: "Max — all 99", icon: "👑" }, bank: { label: "1B Bank", icon: "💰", target: 1e9 }, diary: { label: "Diary Cape", icon: "🗺️" }, firecape: { label: "Fire Cape", icon: "🔥" }, gloves: { label: "Barrows Gloves", icon: "🧤" } };
+    const goalOrder = ["none", "questcape", "base70", "base80", "max", "bank", "diary", "firecape", "gloves"];
+    const belowN = (N) => skillArr.filter((s) => s.l < N).sort((a, b) => a.l - b.l);
+    const cntSk = (sk, kind) => (cnt[sk] && cnt[sk][kind]) || 0;
+    const gspec = GS[goalId] || GS.none;
+    let goalPct = 0, goalPath = "";
+    const goalActive = goalId !== "none" && !!GS[goalId];
+    if (goalId === "questcape") { goalPct = qDone / qTotal; const qb = Object.keys(cnt).filter((s) => s !== "combat" && cnt[s].quest > 0).map((s) => ({ s, n: cnt[s].quest })).sort((a, b) => b.n - a.n)[0]; const readyQ = (D.quests || []).filter((q) => readyNow(q)).length; goalPath = qTotal - qDone + " quests remain · " + readyQ + " you can do now" + (qb ? " · training " + cap(qb.s) + " clears " + qb.n + " more" : ""); }
+    else if (goalId === "base70" || goalId === "base80") { const N = GS[goalId].N, below = belowN(N); goalPct = (skillArr.length - below.length) / skillArr.length; goalPath = below.length ? below.length + " skills below " + N + " · lowest: " + below.slice(0, 3).map((s) => cap(s.n) + " " + s.l).join(", ") : "Every skill at " + N + " — done!"; }
+    else if (goalId === "max") { goalPct = totalLevel / 2277; const below = belowN(99); goalPath = 2277 - totalLevel + " levels from 2277 · lowest: " + below.slice(0, 3).map((s) => cap(s.n) + " " + s.l).join(", "); }
+    else if (goalId === "bank") { goalPct = netWorth / GS.bank.target; const doable = cands.filter((c) => c.gpHr > 0 && (c.access == null || c.access >= 100)); const tm = (doable.length ? doable : cands.filter((c) => c.gpHr > 0)).sort((a, b) => b.gpHr - a.gpHr)[0]; goalPath = this.short(Math.max(0, GS.bank.target - netWorth)) + " from 1B · fastest lever you can do now: " + (tm ? tm.title + " (~" + this.short(tm.gpHr) + "/hr)" : "stack money makers"); }
+    else if (goalId === "diary") { goalPct = diDone / diTotal; const db = Object.keys(cnt).filter((s) => s !== "combat" && cnt[s].diary > 0).map((s) => ({ s, n: cnt[s].diary })).sort((a, b) => b.n - a.n)[0]; goalPath = diTotal - diDone + " diaries remain" + (db ? " · training " + cap(db.s) + " clears " + db.n : ""); }
+    else if (goalId === "firecape") { const r = lv.ranged || 1, p = lv.prayer || 1; goalPct = Math.min(1, (Math.min(r, 75) / 75) * 0.7 + (Math.min(p, 43) / 43) * 0.3); goalPath = r >= 75 && p >= 43 ? "Ranged " + r + " · Prayer " + p + " — brave the Fight Caves!" : "Ranged " + r + "/75 · Prayer " + p + "/43 · build ranged + prayer first"; }
+    else if (goalId === "gloves") { const need = [["herblore", 31], ["fishing", 50], ["cooking", 70]]; const unmet = need.filter((x) => (lv[x[0]] || 1) < x[1]); goalPct = (need.length - unmet.length) / need.length; goalPath = unmet.length ? "RFD gated on " + unmet.map((x) => cap(x[0]) + " " + x[1] + " (now " + (lv[x[0]] || 1) + ")").join(", ") : "Skill gates met — grind the RFD subquests"; }
+    const biasOf = (c) => {
+      if (!goalActive) return 1; const sk = c.skill || "", g = c.gpS || 0;
+      // Activity candidates carry real goal-tags: strongly prefer on-goal, demote
+      // off-goal. (This is what stops High Alchemy leaking onto a Diary path.)
+      if (c.adv) { return (c.adv.goals || []).indexOf(goalId) >= 0 ? 1.9 : 0.45; }
+      if (goalId === "questcape") { if (c.domain === "quest") return 2.0; if (c.domain === "train") return 1.2 + Math.min(1, cntSk(sk, "quest") / 6) * 0.9; if (c.domain === "diary") return 0.85; return 0.92; }
+      if (goalId === "base70" || goalId === "base80") { const N = GS[goalId].N; if (c.domain === "train") return (lv[sk] || 99) < N ? 2.2 : 0.7; if (c.domain === "boss" || c.domain === "slayer" || c.domain === "combat") return 1.3; return 0.85; }
+      if (goalId === "max") { if (c.domain === "train") return 1.7; if (c.domain === "alch" || c.domain === "farm" || c.domain === "slayer") return 1.2; return 0.92; }
+      if (goalId === "bank") { if (c.gpHr > 0 || c.domain === "quest") return 1 + Math.min(1.4, (g / 100) * 1.4); if (c.domain === "train") return 0.65; return 0.85; }
+      if (goalId === "diary") { if (c.domain === "diary") return 2.0; if (c.domain === "train") return 1.15 + Math.min(1, cntSk(sk, "diary") / 6) * 0.8; return 0.9; }
+      if (goalId === "firecape") { if (c.domain === "train" && (sk === "ranged" || sk === "prayer" || sk === "defence")) return 1.9; if (c.domain === "boss" || c.domain === "slayer" || c.domain === "combat") return 1.5; return 0.85; }
+      if (goalId === "gloves") { if (c.domain === "quest") return 1.7; if (c.domain === "train" && (sk === "herblore" || sk === "fishing" || sk === "cooking")) return 2.0; return 0.85; }
+      return 1;
+    };
+    cands.forEach((c) => { c.goalMult = biasOf(c); c.score *= c.goalMult; c.onPath = goalActive && c.goalMult > 1.08; });
+    cands.sort((a, b) => b.score - a.score);
+    if (typeof window !== "undefined") window.__counsel = cands; // debug: inspect the full ranked candidate list
+    const goalChips = goalOrder.map((id) => ({ id, icon: GS[id].icon, label: GS[id].label, active: id === goalId, bg: id === goalId ? "#e3c878" : "rgba(255,255,255,.05)", fg: id === goalId ? "#2c2013" : "#c3b0da", bd: id === goalId ? "#e3c878" : "rgba(227,200,120,.16)" }));
+
+    // ---- presentation ----
+    const DGL = { boss: { g: "⚔️", c: "#a23a2c", label: "Bossing", goto: "bossing" }, slayer: { g: "💀", c: "#7a2a1f", label: "Slayer", goto: "slayer" }, train: { g: "📈", c: "#2f7d72", label: "Skilling", goto: "skills" }, alch: { g: "🔮", c: "#6a4a8a", label: "Alchemy", goto: "alchemy" }, farm: { g: "🌿", c: "#5c7a35", label: "Farming", goto: "farming" }, quest: { g: "📜", c: "#4a59a0", label: "Quest", goto: "quests" }, diary: { g: "🗺️", c: "#2f7d7a", label: "Diary", goto: "diary" }, flip: { g: "💰", c: "#b8863a", label: "Flipping", goto: "flipping" }, combat: { g: "⚔️", c: "#a23a2c", label: "Combat", goto: "bossing" } };
+    const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"];
+    const mk = (c, i) => {
+      const dg = DGL[c.domain] || DGL.boss; const accLabel = c.access >= 100 ? "Ready now" : c.access >= 60 ? "Almost there" : "Locked"; const accColor = c.access >= 100 ? "#8fbf5a" : c.access >= 60 ? "#d0a94e" : "#d98a6a";
+      return {
+        rank: ROMAN[i] || "" + (i + 1), rankColor: c.onPath ? "#e3c878" : "#6a5a88", onPath: !!c.onPath, glyph: dg.g, domColor: dg.c, domLabel: dg.label, title: c.title, why: c.why, metric: c.metric || "", src: c.source || "", hasSrc: !!c.source, srcColor: c.source === "your data" ? "#8fbf5a" : "#9a86c0", accLabel, accColor, goto: c.goto || dg.goto,
+        bars: [{ k: "GOLD", pct: Math.max(3, c.gpS).toFixed(0) + "%", color: "#d2a94f", val: Math.round(c.gpS) }, { k: "XP", pct: Math.max(3, c.xpS).toFixed(0) + "%", color: "#46a596", val: Math.round(c.xpS) }, { k: "LEV", pct: Math.max(3, c.levS).toFixed(0) + "%", color: "#9a7bc0", val: Math.round(c.levS) }, { k: "FIT", pct: Math.max(3, c.fitS).toFixed(0) + "%", color: "#8fbf5a", val: Math.round(c.fitS) }, { k: "ACC", pct: Math.max(3, c.accS).toFixed(0) + "%", color: "#d0a94e", val: Math.round(c.accS) }],
+      };
+    };
+    const hero = cands[0] ? mk(cands[0], 0) : null;
+    const queue = cands.slice(1, 7).map((c, i) => mk(c, i + 1));
+    const synthCount = (D.quests || []).length + (D.diaries || []).length + (D.bosses || []).length + (D.slayer || []).length + this.skillsRaw.length + goals.length + ((this.logs && this.logs.flips) || []).length + (this.alchItems || []).length + (this.farmRunDefs || []).length;
+    const topBn = bottleneck[0], bnc = topBn ? topBn.cnt : {}; const bnParts = []; if (bnc.boss) bnParts.push(bnc.boss + " bosses"); if (bnc.task) bnParts.push(bnc.task + " tasks"); if (bnc.quest) bnParts.push(bnc.quest + " quests"); if (bnc.diary) bnParts.push(bnc.diary + " diaries");
+    const lenses = LD.map((x) => ({ id: x.id, label: x.label, active: x.id === lens, bg: x.id === lens ? "#e3c878" : "transparent", fg: x.id === lens ? "#2c2013" : "#c9a24e" }));
+    return {
+      counselHero: hero, counselQueue: queue, counselLenses: lenses, counselSynth: "" + synthCount, counselDomains: "9", counselBnLabel: topBn ? cap(topBn.skill) + " " + (lv[topBn.skill] || 1) : "—", counselBnParts: bnParts.join(" · ") || "nothing right now", counselLensName: L.label,
+      counselGoals: goalChips, counselGoalActive: goalActive, counselGoalLabel: gspec.label, counselGoalPct: (Math.max(0, Math.min(1, goalPct)) * 100).toFixed(1) + "%", counselGoalPctLabel: Math.round(Math.min(1, goalPct) * 100) + "%", counselGoalPath: goalPath,
+    };
+  }
+
+  // ---------- The Keystone Web: dependency-aware bottleneck / cascade engine ----------
+  _pfSig() { return this.skillsRaw.map((s) => s[1]).join(",") + "|" + (this.account.combat || 0) + "|" + (this.state.pfSort || "lev") + "|" + Object.keys(this.questOv || {}).filter((k) => this.questOv[k]).sort().join("~"); }
+  computePathfinder() { const sig = this._pfSig(); if (this._pfCache && this._pfCache.sig === sig) return this._pfCache.data; const data = this._buildPathfinder(); this._pfCache = { sig, data }; return data; }
+  _buildPathfinder() {
+    const lv0 = this._lvMap();
+    const combat0 = this.account.combat || 3;
+    const cap = (s) => (s || "").charAt(0).toUpperCase() + (s || "").slice(1);
+    const isDone = (q) => this.questDone(q);
+    const questByName = {}; (D.quests || []).forEach((q) => (questByName[q.n] = q));
+    const bossReqQuests = (b) => this.bossReqQuestsC(b);
+    const diaryUtil = (d) => { const r = (d.reward || "").toLowerCase(); let u = { easy: 1, medium: 1.6, hard: 2.4, elite: 3.4 }[(d.tier || "").toLowerCase()] || 1; let k = 0.4; if (/unlimited teleport|unlimited/.test(r)) k = 2.2; else if (/teleport/.test(r)) k = 1.5; else if (/xp|prayer|run energy|slayer/.test(r)) k = 1.3; else if (/cosmetic|no new benefit/.test(r)) k = 0.3; return u * k; };
+    const bossGp = (b) => { const e = this.bossEff(b); return typeof e.estGp === "number" ? e.estGp : 0; };
+    const questValue = (q) => { let v = (q.qp || 1) * 2; const k = (q.key || "").toLowerCase(); if (/barrows glove|ancient|dragon slayer|blowpipe|ava|salve|fairy ring|lunar|prifddinas|faerdhinen|bofa| v's shield|ectophial|dragon defender/.test(k)) v += 15; else if (k && k !== "-") v += 4; return v; };
+
+    // done set (mutable base)
+    const doneBase = {}; (D.quests || []).forEach((q) => { if (isDone(q)) doneBase[q.n] = true; });
+
+    // requirement key helpers
+    const skKey = (s, l) => "S:" + s + ":" + l, cbKey = (l) => "C:" + l, qKey = (n) => "Q:" + n;
+    const SK = { attack: 1, strength: 1, defence: 1, hitpoints: 1, ranged: 1, prayer: 1, magic: 1, runecraft: 1, construction: 1, agility: 1, herblore: 1, thieving: 1, crafting: 1, fletching: 1, slayer: 1, hunter: 1, mining: 1, smithing: 1, fishing: 1, cooking: 1, firemaking: 1, woodcutting: 1, farming: 1 };
+    const parseGates = (str) => { const out = []; if (!str) return out; const re = /([A-Za-z][A-Za-z']+)\s+(\d+)|(\d+)\s+([A-Za-z][A-Za-z']+)/g; let m; while ((m = re.exec(str))) { let s, l; if (m[1]) { s = m[1].toLowerCase(); l = +m[2]; } else { s = m[4].toLowerCase(); l = +m[3]; } if (s === "runecrafting") s = "runecraft"; if (SK[s]) out.push({ s, l }); } return out; };
+
+    // build content nodes with requirement key-lists
+    const DOM = { boss: { icon: "⚔️", color: "#a23a2c", label: "boss", plural: "bosses", goto: "bossing" }, task: { icon: "💀", color: "#7a2a1f", label: "task", plural: "tasks", goto: "slayer" }, quest: { icon: "📜", color: "#4a59a0", label: "quest", plural: "quests", goto: "quests" }, diary: { icon: "🗺️", color: "#2f7d7a", label: "diary", plural: "diaries", goto: "diary" }, gear: { icon: "🛡️", color: "#9a7233", label: "gear piece", plural: "gear", goto: "gear" } };
+    const items = []; // locked content
+    const reqOfQuest = {}; // name -> req keys (skills + prereq quests)
+    (D.quests || []).forEach((q) => { const reqs = []; parseGates(q.gate).forEach((g) => reqs.push(skKey(g.s, g.l))); this.questDeps(q.n).forEach((pn) => { if (questByName[pn]) reqs.push(qKey(pn)); }); reqOfQuest[q.n] = reqs; });
+    (D.quests || []).forEach((q) => { if (isDone(q)) return; items.push({ type: "quest", name: q.n, value: questValue(q), reqs: reqOfQuest[q.n] || [], goto: "quests" }); });
+    (D.diaries || []).forEach((d) => { if (this.diaryStatus(d) === "Done") return; const reqs = []; parseGates(d.gate).forEach((g) => reqs.push(skKey(g.s, g.l))); items.push({ type: "diary", name: d.region + " " + d.tier, value: diaryUtil(d) * 3, reqs, goto: "diary" }); });
+    (D.bosses || []).forEach((b) => { const gp = bossGp(b); if (gp <= 0) return; const reqs = []; if (b.minCb) reqs.push(cbKey(b.minCb)); if (b.slay > 0) reqs.push(skKey("slayer", b.slay)); parseGates(b.req).forEach((g) => { if (g.s !== "combat") reqs.push(skKey(g.s, g.l)); }); bossReqQuests(b).forEach((pn) => { if (questByName[pn]) reqs.push(qKey(pn)); }); items.push({ type: "boss", name: b.n, value: gp / 1e4, reqs, goto: "bossing", gp }); });
+    (D.slayer || []).forEach((t) => { const qr = this.taskReqQuestsC(t.task); if ((t.slay || 1) <= 1 && !qr.length) return; const reqs = []; if ((t.slay || 1) > 1) reqs.push(skKey("slayer", t.slay)); qr.forEach((pn) => { if (questByName[pn]) reqs.push(qKey(pn)); }); items.push({ type: "task", name: t.task, value: (t.ev || t.gpHr || 0) / 4e4, reqs, goto: "slayer", gpHr: t.gpHr }); });
+    // gear dimension: quest-gated equipment (BiS pieces locked behind quests)
+    const gearSeen = {};
+    Object.keys(GEAR_DATA).forEach((st) => { (GEAR_DATA[st] || []).forEach((sl) => { (sl.items || []).forEach((it) => { if (gearSeen[it.n]) return; const qs = this.questsInText(it.req || ""); if (!qs.length) return; gearSeen[it.n] = 1; const reqs = []; parseGates(it.req).forEach((g) => { if (g.s !== "combat") reqs.push(skKey(g.s, g.l)); }); qs.forEach((pn) => { if (questByName[pn]) reqs.push(qKey(pn)); }); items.push({ type: "gear", name: it.n, value: 6, reqs, goto: "gear" }); }); }); });
+
+    // met-state evaluator over a mutable world (lv map, combat, done set)
+    const metKey = (key, lvm, cb, dn) => { const p = key.split(":"); if (p[0] === "S") return (lvm[p[1]] || 1) >= +p[2]; if (p[0] === "C") return cb >= +p[1]; return !!dn[p[1]]; };
+    const unmetReqs = (it, lvm, cb, dn) => it.reqs.filter((r) => !metKey(r, lvm, cb, dn));
+    const blocked = (it) => unmetReqs(it, lv0, combat0, doneBase).length > 0;
+    const lockedItems = items.filter(blocked);
+
+    // simulate an action -> {direct:[items], horizon:[items]}
+    const simulate = (action) => {
+      const lvm = Object.assign({}, lv0); let cb = combat0; const dn = Object.assign({}, doneBase);
+      if (action.kind === "skill") lvm[action.s] = Math.max(lvm[action.s] || 1, action.l);
+      else if (action.kind === "combat") cb = Math.max(cb, action.l);
+      else if (action.kind === "quest") dn[action.name] = true;
+      // direct: locked items fully met after this single action
+      const direct = lockedItems.filter((it) => unmetReqs(it, lvm, cb, dn).length === 0);
+      // horizon: keep completing any now-doable locked quest, cascade
+      const dn2 = Object.assign({}, dn); let changed = true, guard = 0;
+      while (changed && guard < 12) { changed = false; guard++; (D.quests || []).forEach((q) => { if (dn2[q.n]) return; if (unmetReqs({ reqs: reqOfQuest[q.n] || [] }, lvm, cb, dn2).length === 0) { dn2[q.n] = true; changed = true; } }); }
+      const horizon = lockedItems.filter((it) => (it.type !== "quest" || !dn[it.name]) && unmetReqs(it, lvm, cb, dn2).length === 0);
+      return { direct, horizon };
+    };
+    const summarize = (list) => { const c = { boss: 0, task: 0, quest: 0, diary: 0, gear: 0 }; let val = 0; list.forEach((it) => { c[it.type]++; val += it.value; }); return { counts: c, val }; };
+
+    // ---- keystone candidates ----
+    const keystones = [];
+    // skill keystones — walk the MILESTONE ladder to the NEXT breakpoint instead
+    // of one global-max leap. Ranking (lev) reflects the skill's full DOWNSTREAM
+    // value (reach = what maxing it eventually opens), but the ACTION targets the
+    // realistic next rung, with a time estimate and the method to climb it.
+    const MS = SKILL_MILESTONES;
+    const actById = this._actById();
+    const rungType = (t) => (t === "boss" || t === "monster" ? "boss" : t === "gear" ? "gear" : t === "area" ? "quest" : "task");
+    const mergeDir = (dObj, curated) => { const c = Object.assign({}, dObj.counts); let v = dObj.val; curated.forEach((u) => { c[u.type] = (c[u.type] || 0) + 1; v += u.value || 1; }); return { counts: c, val: v }; };
+    Object.keys(MS).forEach((key) => {
+      const L = MS[key]; if (!L || L.kind === "combat") return;
+      const cur = lv0[key] || 1;
+      const bps = (L.rungs || []).filter((r) => r.isBreakpoint && r.level > cur).sort((a, b) => a.level - b.level);
+      if (!bps.length) return;
+      const nextRung = bps[0], topLevel = bps[bps.length - 1].level;
+      const simTop = simulate({ kind: "skill", s: key, l: topLevel }); const dT = summarize(simTop.direct), hT = summarize(simTop.horizon); const reach = dT.val + 0.35 * hT.val;
+      const simN = simulate({ kind: "skill", s: key, l: nextRung.level }); const dN = summarize(simN.direct), hN = summarize(simN.horizon);
+      const rungVal = (nextRung.unlocks || []).reduce((a, u) => a + (u.value || 1), 0);
+      const levels = nextRung.level - cur, xp = Math.max(0, this.xpFor(nextRung.level) - this.xpFor(cur));
+      const mId = (nextRung.band && nextRung.band.method && nextRung.band.method[0]) || null;
+      const mAct = mId ? actById[mId] : null, rate = mAct ? this.activityXpHr(mAct) : 0, hours = rate > 0 ? Math.round(xp / rate) : 0;
+      const impact = reach + rungVal; if (impact <= 0) return;
+      const curated = (nextRung.unlocks || []).map((u) => ({ name: u.name, value: u.value || 1, type: rungType(u.type) }));
+      keystones.push({ kind: "skill", skill: key, level: nextRung.level, action: "Train " + cap(key) + " to " + nextRung.level,
+        effortLabel: "+" + levels + " lvl · " + this.short(xp) + " xp" + (hours > 0 ? " · ~" + hours + "h" : ""),
+        why: nextRung.why || "", methodName: mAct ? mAct.name : "", hours,
+        dir: mergeDir(dN, curated), hor: hN, impact, lev: impact / (1 + levels * 0.03), unlocked: curated.concat(simN.direct), goto: "skills" });
+    });
+    // combat keystone — same laddering; also feeds the chokepoint section via bestCb.
+    let bestCb = null;
+    (() => {
+      const L = MS.combat; if (!L) return; const cur = combat0;
+      const bps = (L.rungs || []).filter((r) => r.isBreakpoint && r.level > cur).sort((a, b) => a.level - b.level); if (!bps.length) return;
+      const nextRung = bps[0], topLevel = bps[bps.length - 1].level;
+      const simTop = simulate({ kind: "combat", l: topLevel }); const dT = summarize(simTop.direct), hT = summarize(simTop.horizon); const reach = dT.val + 0.35 * hT.val;
+      const simN = simulate({ kind: "combat", l: nextRung.level }); const dN = summarize(simN.direct), hN = summarize(simN.horizon);
+      const rungVal = (nextRung.unlocks || []).reduce((a, u) => a + (u.value || 1), 0); const levels = nextRung.level - cur; const impact = reach + rungVal; if (impact <= 0) return;
+      const curated = (nextRung.unlocks || []).map((u) => ({ name: u.name, value: u.value || 1, type: rungType(u.type) }));
+      bestCb = { l: nextRung.level, dir: mergeDir(dN, curated), hor: hN, impact, lev: impact / (1 + levels * 0.05), direct: simN.direct };
+      keystones.push({ kind: "combat", level: nextRung.level, action: "Reach " + nextRung.level + " Combat", effortLabel: "+" + levels + " combat lvl",
+        why: nextRung.why || "", methodName: "", hours: 0, dir: bestCb.dir, hor: hN, impact, lev: bestCb.lev, unlocked: curated.concat(simN.direct), goto: "bossing" });
+    })();
+    // quest keystones: any not-done quest that unlocks >=1 item
+    (D.quests || []).forEach((q) => { if (isDone(q)) return; const sim = simulate({ kind: "quest", name: q.n }); const d = summarize(sim.direct), h = summarize(sim.horizon); if (d.val + h.val <= 0) return; const unmetPre = (reqOfQuest[q.n] || []).filter((r) => r[0] === "Q" && !metKey(r, lv0, combat0, doneBase)).length; const unmetSk = (reqOfQuest[q.n] || []).filter((r) => r[0] === "S" && !metKey(r, lv0, combat0, doneBase)).length; const eff = 1 + unmetPre * 0.4 + unmetSk * 0.25; const impact = d.val + 0.45 * h.val; keystones.push({ kind: "quest", name: q.n, action: "Complete " + q.n, effortLabel: unmetPre ? unmetPre + " prereq quest" + (unmetPre > 1 ? "s" : "") + " first" : unmetSk ? unmetSk + " stat gate" + (unmetSk > 1 ? "s" : "") : "ready to start", dir: d, hor: h, impact, lev: impact / eff, unlocked: sim.direct, goto: "quests" }); });
+
+    // rank
+    const byImpact = keystones.slice().sort((a, b) => b.impact - a.impact);
+    const byLev = keystones.slice().sort((a, b) => b.lev - a.lev);
+
+    // presentation for a keystone
+    const KIND = { skill: { icon: "📈", color: "#2f7d72" }, combat: { icon: "⚔️", color: "#a23a2c" }, quest: { icon: "📜", color: "#4a59a0" } };
+    const chip = (c) => { const out = []; ["boss", "task", "quest", "diary", "gear"].forEach((t) => { if (c.counts[t] > 0) out.push({ icon: DOM[t].icon, n: "" + c.counts[t], color: DOM[t].color }); }); return out; };
+    const maxImpact = Math.max.apply(null, [1].concat(keystones.map((k) => k.impact)));
+    const maxLev = Math.max.apply(null, [1].concat(keystones.map((k) => k.lev)));
+    const mkK = (k, i, scoreKey) => {
+      const kd = KIND[k.kind] || KIND.skill; const tot = k.dir.counts.boss + k.dir.counts.task + k.dir.counts.quest + k.dir.counts.diary + k.dir.counts.gear; const horTot = k.hor.counts.boss + k.hor.counts.task + k.hor.counts.quest + k.hor.counts.diary + k.hor.counts.gear;
+      const unl = (k.unlocked || []).slice().sort((a, b) => b.value - a.value).slice(0, 10).map((it) => ({ name: it.name, color: DOM[it.type].color, icon: DOM[it.type].icon }));
+      return {
+        rank: "" + (i + 1), kind: k.kind, icon: kd.icon, color: kd.color, action: k.action, effort: k.effortLabel,
+        chips: chip(k.dir), directN: "" + tot, horizonN: horTot > tot ? "+" + (horTot - tot) + " on the horizon" : "", barPct: Math.max(4, (scoreKey === "lev" ? k.lev / maxLev : k.impact / maxImpact) * 100).toFixed(0) + "%",
+        unlocked: unl, unlockedMore: (k.unlocked || []).length > 10 ? "+" + ((k.unlocked || []).length - 10) + " more" : "", goto: k.goto,
+        why: k.why || "", hasWhy: !!k.why, climb: k.methodName ? "Climb via " + k.methodName + (k.hours ? " · ~" + k.hours + "h to this rung" : "") : "", hasClimb: !!k.methodName,
+      };
+    };
+
+    const sortMode = this.state.pfSort || "lev";
+    const ranked = (sortMode === "impact" ? byImpact : byLev).slice(0, 9).map((k, i) => mkK(k, i, sortMode));
+
+    // frontier: locked items with exactly ONE unmet requirement
+    const frontier = lockedItems.map((it) => ({ it, um: unmetReqs(it, lv0, combat0, doneBase) })).filter((x) => x.um.length === 1)
+      .map((x) => { const r = x.um[0].split(":"); let blk, bc; if (r[0] === "S") { blk = cap(r[1]) + " " + r[2]; bc = "#2f7d72"; } else if (r[0] === "C") { blk = "Combat " + r[1]; bc = "#a23a2c"; } else { blk = r[1]; bc = "#4a59a0"; } return { name: x.it.name, type: x.it.type, glyph: DOM[x.it.type].icon, typeColor: DOM[x.it.type].color, blocker: blk, blockerColor: bc, value: x.it.value, goto: x.it.goto }; })
+      .sort((a, b) => b.value - a.value);
+
+    // reachability tiers
+    const tiers = { one: 0, two: 0, deep: 0 };
+    lockedItems.forEach((it) => { const n = unmetReqs(it, lv0, combat0, doneBase).length; if (n === 1) tiers.one++; else if (n === 2) tiers.two++; else tiers.deep++; });
+
+    // ---- chokepoint by centrality: which requirement sits in the most blocker-sets ----
+    const part = {}, pcount = {}; let totalW = 0;
+    const pw = (it) => (it.type === "boss" ? 3 : it.type === "gear" ? 1.6 : it.type === "task" ? 1.4 : 1);
+    lockedItems.forEach((it) => { const um = unmetReqs(it, lv0, combat0, doneBase); if (!um.length) return; const w = pw(it); totalW += w; const share = w / um.length; um.forEach((r) => { const p = r.split(":"); let key = null; if (p[0] === "S") key = p[1]; else if (p[0] === "C") key = "combat"; if (!key) return; part[key] = (part[key] || 0) + share; if (!pcount[key]) pcount[key] = { boss: 0, task: 0, quest: 0, diary: 0, gear: 0 }; pcount[key][it.type]++; }); });
+    const totalLockedVal = totalW || 1;
+    const chokeKey = Object.keys(part).filter((k) => k !== "combat").sort((a, b) => part[b] - part[a])[0] || null;
+    let choke = null;
+    if (chokeKey) {
+      const isCb = chokeKey === "combat"; const kd = isCb ? KIND.combat : KIND.skill; const pc = pcount[chokeKey]; let action, effort;
+      if (isCb) { const l = bestCb ? bestCb.l : combat0 + 1; action = "Reach " + l + " Combat"; effort = "+" + (l - combat0) + " combat lvl"; }
+      else { const ksk = keystones.find((k) => k.kind === "skill" && k.skill === chokeKey); const cur = lv0[chokeKey] || 1; const tgt = ksk ? ksk.level : cur; action = "Train " + cap(chokeKey) + " to " + tgt; effort = ksk ? ksk.effortLabel : "from " + cur; }
+      const spokesRaw = [["boss", pc.boss], ["task", pc.task], ["quest", pc.quest], ["diary", pc.diary], ["gear", pc.gear]].filter((x) => x[1] > 0);
+      const spokes = spokesRaw.map((x, idx) => { const ang = ((-90 + idx * (360 / Math.max(1, spokesRaw.length))) * Math.PI) / 180; const len = 46 + Math.min(28, x[1] * 2.2); return { x2: (130 + Math.cos(ang) * len).toFixed(1), y2: (96 + Math.sin(ang) * len).toFixed(1), lx: (130 + Math.cos(ang) * (len + 18)).toFixed(1), ly: (96 + Math.sin(ang) * (len + 18)).toFixed(1), n: "" + x[1], label: DOM[x[0]].plural, color: DOM[x[0]].color, r: (9 + Math.min(11, x[1] * 0.7)).toFixed(0) }; });
+      const parts = []; ["boss", "task", "quest", "diary", "gear"].forEach((t) => { if (pc[t] > 0) parts.push(pc[t] + " " + (pc[t] > 1 ? DOM[t].plural : DOM[t].label)); });
+      const totalPieces = pc.boss + pc.task + pc.quest + pc.diary + pc.gear;
+      choke = { icon: kd.icon, color: kd.color, action, coverPct: Math.round((part[chokeKey] / totalLockedVal) * 100) + "%", blurb: (isCb ? "Combat" : cap(chokeKey)) + " appears in the blocker list of " + totalPieces + " locked pieces — " + parts.join(", ") + ". No single requirement gates a wider swath of the account.", spokes, effort };
+    }
+
+    return {
+      pfChoke: choke, pfKeystones: ranked, pfFrontier: frontier.slice(0, 10), pfFrontierMore: frontier.length > 10 ? "+" + (frontier.length - 10) + " more on the cusp" : "",
+      pfTierOne: "" + tiers.one, pfTierTwo: "" + tiers.two, pfTierDeep: "" + tiers.deep, pfTotalLocked: "" + lockedItems.length,
+      pfHasData: keystones.length > 0,
+    };
+  }
+
   // ===================== DASHBOARD =====================
+  // The Oracle's Counsel — the data-driven recommendation card at the top of the
+  // dashboard (1:1 port of the prototype's presentation).
+  renderCounsel() {
+    const cm = this.computeCounsel();
+    const hero = cm.counselHero;
+    const rule = <span style={{ height: 1, flex: 1, background: "linear-gradient(90deg, rgba(227,200,120,.34), transparent)" }} />;
+    return (
+      <div style={{ position: "relative", border: "2px solid #6b5226", borderRadius: 9, overflow: "hidden", marginBottom: 26, background: "radial-gradient(130% 150% at 12% 0%, #241a33 0%, #1b1526 44%, #130e1b 100%)", boxShadow: "0 14px 38px rgba(18,10,28,.42), inset 0 1px 0 rgba(227,200,120,.14)" }}>
+        <div style={{ position: "absolute", inset: 0, opacity: 0.55, backgroundImage: "radial-gradient(circle at 86% 14%, rgba(227,200,120,.16), transparent 42%), radial-gradient(circle at 16% 96%, rgba(106,74,138,.26), transparent 46%)", pointerEvents: "none" }} />
+        {/* header row + lens picker */}
+        <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 15, padding: "17px 22px 14px", borderBottom: "1px solid rgba(227,200,120,.18)", flexWrap: "wrap", rowGap: 11 }}>
+          <div style={{ width: 46, height: 46, flex: "0 0 46px", borderRadius: "50%", background: "radial-gradient(circle at 35% 28%, #f0dc98, #c39a44 58%, #7c5520)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 23, boxShadow: "0 0 20px rgba(227,200,120,.4), inset 0 1px 2px rgba(255,255,255,.5)" }}>🔮</div>
+          <div style={{ flex: 1, minWidth: 230 }}>
+            <div style={cinzel({ fontWeight: 800, fontSize: 21, color: "#f2e2b2", letterSpacing: ".01em" })}>The Oracle’s Counsel</div>
+            <div style={mono({ fontSize: 10.5, color: "#9a86c0", marginTop: 2 })}>Synthesised <span style={{ color: "#e3c878" }}>{cm.counselSynth}</span> signals across {cm.counselDomains} domains · reading the whole ledger for your next move</div>
+          </div>
+          <div style={{ display: "flex", gap: 3, padding: 3, background: "rgba(0,0,0,.3)", border: "1px solid rgba(227,200,120,.2)", borderRadius: 9 }}>
+            {cm.counselLenses.map((L) => (
+              <a key={L.id} href="#" onClick={(e) => { e.preventDefault(); this.setLens(L.id); }} style={{ padding: "6px 12px", borderRadius: 6, textDecoration: "none", background: L.bg, color: L.fg, transition: "background .12s", ...mono({ fontSize: 10.5, letterSpacing: ".03em" }) }}>{L.label}</a>
+            ))}
+          </div>
+        </div>
+        {/* ambition chip row */}
+        <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 13, padding: "11px 22px", borderBottom: "1px solid rgba(227,200,120,.14)", background: "rgba(0,0,0,.16)", flexWrap: "wrap", rowGap: 9 }}>
+          <span style={mono({ fontSize: 9.5, letterSpacing: ".2em", color: "#9a86c0", flex: "0 0 auto" })}>AMBITION</span>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {cm.counselGoals.map((g) => (
+              <a key={g.id} href="#" onClick={(e) => { e.preventDefault(); this.setGoal(g.id); }} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 11px", borderRadius: 20, textDecoration: "none", background: g.bg, color: g.fg, border: `1px solid ${g.bd}`, ...mono({ fontSize: 10.5 }) }}><span style={{ fontSize: 11 }}>{g.icon}</span>{g.label}</a>
+            ))}
+          </div>
+        </div>
+        {/* active-goal progress strip */}
+        {cm.counselGoalActive && (
+          <div style={{ position: "relative", padding: "13px 22px", borderBottom: "1px solid rgba(227,200,120,.14)", background: "linear-gradient(90deg, rgba(106,74,138,.22), rgba(90,64,120,.06))" }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 7, gap: 12, flexWrap: "wrap" }}>
+              <span style={cinzel({ fontWeight: 700, fontSize: 13, color: "#ecdcf4" })}>Charting your path to {cm.counselGoalLabel}</span>
+              <span style={mono({ fontSize: 10.5, color: "#e3c878" })}>{cm.counselGoalPctLabel} complete</span>
+            </div>
+            <div style={{ height: 8, background: "rgba(0,0,0,.32)", borderRadius: 4, overflow: "hidden", border: "1px solid rgba(227,200,120,.12)" }}><div style={{ height: "100%", width: cm.counselGoalPct, background: "linear-gradient(90deg,#9a7bc0,#e3c878)" }} /></div>
+            <div style={mono({ fontSize: 10.5, color: "#b8a6d8", marginTop: 8 })}>◆ {cm.counselGoalPath}</div>
+          </div>
+        )}
+        {/* hero + queue */}
+        <div style={{ position: "relative", display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))" }}>
+          {hero && (
+            <div style={{ padding: "19px 22px 21px", borderRight: "1px solid rgba(227,200,120,.14)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                <span style={mono({ fontWeight: 600, fontSize: 10, color: "#9a86c0", letterSpacing: ".24em" })}>TOP COUNSEL</span>{rule}
+              </div>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+                <div style={{ width: 54, height: 54, flex: "0 0 54px", borderRadius: 11, background: hero.domColor, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 27, boxShadow: "0 5px 14px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.18)" }}>{hero.glyph}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+                    <span style={{ padding: "2px 8px", border: "1px solid rgba(227,200,120,.32)", borderRadius: 4, ...mono({ fontSize: 9, letterSpacing: ".14em", color: "#c9b06a" }) }}>{hero.domLabel}</span>
+                    <span style={mono({ fontSize: 9.5, color: hero.accColor })}>● {hero.accLabel}</span>
+                    {hero.onPath && <span style={mono({ fontSize: 9, color: "#e3c878" })}>◆ on your path</span>}
+                  </div>
+                  <div style={cinzel({ fontWeight: 800, fontSize: 19, color: "#f4e8c8", lineHeight: 1.2, marginTop: 6 })}>{hero.title}</div>
+                </div>
+              </div>
+              <div style={{ fontSize: 13, lineHeight: 1.58, color: "#d4c7ae", margin: "13px 0 16px" }}>{hero.why}</div>
+              <div style={cinzel({ fontWeight: 800, fontSize: 22, color: "#e3c878", marginBottom: 4 })}>{hero.metric}</div>
+              {hero.hasSrc && <div style={mono({ fontSize: 9, letterSpacing: ".14em", color: hero.srcColor, marginBottom: 16 })}>● {hero.src}</div>}
+              <div style={{ marginBottom: 17 }}>
+                <div style={mono({ fontSize: 8.5, letterSpacing: ".22em", color: "#8a7aa8", marginBottom: 11 })}>WHY IT RANKS · SIGNAL FINGERPRINT</div>
+                <div style={{ display: "flex", gap: 13 }}>
+                  {hero.bars.map((b) => (
+                    <div key={b.k} style={{ flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 5 }}>
+                        <span style={mono({ fontSize: 8.5, color: "#9a8ab8", letterSpacing: ".04em" })}>{b.k}</span>
+                        <span style={mono({ fontSize: 9, color: "#c9b78a" })}>{b.val}</span>
+                      </div>
+                      <div style={{ height: 6, background: "rgba(255,255,255,.09)", borderRadius: 3, overflow: "hidden" }}><div style={{ height: "100%", width: b.pct, background: b.color }} /></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <a href="#" onClick={(e) => { e.preventDefault(); this.go(hero.goto); }} style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "9px 17px", borderRadius: 6, background: "linear-gradient(180deg,#e9d18a,#c9a24e)", color: "#2c2013", textDecoration: "none", boxShadow: "0 4px 12px rgba(227,200,120,.26)", ...cinzel({ fontWeight: 700, fontSize: 13 }) }}>Act on this →</a>
+            </div>
+          )}
+          <div style={{ padding: "15px 17px 17px", display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 9 }}>
+              <span style={mono({ fontWeight: 600, fontSize: 10, color: "#9a86c0", letterSpacing: ".24em" })}>THE QUEUE</span>{rule}
+            </div>
+            {cm.counselQueue.map((q, i) => (
+              <a key={i} href="#" className="cq-row" onClick={(e) => { e.preventDefault(); this.go(q.goto); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 10px", borderRadius: 8, textDecoration: "none", border: "1px solid transparent" }}>
+                <span style={{ width: 22, textAlign: "center", flex: "0 0 22px", ...cinzel({ fontWeight: 800, fontSize: 13, color: q.rankColor }) }}>{q.rank}</span>
+                <span style={{ width: 33, height: 33, flex: "0 0 33px", borderRadius: 8, background: q.domColor, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>{q.glyph}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", ...cinzel({ fontWeight: 600, fontSize: 13.5, color: "#ece0c4" }) }}>{q.title}</div>
+                  <div style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 2, ...mono({ fontSize: 9.5, color: "#9a86c0" }) }}>{q.domLabel} · {q.metric}{q.hasSrc && <span> · <span style={{ color: q.srcColor }}>{q.src}</span></span>}</div>
+                </div>
+                <div style={{ display: "flex", gap: 3, flex: "0 0 auto" }}>
+                  {q.bars.map((b) => (
+                    <span key={b.k} style={{ width: 4, height: 24, background: "rgba(255,255,255,.09)", borderRadius: 2, display: "flex", alignItems: "flex-end", overflow: "hidden" }}><span style={{ width: "100%", height: b.pct, background: b.color }} /></span>
+                  ))}
+                </div>
+              </a>
+            ))}
+          </div>
+        </div>
+        {/* footer: bottleneck + lens name */}
+        <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 11, padding: "12px 22px", borderTop: "1px solid rgba(227,200,120,.16)", background: "rgba(0,0,0,.24)", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 15 }}>⛓️</span>
+          <div style={mono({ fontSize: 11, color: "#b8a6d8" })}>Deepest lock: <span style={{ color: "#e6a5a5", fontWeight: 600 }}>{cm.counselBnLabel}</span> <span style={{ color: "#7a6a98" }}>— gates {cm.counselBnParts}</span></div>
+          <span style={{ flex: 1 }} />
+          <div style={mono({ fontSize: 10, color: "#6a5a88" })}>lens · {cm.counselLensName}</div>
+        </div>
+      </div>
+    );
+  }
   renderDashboard(A) {
     const d = this.derive();
     const sm = this.skillMap;
@@ -808,6 +1363,7 @@ export default class Almanac extends React.Component {
     ];
     return (
       <div>
+        {this.renderCounsel()}
         {/* hero */}
         <Card style={{ marginBottom: 16, background: "linear-gradient(135deg,#2a1a10,#3a2410)", border: "1px solid #6b5226", display: "flex", alignItems: "center", gap: 20 }}>
           <div style={{ width: 78, height: 78, borderRadius: "50%", background: "radial-gradient(circle at 38% 32%, #e3c878, #b98f3e 60%, #7c5a22)", border: "3px solid #e3c878", display: "flex", alignItems: "center", justifyContent: "center", ...cinzel({ fontWeight: 800, fontSize: 38, color: "#3a2410" }) }}>{(d.logs && (this.stats.rsn[0] || "A")).toUpperCase()}</div>
@@ -965,6 +1521,105 @@ export default class Almanac extends React.Component {
               </div>
             </Card>
           ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ===================== PATHFINDER (The Keystone Web) =====================
+  renderPathfinder() {
+    const TH = themeFor("pathfinder");
+    const pf = this.computePathfinder();
+    const ch = pf.pfChoke;
+    const sortBtn = (id, label) => { const on = (this.state.pfSort || "lev") === id; return <a key={id} href="#" onClick={(e) => { e.preventDefault(); this.setPfSort(id); }} style={{ padding: "5px 11px", borderRadius: 5, textDecoration: "none", background: on ? "#6a4a8a" : "transparent", color: on ? "#fbf3df" : "#7a5aa0", ...mono({ fontSize: 10 }) }}>{label}</a>; };
+    return (
+      <div>
+        <SectionTitle kicker="Dependency Atlas · what unlocks what" title="The Keystone Web" accent={TH.accent} />
+        {/* #1 chokepoint hero */}
+        {ch && (
+          <div style={{ position: "relative", border: "2px solid #5a4478", borderRadius: 9, overflow: "hidden", marginBottom: 22, background: "radial-gradient(130% 150% at 15% 0%, #2a1f3d 0%, #201830 46%, #171021 100%)", boxShadow: "0 14px 38px rgba(18,10,28,.4)" }}>
+            <div style={{ position: "absolute", inset: 0, opacity: 0.5, backgroundImage: "radial-gradient(circle at 84% 16%, rgba(154,123,192,.2), transparent 44%), radial-gradient(circle at 14% 92%, rgba(106,74,138,.28), transparent 48%)", pointerEvents: "none" }} />
+            <div style={{ position: "relative", display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", alignItems: "center" }}>
+              <div style={{ padding: 22, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg viewBox="0 0 260 192" style={{ width: "100%", maxWidth: 330, height: "auto" }}>
+                  {ch.spokes.map((s, i) => <line key={"l" + i} x1="130" y1="96" x2={s.x2} y2={s.y2} stroke={s.color} strokeWidth="2" opacity="0.5" />)}
+                  {ch.spokes.map((s, i) => (
+                    <g key={"g" + i}>
+                      <circle cx={s.x2} cy={s.y2} r={s.r} fill={s.color} opacity="0.92" />
+                      <text x={s.x2} y={s.y2} textAnchor="middle" dy="4" fill="#fbf3df" fontFamily="'JetBrains Mono',monospace" fontSize="12" fontWeight="700">{s.n}</text>
+                      <text x={s.lx} y={s.ly} textAnchor="middle" dy="3" fill="#b8a6d8" fontFamily="'JetBrains Mono',monospace" fontSize="8.5">{s.label}</text>
+                    </g>
+                  ))}
+                  <circle cx="130" cy="96" r="26" fill={ch.color} stroke="#e3c878" strokeWidth="2" />
+                  <text x="130" y="96" textAnchor="middle" dy="8" fontSize="24">{ch.icon}</text>
+                </svg>
+              </div>
+              <div style={{ padding: "24px 26px 24px 4px" }}>
+                <div style={mono({ fontSize: 10, letterSpacing: ".24em", color: "#9a86c0", marginBottom: 9 })}>THE #1 CHOKEPOINT</div>
+                <div style={cinzel({ fontWeight: 800, fontSize: 25, color: "#f2e2b2", lineHeight: 1.15 })}>{ch.action}</div>
+                <div style={{ margin: "8px 0 12px", ...mono({ fontSize: 11, color: "#e3c878" }) }}>holds <span style={{ fontWeight: 700 }}>{ch.coverPct}</span> of your locked value · {ch.effort}</div>
+                <div style={{ fontSize: 13.5, lineHeight: 1.6, color: "#d4c7ae", marginBottom: 16 }}>{ch.blurb}</div>
+                <a href="#" onClick={(e) => { e.preventDefault(); this.go("skills"); }} style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "9px 17px", borderRadius: 6, background: "linear-gradient(180deg,#b79bd8,#7a5aa0)", color: "#1a1226", textDecoration: "none", ...cinzel({ fontWeight: 700, fontSize: 13 }) }}>Break this lock →</a>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* reachability tier cards */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 22 }}>
+          {[[pf.pfTotalLocked, "Locked pieces", "#6a4a8a", "#2c2013"], [pf.pfTierOne, "One lock away", "#5c7a35", "#5c6e35"], [pf.pfTierTwo, "Two locks away", "#9a7530", "#9a7530"], [pf.pfTierDeep, "Deeper in the web", "#963a2c", "#963a2c"]].map(([v, l, bc, fc], i) => (
+            <div key={i} style={{ background: "#f2e9d2", border: "1px solid rgba(44,32,19,.2)", borderTop: `3px solid ${bc}`, borderRadius: 5, padding: "16px 18px" }}>
+              <div style={cinzel({ fontWeight: 800, fontSize: 30, color: fc })}>{v}</div>
+              <div style={{ marginTop: 2, textTransform: "uppercase", ...mono({ fontSize: 9.5, letterSpacing: ".12em", color: "#8a6a38" }) }}>{l}</div>
+            </div>
+          ))}
+        </div>
+        {/* keystones */}
+        <div style={{ background: "#f2e9d2", border: "1px solid rgba(44,32,19,.2)", borderRadius: 6, boxShadow: "0 4px 14px rgba(90,64,30,.12)", marginBottom: 22, overflow: "hidden" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "15px 20px", borderBottom: "1px solid rgba(44,32,19,.14)", background: "rgba(106,74,138,.08)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 16 }}>🧲</span><h3 style={{ margin: 0, ...cinzel({ fontWeight: 700, fontSize: 16, color: "#2c2013" }) }}>Keystones — highest-leverage unlocks</h3></div>
+            <div style={{ display: "flex", gap: 3, padding: 3, background: "rgba(44,32,19,.06)", borderRadius: 7 }}>{sortBtn("lev", "Best leverage")}{sortBtn("impact", "Total cascade")}</div>
+          </div>
+          {pf.pfKeystones.map((k, i) => (
+            <div key={i} style={{ padding: "15px 20px", borderBottom: "1px solid rgba(44,32,19,.08)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
+                <span style={{ width: 20, textAlign: "center", flex: "0 0 20px", ...cinzel({ fontWeight: 800, fontSize: 15, color: "#a88bc8" }) }}>{k.rank}</span>
+                <span style={{ width: 38, height: 38, flex: "0 0 38px", borderRadius: 9, background: k.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19 }}>{k.icon}</span>
+                <a href="#" onClick={(e) => { e.preventDefault(); this.go(k.goto); }} style={{ flex: 1, minWidth: 0, textDecoration: "none" }}>
+                  <div style={cinzel({ fontWeight: 700, fontSize: 15.5, color: "#2c2013" })}>{k.action}</div>
+                  <div style={{ marginTop: 2, ...mono({ fontSize: 10, color: "#8a6a38" }) }}>{k.effort}</div>
+                </a>
+                <div style={{ display: "flex", gap: 6, flex: "0 0 auto" }}>
+                  {k.chips.map((c, j) => <span key={j} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 12, background: c.color, color: "#fbf3df", ...mono({ fontSize: 10.5, fontWeight: 600 }) }}><span style={{ fontSize: 11 }}>{c.icon}</span>{c.n}</span>)}
+                </div>
+              </div>
+              {k.hasWhy && <div style={{ fontSize: 13, lineHeight: 1.5, color: "#4a3d2a", margin: "9px 0 0 33px" }}>{k.why}</div>}
+              {k.hasClimb && <div style={{ margin: "6px 0 0 33px", ...mono({ fontSize: 10, color: "#2f7d72" }) }}>🧲 {k.climb}</div>}
+              <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "11px 0 0 33px" }}>
+                <div style={{ flex: 1, height: 7, background: "rgba(44,32,19,.08)", borderRadius: 4, overflow: "hidden", maxWidth: 230 }}><div style={{ height: "100%", width: k.barPct, background: "linear-gradient(90deg,#9a7bc0,#e3c878)" }} /></div>
+                <span style={mono({ fontSize: 10, color: "#6a5436" })}>frees {k.directN} now <span style={{ color: "#7a5aa0" }}>{k.horizonN}</span></span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "10px 0 0 33px" }}>
+                {k.unlocked.map((u, j) => <span key={j} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 9px", borderRadius: 5, background: "#fbf6e8", border: "1px solid rgba(44,32,19,.12)", ...mono({ fontSize: 10, color: "#5a4a35" }) }}><span style={{ width: 7, height: 7, borderRadius: 2, background: u.color }} />{u.name}</span>)}
+                {k.unlockedMore && <span style={{ alignSelf: "center", ...mono({ fontSize: 10, color: "#a08a5a" }) }}>{k.unlockedMore}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+        {/* frontier */}
+        <div style={{ background: "#f2e9d2", border: "1px solid rgba(44,32,19,.2)", borderRadius: 6, boxShadow: "0 4px 14px rgba(90,64,30,.12)", overflow: "hidden" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "15px 20px", borderBottom: "1px solid rgba(44,32,19,.14)", background: "rgba(106,74,138,.08)" }}><span style={{ fontSize: 16 }}>⚸</span><h3 style={{ margin: 0, ...cinzel({ fontWeight: 700, fontSize: 16, color: "#2c2013" }) }}>The Frontier — one lock from opening</h3></div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 11, padding: "18px 20px" }}>
+            {pf.pfFrontier.map((f, i) => (
+              <a key={i} href="#" onClick={(e) => { e.preventDefault(); this.go(f.goto); }} style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 13px", borderRadius: 7, background: "#fbf6e8", border: "1px solid rgba(44,32,19,.14)", textDecoration: "none" }}>
+                <span style={{ width: 32, height: 32, flex: "0 0 32px", borderRadius: 7, background: f.typeColor, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>{f.glyph}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", ...cinzel({ fontWeight: 600, fontSize: 13.5, color: "#2c2013" }) }}>{f.name}</div>
+                  <div style={{ marginTop: 2, ...mono({ fontSize: 10, color: f.blockerColor }) }}>needs {f.blocker}</div>
+                </div>
+              </a>
+            ))}
+          </div>
+          {pf.pfFrontierMore && <div style={{ padding: "0 20px 16px", ...mono({ fontSize: 10.5, color: "#a08a5a" }) }}>{pf.pfFrontierMore}</div>}
         </div>
       </div>
     );

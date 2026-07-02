@@ -31,6 +31,7 @@ export const cinzel = (extra) => ({ fontFamily: "'Cinzel', serif", ...extra });
 export const THEME = {
   dashboard: { accent: "#b98f3e", lite: "#e3c878", g1: "#3a2a14", g2: "#5a4424", icon: "⚔" },
   skills:    { accent: "#3c6b6b", lite: "#7fb0ad", g1: "#15302f", g2: "#274a48", icon: "✦" },
+  pathfinder:{ accent: "#6a4a8a", lite: "#b79bd8", g1: "#2a1f3d", g2: "#42285f", icon: "🕸" },
   goals:     { accent: "#9a6b30", lite: "#d8a85a", g1: "#33220f", g2: "#54381b", icon: "✸" },
   networth:  { accent: "#6e7d3a", lite: "#b6c06a", g1: "#23301a", g2: "#3c4d24", icon: "🪙" },
   flipping:  { accent: "#b98f3e", lite: "#e3c878", g1: "#3a2a14", g2: "#5a4424", icon: "⚖" },
