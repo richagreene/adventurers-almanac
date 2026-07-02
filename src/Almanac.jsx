@@ -16,7 +16,7 @@ import { ACTIVITIES_DATA } from "./data/activitiesData.js";
 import { SKILL_MILESTONES } from "./data/skillMilestones.js";
 import { CONTENT_REQS } from "./data/contentReqs.js";
 import { QUEST_DEPS } from "./data/questDeps.js";
-import { refreshActivityGp, liveGpRate } from "./lib/activityPrices.js";
+import { refreshActivityGp, liveGpRate, geSellNet } from "./lib/activityPrices.js";
 import { fetchPlayer, fetchPrices, priceById, combatLevel, fetchItemNames, natureRunePrice } from "./lib/api.js";
 import { C, mono, serif, cinzel, Card, Kicker, SectionTitle, StatCards, Bar, Seg, Tag, Btn, DataTable, Hero, themeFor, LineChart, BarChartH, Icon, Donut, BandBar } from "./lib/ui.jsx";
 import { loadItemIndex, itemIconUrl, skillIconUrl, ensureItemStats, getItemStats } from "./lib/icons.js";
@@ -67,19 +67,22 @@ export default class Almanac extends React.Component {
     { item: "Rune javelin tips", alch: 810, buy: 370, limit: 10000 },
     { item: "Yew longbow", alch: 768, buy: 475, limit: 18000 },
   ];
+  // Herb tiers. seed/herb/net are snapshots until "⟳ Live prices" re-prices them:
+  // net = patches × (yield × herb-after-tax − seed). yield ≈ avg grimy herbs per
+  // patch with magic secateurs + ultracompost; 6 herb patches on the circuit.
   farmDefs = [
-    { tier: "Ranarr", lvl: 32, unlocked: true, seed: 26678, herb: 5346, net: 56199 },
-    { tier: "Snapdragon", lvl: 62, unlocked: true, seed: 53508, herb: 8393, net: 80260 },
-    { tier: "Torstol", lvl: 85, unlocked: false, seed: 15900, herb: 3155, net: 143793 },
+    { tier: "Ranarr", lvl: 32, unlocked: true, seedItem: "Ranarr seed", herbItem: "Grimy ranarr weed", yield: 6.8, patches: 6, seed: 26678, herb: 5346, net: 56199 },
+    { tier: "Snapdragon", lvl: 62, unlocked: true, seedItem: "Snapdragon seed", herbItem: "Grimy snapdragon", yield: 6.8, patches: 6, seed: 53508, herb: 8393, net: 80260 },
+    { tier: "Torstol", lvl: 85, unlocked: false, seedItem: "Torstol seed", herbItem: "Grimy torstol", yield: 6.8, patches: 6, seed: 15900, herb: 3155, net: 143793 },
   ];
   // growHrs = real grow time; caps how many runs/day are actually possible
   // (24h ÷ growHrs). Herbs ~80 min, fruit trees 16h, trees ~hours, hardwoods slow.
   farmRunDefs = [
     { name: "Herb run", crop: "Snapdragon", type: "Herb", req: 62, xpRun: 6981, gpRun: 80260, timeMin: 6, growHrs: 1.33, patches: 6, teles: "Ectophial · Explorer ring · Ardy cloak · Catherby · Hosidius", seeds: "6× Snapdragon seed + compost" },
-    { name: "Fruit tree run", crop: "Palm", type: "Fruit", req: 68, xpRun: 51303, gpRun: -32000, timeMin: 13, growHrs: 16, patches: 6, teles: "Gnome Stronghold · Tree Gnome Village · Brimhaven · Catherby · Lletya · Farming Guild", seeds: "6× Palm sapling" },
-    { name: "Tree run", crop: "Yew", type: "Tree", req: 60, xpRun: 35755, gpRun: -14000, timeMin: 14, growHrs: 8, patches: 5, teles: "Lumbridge · Varrock · Falador · Gnome Stronghold · Farming Guild", seeds: "5× Yew sapling" },
-    { name: "Hardwood run", crop: "Mahogany", type: "Hardwood", req: 55, xpRun: 31500, gpRun: -9000, timeMin: 6, growHrs: 24, patches: 2, teles: "Fossil Island · Mushroom forest", seeds: "2× Mahogany sapling" },
-    { name: "Tree run", crop: "Magic", type: "Tree", req: 75, xpRun: 69569, gpRun: -58000, timeMin: 14, growHrs: 8, patches: 5, teles: "Lumbridge · Varrock · Falador · Gnome Stronghold · Farming Guild", seeds: "5× Magic sapling" },
+    { name: "Fruit tree run", crop: "Palm", type: "Fruit", req: 68, xpRun: 51303, gpRun: -32000, sapItem: "Palm sapling", timeMin: 13, growHrs: 16, patches: 6, teles: "Gnome Stronghold · Tree Gnome Village · Brimhaven · Catherby · Lletya · Farming Guild", seeds: "6× Palm sapling" },
+    { name: "Tree run", crop: "Yew", type: "Tree", req: 60, xpRun: 35755, gpRun: -14000, sapItem: "Yew sapling", timeMin: 14, growHrs: 8, patches: 5, teles: "Lumbridge · Varrock · Falador · Gnome Stronghold · Farming Guild", seeds: "5× Yew sapling" },
+    { name: "Hardwood run", crop: "Mahogany", type: "Hardwood", req: 55, xpRun: 31500, gpRun: -9000, sapItem: "Mahogany sapling", timeMin: 6, growHrs: 24, patches: 2, teles: "Fossil Island · Mushroom forest", seeds: "2× Mahogany sapling" },
+    { name: "Tree run", crop: "Magic", type: "Tree", req: 75, xpRun: 69569, gpRun: -58000, sapItem: "Magic sapling", timeMin: 14, growHrs: 8, patches: 5, teles: "Lumbridge · Varrock · Falador · Gnome Stronghold · Farming Guild", seeds: "5× Magic sapling" },
   ];
   farmMilestones = [
     { lvl: 72, label: "Snapdragons · Mahogany hardwoods", tag: "CURRENT" },
@@ -372,7 +375,8 @@ export default class Almanac extends React.Component {
     if (expected >= 0.5) return { t: "on rate", c: C.muted };
     return { t: "early days", c: C.muted };
   }
-  flipTax(sell, qty) { return Math.min(5000000, Math.floor(sell * 0.02)) * qty; }
+  // GE sell tax: 2% per item, exempt under 50 gp, capped at 5M per item.
+  flipTax(sell, qty) { return sell < 50 ? 0 : Math.min(5000000, Math.floor(sell * 0.02)) * qty; }
   computeFlip(f) {
     if (f.avgBuy != null && f.avgSell != null) {
       const qty = f.qty || 1; const tax = this.flipTax(f.avgSell, qty); const net = Math.round((f.avgSell - f.avgBuy) * qty - tax);
@@ -425,12 +429,32 @@ export default class Almanac extends React.Component {
     this.setState({ priceStatus: "Scanning the live market…" });
     try {
       const { byName, byId } = await fetchPrices({ maxAgeMs: 0 }); const now = Date.now() / 1000; let n = 0;
-      this.logs.scan.forEach((it) => { const m = byName[(it.name || "").toLowerCase()]; if (m) { if (m.low) it.buy = m.low; if (m.high) it.sell = m.high; if (m.limit) it.limit = m.limit; if (m.volume) it.vol = m.volume; const tt = Math.max(m.highTime, m.lowTime); if (tt) it.age = Math.max(0, Math.round(now - tt) / 60 | 0); n++; } });
+      // A flip quote is only as fresh as its STALER side — you need both a live
+      // insta-sell (your buy) and a live insta-buy (your sell). Using the fresher
+      // side let one-sided stale quotes show phantom margins that passed the
+      // freshness gate.
+      const quoteAge = (m) => { const oldest = Math.min(m.highTime || 0, m.lowTime || 0); return oldest > 0 ? Math.max(0, (now - oldest) / 60 | 0) : 9999; };
+      this.logs.scan.forEach((it) => { const m = byName[(it.name || "").toLowerCase()]; if (m) { if (m.low) it.buy = m.low; if (m.high) it.sell = m.high; if (m.limit) it.limit = m.limit; if (m.volume) it.vol = m.volume; it.age = quoteAge(m); n++; } });
       this.alchItems.forEach((a) => { const m = byName[a.item.toLowerCase()]; if (m) { if (m.high) a.buy = m.high; if (m.highalch) a.alch = m.highalch; if (m.limit) a.limit = m.limit; } });
       const nat = byName["nature rune"]; if (nat && (nat.high || nat.low)) { this.alchcfg.natRune = nat.high || nat.low; this._save("almanac.alchcfg.v1", this.alchcfg); }
+      // Farming: re-price herb tiers + run costs from the live feed.
+      // net/run = patches × (yield × herb value after GE tax − seed cost).
+      this.farmDefs.forEach((f) => {
+        const s = byName[(f.seedItem || "").toLowerCase()], h = byName[(f.herbItem || "").toLowerCase()];
+        if (!s || !h) return;
+        const seed = s.high || s.low, herb = h.low || h.high; // pay the ask for seeds, insta-sell the grimys
+        if (!seed || !herb) return;
+        f.seed = seed; f.herb = herb;
+        f.net = Math.round((f.patches || 6) * ((f.yield || 6.8) * geSellNet(herb) - seed));
+      });
+      this.farmRunDefs.forEach((r) => {
+        if (/herb/i.test(r.type || "")) { const def = this.farmDefs.find((f) => f.tier === r.crop); if (def) r.gpRun = def.net; return; }
+        const sap = byName[(r.sapItem || "").toLowerCase()];
+        if (sap && (sap.high || sap.low)) r.gpRun = -Math.round((r.patches || 1) * (sap.high || sap.low));
+      });
       // Keep the whole tradeable market so the scanner ranks real flips, not just
       // a handful of seed items. Drop items with no live buy & sell.
-      this.priceRows = Object.values(byId).filter((m) => m.high > 0 && m.low > 0).map((m) => ({ name: m.name, buy: m.low, sell: m.high, vol: m.volume || 0, limit: m.limit || 0, age: Math.max(0, (now - Math.max(m.highTime || 0, m.lowTime || 0)) / 60 | 0) }));
+      this.priceRows = Object.values(byId).filter((m) => m.high > 0 && m.low > 0).map((m) => ({ name: m.name, buy: m.low, sell: m.high, vol: m.volume || 0, limit: m.limit || 0, age: quoteAge(m) }));
       this.saveLogs(); this.setState({ priceStatus: `Scanned ${this.priceRows.length.toLocaleString()} items · ${new Date().toLocaleTimeString()}` });
     } catch (err) { this.setState({ priceStatus: "Live market unavailable right now — using your manual list." }); }
   };
@@ -454,7 +478,7 @@ export default class Almanac extends React.Component {
   };
 
   // ---------- handlers: navigation & forms ----------
-  go = (s) => { this.setState({ section: s, openForm: null }); if (s === "flipping" && !this.priceRows && !this._marketLoading) { this._marketLoading = true; this.refreshPrices(); } };
+  go = (s) => { this.setState({ section: s, openForm: null }); if ((s === "flipping" || s === "farming") && !this.priceRows && !this._marketLoading) { this._marketLoading = true; this.refreshPrices(); } };
   setLens = (id) => this.setState({ counselLens: id });
   setGoal = (id) => { this.setState({ goalId: id }); this._save("almanac.counselgoal.v1", id); };
   setPfSort = (id) => this.setState({ pfSort: id });
@@ -1863,10 +1887,10 @@ export default class Almanac extends React.Component {
       { key: "capital", label: "Flip capital", suffix: "gp", hint: "split across 8 GE slots" },
       { key: "minMargin", label: "Min margin %", suffix: "%", hint: "floor after the 2% tax" },
       { key: "maxMargin", label: "Max margin %", suffix: "%", hint: "ceiling (stale/manip) · 0 = no limit" },
-      { key: "minProfit4h", label: "Min profit / 4h", suffix: "gp", hint: "the 'worth a GE slot' bar" },
+      { key: "minProfit4h", label: "Min profit / 4h", suffix: "gp", hint: "the 'worth a GE slot' bar · fill capped by limit, capital AND volume" },
       { key: "minVolume", label: "Min daily volume", suffix: "", hint: "liquidity gate" },
       { key: "minBuy", label: "Min buy price", suffix: "gp", hint: "cuts penny junk" },
-      { key: "maxAge", label: "Max price age", suffix: "min", hint: "freshness gate · 0 = no limit" },
+      { key: "maxAge", label: "Max price age", suffix: "min", hint: "age of the STALER price side · 0 = no limit" },
       { key: "watchTol", label: "Watch tolerance", suffix: "%", hint: "how close a near-miss counts as Watch" },
     ];
     const tol = Math.max(0, (cfg.watchTol != null ? cfg.watchTol : 15)) / 100;
@@ -1879,7 +1903,11 @@ export default class Almanac extends React.Component {
     const fail = { margin: 0, vol: 0, age: 0, profit: 0, buy: 0 };
     const allRows = source.map((it, i) => {
       const tax = this.flipTax(it.sell, 1); const margin = it.buy > 0 ? ((it.sell - tax - it.buy) / it.buy) * 100 : 0;
-      const qty = Math.min(it.limit || 1, Math.floor(capPer / Math.max(1, it.buy)));
+      // Realistic 4h fill: buy limit AND your capital AND market throughput.
+      // Daily volume counts both sides, a 4h window is 1/6 of a day, so the flow
+      // available on your side ≈ vol/2/6 — you can't flip more than trades.
+      const throughput = Math.floor((it.vol || 0) / 12);
+      const qty = Math.min(it.limit || 1, Math.floor(capPer / Math.max(1, it.buy)), Math.max(0, throughput));
       const profit4h = qty * (it.sell - tax - it.buy);
       const cMargin = margin >= cfg.minMargin && margin <= maxMargin, cVol = (it.vol || 0) >= cfg.minVolume, cAge = (it.age || 0) <= maxAge, cProfit = profit4h >= cfg.minProfit4h, cBuy = it.buy >= cfg.minBuy;
       if (!cMargin) fail.margin++; if (!cVol) fail.vol++; if (!cAge) fail.age++; if (!cProfit) fail.profit++; if (!cBuy) fail.buy++;
@@ -1967,7 +1995,7 @@ export default class Almanac extends React.Component {
               {rows.length === 0 && <tr><td colSpan={9} style={serif({ fontStyle: "normal", color: C.muted, padding: 18 })}>{!usingMarket && this.logs.scan.length === 0 ? "Hit ⟳ Live prices to scan the market, or add items manually." : watchN > 0 ? `Nothing clears every gate. ${watchN} item${watchN > 1 ? "s are" : " is"} close — tick “Show watch items”.` : `Nothing clears the gates among ${scanned.toLocaleString()} items${failTop ? ` (${failTop})` : ""}. Loosen the control panel or hit Reset.`}</td></tr>}</tbody>
             </table>
           </div>
-          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>By default only <strong>FLIP NOW</strong> (clears every gate at your bankroll) shows. Watch items sit within the tolerance % of qualifying.{avoidShown ? ` ${avoidShown} shown ${avoidShown > 1 ? "are" : "is"} on your avoid list (⚑) — flagged from past performance.` : ""} Hit ⟳ Live prices to refresh from the OSRS Wiki.</div>
+          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>By default only <strong>FLIP NOW</strong> (clears every gate at your bankroll) shows. Watch items sit within the tolerance % of qualifying.{avoidShown ? ` ${avoidShown} shown ${avoidShown > 1 ? "are" : "is"} on your avoid list (⚑) — flagged from past performance.` : ""} Margin is after the 2% sell tax; age is the <strong>staler</strong> price side (both sides must be live for the margin to be real); profit/4h fills min(buy limit, your capital per slot, ~4h of one-sided market volume). Hit ⟳ Scan market to refresh from the OSRS Wiki.</div>
         </Card>
       </div>
     );
@@ -2857,7 +2885,8 @@ export default class Almanac extends React.Component {
     return (
       <div>
         <SectionTitle kicker="The Allotments · grow-time, not play-time" title="Farming Engine" accent={TH.accent}
-          right={<Btn tone="gold" onClick={() => this.toggleForm("herb")}>+ Log herb run</Btn>} />
+          right={<div style={{ display: "flex", gap: 8 }}><Btn onClick={this.refreshPrices}>⟳ Live prices</Btn><Btn tone="gold" onClick={() => this.toggleForm("herb")}>+ Log herb run</Btn></div>} />
+        {this.state.priceStatus && <div style={{ marginBottom: 14, padding: "8px 14px", background: "rgba(92,110,53,.10)", borderRadius: 5, ...mono({ fontSize: 11, color: "#5c6e35" }) }}>{this.state.priceStatus} — seed costs, herb values and run nets re-priced from the live GE.</div>}
         {bestFarm && <Hero theme={TH} icon="🌱" kicker={`Farming ${farmLvl} · herb-run verdict`} title={`Plant ${bestFarm.tier}`}
           blurb={`${this.short(bestFarm.net)} net per run at Farming ${farmLvl} — ${days > 0 ? days + " days to " + goal + " at " + this.short(xpDay) + " xp/day" : "goal reached"}`}
           statLabel="Logged net" statValue={loggedRuns ? this.signed(loggedNet) : "—"} statSub={loggedRuns ? loggedRuns + " runs" : "no runs yet"} />}
@@ -2915,18 +2944,22 @@ export default class Almanac extends React.Component {
           </Card>
         </div>
         <Card style={{ marginTop: 14 }}>
-          <Kicker color={C.goldDeep}>Herb tiers · net/run by plant level</Kicker>
+          <Kicker color={C.goldDeep}>Herb tiers · net/run by plant level · ⟳ re-prices from the live GE</Kicker>
           <div className="sheetwrap" style={{ marginTop: 8 }}>
             <table className="sheet">
-              <thead><tr>{["Tier", "Plant lvl", "Net/run", "Runs logged", "Total net", "Status"].map((h, i) => <th key={i} className={i > 1 && i < 5 ? "num" : ""}>{h}</th>)}</tr></thead>
+              <thead><tr>{["Tier", "Plant lvl", "Seed cost", "Herb (ea)", "Net/run", "Runs logged", "Total net", "Status"].map((h, i) => <th key={i} className={i > 1 && i < 7 ? "num" : ""}>{h}</th>)}</tr></thead>
               <tbody>{this.farmDefs.map((f, k) => { const a = agg[f.tier] || { runs: 0, net: 0 }; const fU = farmLvl >= f.lvl; return (
                 <tr key={k}>
-                  <td style={cinzel({ fontWeight: 600, fontSize: 13 })}>{f.tier}</td><td className="num" style={mono({ fontSize: 12 })}>Lv {f.lvl}</td><td className="num" style={mono({ fontSize: 12, color: C.green })}>{this.short(f.net)}</td><td className="num" style={mono({ fontSize: 12 })}>{a.runs}</td><td className="num" style={mono({ fontSize: 12 })}>{a.net > 0 ? this.short(a.net) : "—"}</td>
+                  <td style={cinzel({ fontWeight: 600, fontSize: 13 })}>{f.tier}</td><td className="num" style={mono({ fontSize: 12 })}>Lv {f.lvl}</td>
+                  <td className="num" style={mono({ fontSize: 12, color: C.red })}>{this.short(f.seed)}</td>
+                  <td className="num" style={mono({ fontSize: 12 })}>{this.short(f.herb)}</td>
+                  <td className="num" style={mono({ fontSize: 12, color: f.net >= 0 ? C.green : C.red })}>{this.short(f.net)}</td><td className="num" style={mono({ fontSize: 12 })}>{a.runs}</td><td className="num" style={mono({ fontSize: 12 })}>{a.net > 0 ? this.short(a.net) : "—"}</td>
                   <td><Tag color={fU ? C.green : C.red} bg={fU ? "rgba(92,110,53,.16)" : "rgba(150,58,44,.12)"}>{fU ? "unlocked" : "locked"}</Tag></td>
                 </tr>
               ); })}</tbody>
             </table>
           </div>
+          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Net/run = {this.farmDefs[0].patches} patches × ({this.farmDefs[0].yield} avg herbs × herb value after the 2% GE tax − seed cost). Hit ⟳ Live prices to re-price; before that these are snapshots.</div>
         </Card>
         <Card style={{ marginTop: 14 }}>
           <Kicker color={C.goldDeep}>Herb-run log · {this.short(loggedNet)} over {loggedRuns} runs · edit or delete entries</Kicker>
