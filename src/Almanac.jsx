@@ -454,7 +454,7 @@ export default class Almanac extends React.Component {
       });
       // Keep the whole tradeable market so the scanner ranks real flips, not just
       // a handful of seed items. Drop items with no live buy & sell.
-      this.priceRows = Object.values(byId).filter((m) => m.high > 0 && m.low > 0).map((m) => ({ name: m.name, buy: m.low, sell: m.high, vol: m.volume || 0, limit: m.limit || 0, age: quoteAge(m) }));
+      this.priceRows = Object.values(byId).filter((m) => m.high > 0 && m.low > 0).map((m) => ({ name: m.name, buy: m.low, sell: m.high, vol: m.volume || 0, limit: m.limit || 0, age: quoteAge(m), avgHigh1h: m.avgHigh1h, avgLow1h: m.avgLow1h, hvol1h: m.hvol1h, lvol1h: m.lvol1h }));
       this.saveLogs(); this.setState({ priceStatus: `Scanned ${this.priceRows.length.toLocaleString()} items · ${new Date().toLocaleTimeString()}` });
     } catch (err) { this.setState({ priceStatus: "Live market unavailable right now — using your manual list." }); }
   };
@@ -1902,13 +1902,21 @@ export default class Almanac extends React.Component {
     const source = usingMarket ? this.priceRows : this.logs.scan;
     const fail = { margin: 0, vol: 0, age: 0, profit: 0, buy: 0 };
     const allRows = source.map((it, i) => {
-      const tax = this.flipTax(it.sell, 1); const margin = it.buy > 0 ? ((it.sell - tax - it.buy) / it.buy) * 100 : 0;
-      // Realistic 4h fill: buy limit AND your capital AND market throughput.
-      // Daily volume counts both sides, a 4h window is 1/6 of a day, so the flow
-      // available on your side ≈ vol/2/6 — you can't flip more than trades.
-      const throughput = Math.floor((it.vol || 0) / 12);
-      const qty = Math.min(it.limit || 1, Math.floor(capPer / Math.max(1, it.buy)), Math.max(0, throughput));
-      const profit4h = qty * (it.sell - tax - it.buy);
+      // Realistic trade prices: a single outlier trade can spike the instant
+      // low/high, so when we have the last hour's averages, you can't expect to
+      // buy below them or sell above them sustainably.
+      const has1h = it.hvol1h != null;
+      const buy = has1h && it.avgLow1h > 0 ? Math.max(it.buy, it.avgLow1h) : it.buy;
+      const sell = has1h && it.avgHigh1h > 0 ? Math.min(it.sell, it.avgHigh1h) : it.sell;
+      const tax = this.flipTax(sell, 1); const margin = buy > 0 ? ((sell - tax - buy) / buy) * 100 : 0;
+      // Realistic 4h fill: buy limit AND your capital AND what's ACTUALLY
+      // trading. A flip consumes both sides, so current flow = the thinner
+      // side of the last hour × 4. Yesterday's 24h volume (vol/12) is only the
+      // fallback when the hourly feed is unavailable (e.g. manual items).
+      const flowHr = has1h ? Math.min(it.hvol1h || 0, it.lvol1h || 0) : null;
+      const throughput = has1h ? flowHr * 4 : Math.floor((it.vol || 0) / 12);
+      const qty = Math.min(it.limit || 1, Math.floor(capPer / Math.max(1, buy)), Math.max(0, throughput));
+      const profit4h = qty * (sell - tax - buy);
       const cMargin = margin >= cfg.minMargin && margin <= maxMargin, cVol = (it.vol || 0) >= cfg.minVolume, cAge = (it.age || 0) <= maxAge, cProfit = profit4h >= cfg.minProfit4h, cBuy = it.buy >= cfg.minBuy;
       if (!cMargin) fail.margin++; if (!cVol) fail.vol++; if (!cAge) fail.age++; if (!cProfit) fail.profit++; if (!cBuy) fail.buy++;
       // "near" = within the watch tolerance of clearing a gate it currently fails.
@@ -1918,7 +1926,7 @@ export default class Almanac extends React.Component {
       const gates = [[cMargin, nMargin], [cVol, nVol], [cAge, nAge], [cProfit, nProfit], [cBuy, nBuy]];
       const all = gates.every((g) => g[0]);
       const watch = !all && gates.every((g) => g[0] || g[1]);
-      return { i, manualIdx: usingMarket ? -1 : i, name: it.name, buy: this.fmt(it.buy), sell: this.fmt(it.sell), margin: margin.toFixed(1) + "%", marginColor: cMargin ? C.green : C.red, vol: this.short(it.vol || 0), age: (it.age || 0) + "m", profit4h: this.short(profit4h), profit4hN: profit4h, all, watch, verdict: all ? "FLIP NOW" : watch ? "WATCH" : "SKIP", vColor: all ? C.green : watch ? "#9a7530" : C.red, vBg: all ? "rgba(92,110,53,.18)" : watch ? "rgba(201,162,74,.16)" : "rgba(150,58,44,.1)", rowBg: all ? "rgba(92,110,53,.10)" : watch ? "rgba(201,162,74,.07)" : "transparent" };
+      return { i, manualIdx: usingMarket ? -1 : i, name: it.name, buy: this.fmt(buy), sell: this.fmt(sell), margin: margin.toFixed(1) + "%", marginColor: cMargin ? C.green : C.red, vol: this.short(it.vol || 0), flow: flowHr == null ? "—" : this.short(flowHr) + "/h", flowN: flowHr == null ? -1 : flowHr, age: (it.age || 0) + "m", profit4h: this.short(profit4h), profit4hN: profit4h, all, watch, verdict: all ? "FLIP NOW" : watch ? "WATCH" : "SKIP", vColor: all ? C.green : watch ? "#9a7530" : C.red, vBg: all ? "rgba(92,110,53,.18)" : watch ? "rgba(201,162,74,.16)" : "rgba(150,58,44,.1)", rowBg: all ? "rgba(92,110,53,.10)" : watch ? "rgba(201,162,74,.07)" : "transparent" };
     });
     const avoidByName = this.flipAvoidList().byName;
     allRows.forEach((r) => { r.avoid = avoidByName.get((r.name || "").toLowerCase()) || null; });
@@ -1978,7 +1986,7 @@ export default class Almanac extends React.Component {
           </div>
           <div className="sheetwrap">
             <table className="sheet">
-              <thead><tr>{["Item", "Buy", "Sell", "Margin", "Daily vol", "Age", "Profit / 4h", "Verdict", ""].map((h, i) => <th key={i} className={i > 0 && i < 7 ? "num" : ""}>{h}</th>)}</tr></thead>
+              <thead><tr>{["Item", "Buy", "Sell", "Margin", "Daily vol", "Flow (1h)", "Age", "Profit / 4h", "Verdict", ""].map((h, i) => <th key={i} className={i > 0 && i < 8 ? "num" : ""}>{h}</th>)}</tr></thead>
               <tbody>{rows.map((r) => (
                 <tr key={r.i} style={r.avoid ? { background: "rgba(150,58,44,.10)" } : undefined}>
                   <td style={cinzel({ fontWeight: 600, fontSize: 14 })}>{r.name}{r.avoid && <span title={r.avoid.reason} style={{ marginLeft: 7, ...mono({ fontSize: 9, fontWeight: 600, color: r.avoid.tier === "dead" ? "#9a7530" : C.red, background: r.avoid.tier === "dead" ? "rgba(201,162,74,.16)" : "rgba(150,58,44,.14)", padding: "2px 6px", borderRadius: 4 }) }}>⚑ {r.avoid.tier === "dead" ? "DEAD CAP" : "AVOID"}</span>}</td>
@@ -1986,16 +1994,17 @@ export default class Almanac extends React.Component {
                   <td className="num" style={mono({ fontSize: 12 })}>{r.sell}</td>
                   <td className="num" style={mono({ fontSize: 12, color: r.marginColor })}>{r.margin}</td>
                   <td className="num" style={mono({ fontSize: 12 })}>{r.vol}</td>
+                  <td className="num" style={mono({ fontSize: 12, color: r.flowN === 0 ? C.red : C.muted2 })}>{r.flow}</td>
                   <td className="num" style={mono({ fontSize: 12 })}>{r.age}</td>
                   <td className="num" style={mono({ fontSize: 12 })}>{r.profit4h}</td>
                   <td><Tag color={r.vColor} bg={r.vBg}>{r.verdict}</Tag></td>
                   <td>{r.manualIdx >= 0 ? <span onClick={() => this.delLog("scan", r.manualIdx)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span> : null}</td>
                 </tr>
               ))}
-              {rows.length === 0 && <tr><td colSpan={9} style={serif({ fontStyle: "normal", color: C.muted, padding: 18 })}>{!usingMarket && this.logs.scan.length === 0 ? "Hit ⟳ Live prices to scan the market, or add items manually." : watchN > 0 ? `Nothing clears every gate. ${watchN} item${watchN > 1 ? "s are" : " is"} close — tick “Show watch items”.` : `Nothing clears the gates among ${scanned.toLocaleString()} items${failTop ? ` (${failTop})` : ""}. Loosen the control panel or hit Reset.`}</td></tr>}</tbody>
+              {rows.length === 0 && <tr><td colSpan={10} style={serif({ fontStyle: "normal", color: C.muted, padding: 18 })}>{!usingMarket && this.logs.scan.length === 0 ? "Hit ⟳ Live prices to scan the market, or add items manually." : watchN > 0 ? `Nothing clears every gate. ${watchN} item${watchN > 1 ? "s are" : " is"} close — tick “Show watch items”.` : `Nothing clears the gates among ${scanned.toLocaleString()} items${failTop ? ` (${failTop})` : ""}. Loosen the control panel or hit Reset.`}</td></tr>}</tbody>
             </table>
           </div>
-          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>By default only <strong>FLIP NOW</strong> (clears every gate at your bankroll) shows. Watch items sit within the tolerance % of qualifying.{avoidShown ? ` ${avoidShown} shown ${avoidShown > 1 ? "are" : "is"} on your avoid list (⚑) — flagged from past performance.` : ""} Margin is after the 2% sell tax; age is the <strong>staler</strong> price side (both sides must be live for the margin to be real); profit/4h fills min(buy limit, your capital per slot, ~4h of one-sided market volume). Hit ⟳ Scan market to refresh from the OSRS Wiki.</div>
+          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>By default only <strong>FLIP NOW</strong> (clears every gate at your bankroll) shows. Watch items sit within the tolerance % of qualifying.{avoidShown ? ` ${avoidShown} shown ${avoidShown > 1 ? "are" : "is"} on your avoid list (⚑) — flagged from past performance.` : ""} Margin is after the 2% sell tax, on prices sanity-checked against the last hour's averages (one outlier trade can't fake a spread). <strong>Flow (1h)</strong> is the thinner side of what actually traded in the last hour — profit/4h fills min(buy limit, your capital per slot, 4h of that flow), so yesterday's volume can't inflate a dead item. Hit ⟳ Scan market to refresh from the OSRS Wiki.</div>
         </Card>
       </div>
     );

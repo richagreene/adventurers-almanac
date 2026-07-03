@@ -111,20 +111,28 @@ let _priceCache = null; // { at, byId, byName, mapping }
 /**
  * Fetch and index live GE prices. Returns { byId, byName, mapping, at }.
  * `byName` keys are lowercased item names -> { id, name, limit, highalch,
- * members, low, high, lowTime, highTime, volume }. Cached for `maxAgeMs`.
+ * members, low, high, lowTime, highTime, volume, avgHigh1h, avgLow1h,
+ * hvol1h, lvol1h }. Cached for `maxAgeMs`.
+ *
+ * `volume` is the Wiki's 24h total (yesterday-ish). The /1h fields are the
+ * LAST HOUR's average prices and per-side volumes (highPriceVolume = units
+ * insta-bought, lowPriceVolume = units insta-sold) — the honest measure of
+ * what's actually trading right now.
  */
 export async function fetchPrices({ maxAgeMs = 60_000 } = {}) {
   if (_priceCache && Date.now() - _priceCache.at < maxAgeMs) return _priceCache;
   const H = { Accept: "application/json" };
-  const [mapping, latest, volumes] = await Promise.all([
+  const [mapping, latest, volumes, hour] = await Promise.all([
     fetch(`${PRICES}/mapping`, { headers: H }).then(J),
     fetch(`${PRICES}/latest`, { headers: H }).then(J).then((d) => d.data || {}),
     fetch(`${PRICES}/volumes`, { headers: H }).then(J).then((d) => d.data || {}).catch(() => ({})),
+    fetch(`${PRICES}/1h`, { headers: H }).then(J).then((d) => d.data || {}).catch(() => null),
   ]);
   const byId = {};
   const byName = {};
   mapping.forEach((m) => {
     const live = latest[m.id] || {};
+    const h = hour ? hour[m.id] || {} : null;
     const row = {
       id: m.id,
       name: m.name,
@@ -136,6 +144,10 @@ export async function fetchPrices({ maxAgeMs = 60_000 } = {}) {
       lowTime: live.lowTime || 0,
       highTime: live.highTime || 0,
       volume: volumes[m.id] || 0,
+      avgHigh1h: h ? h.avgHighPrice || 0 : null,
+      avgLow1h: h ? h.avgLowPrice || 0 : null,
+      hvol1h: h ? h.highPriceVolume || 0 : null,
+      lvol1h: h ? h.lowPriceVolume || 0 : null,
     };
     byId[m.id] = row;
     byName[m.name.toLowerCase()] = row;
