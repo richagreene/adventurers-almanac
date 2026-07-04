@@ -307,8 +307,9 @@ export default class Almanac extends React.Component {
     if (!this.questOv) { this.questOv = {}; (D.quests || []).forEach((q) => { if (q.status === "Done") this.questOv[q.n] = true; }); this._save("almanac.questdone.v1", this.questOv); }
     this.flipcfg = this._load("almanac.flipcfg.v1", null) || { ...this.flipDefaults };
     this.alchcfg = this._load("almanac.alchcfg.v1", null) || { castsPerHour: 1200, fireSource: "staff", natRune: 127, fireRune: 5 };
-    this.farmcfg = { lapsPerDay: 1, compost: "ultra", secateurs: true, farmCape: false, attas: false, herbsOverride: 0, patchOrder: null, patchOv: {}, ...(this._load("almanac.farmcfg.v1", null) || {}) };
+    this.farmcfg = { lapsPerDay: 1, compost: "ultra", secateurs: true, farmCape: false, attas: false, herbsOverride: 0, patchOrder: null, patchOv: {}, runsPerDay: {}, ...(this._load("almanac.farmcfg.v1", null) || {}) };
     if (!this.farmcfg.patchOv) this.farmcfg.patchOv = {};
+    if (!this.farmcfg.runsPerDay) this.farmcfg.runsPerDay = {};
     this.compostPrices = this.compostPrices || { compost: 80, super: 450, ultra: 750 };
     this.gcfg = this._load("almanac.gcfg.v1", null) || { hoursPerDay: 2, bankGoal: 10000000000, baseGoal: 70 };
     this.blocks = this._load("almanac.blocks.v1", null);
@@ -443,6 +444,9 @@ export default class Almanac extends React.Component {
     });
   }
   movePatch = (id, dir) => { const order = this.activePatches().map((p) => p.id); const i = order.indexOf(id), j = i + dir; if (j < 0 || j >= order.length) return; [order[i], order[j]] = [order[j], order[i]]; this.setFarmOpt("patchOrder", order); };
+  // Per-run-type runs/day override. Empty input = back to the global default;
+  // 0 = deliberately skip that run type.
+  setRunsPerDay = (crop, raw) => { const m = { ...(this.farmcfg.runsPerDay || {}) }; if (("" + raw).trim() === "") delete m[crop]; else m[crop] = Math.max(0, Math.round(this.parseNum(raw) || 0)); this.setFarmOpt("runsPerDay", m); };
   togglePatch = (id, on) => { const ov = { ...(this.farmcfg.patchOv || {}) }; ov[id] = on; this.setFarmOpt("patchOv", ov); };
   autoPatch = (id) => { const ov = { ...(this.farmcfg.patchOv || {}) }; delete ov[id]; this.setFarmOpt("patchOv", ov); };
   // Everything the herb net/run needs, derived from the mechanics above +
@@ -2980,9 +2984,10 @@ export default class Almanac extends React.Component {
     const runDefs = this.farmRunDefs.map((r) => {
       const unlocked = r.req <= farmLvl;
       const maxRunsDay = Math.max(1, Math.floor(24 / (r.growHrs || 1)));
-      const effRuns = Math.min(laps, maxRunsDay);
+      const want = (this.farmcfg.runsPerDay || {})[r.crop];
+      const effRuns = Math.min(want != null ? want : laps, maxRunsDay);
       const herbDef = /herb/i.test(r.type || "") ? this.farmDefs.find((f) => f.tier === r.crop) : null;
-      return { ...r, unlocked, maxRunsDay, effRuns, gpRun: herbDef ? this.farmNet(herbDef) : r.gpRun, patches: herbDef ? Y.P : r.patches };
+      return { ...r, unlocked, maxRunsDay, effRuns, rdOverride: want != null, gpRun: herbDef ? this.farmNet(herbDef) : r.gpRun, patches: herbDef ? Y.P : r.patches };
     });
     const unlockedRuns = runDefs.filter((r) => r.unlocked);
     const lockedRuns = runDefs.filter((r) => !r.unlocked);
@@ -3108,9 +3113,9 @@ export default class Almanac extends React.Component {
           <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Access is read from your quest log (Priest in Peril → Morytania, My Arm's Big Adventure → Trollheim, Making Friends with My Arm → Weiss, Children of the Sun → Varlamore, The Great Brain Robbery + Morytania Elite → Harmony) and Farming 65 for the Guild. The checkbox overrides the auto-detection either way; ▲▼ set your route order, which the run logger follows.</div>
         </Card>
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
-          <span style={mono({ fontSize: 11, color: C.muted2 })}>TARGET RUNS / DAY</span>
+          <span style={mono({ fontSize: 11, color: C.muted2 })}>DEFAULT RUNS / DAY</span>
           <input className="led" defaultValue={laps} onBlur={(e) => this.setCfg("farmcfg", "lapsPerDay", e.target.value)} style={{ width: 70 }} />
-          <span style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted })}>Each run type is capped to what its grow time actually allows — fruit trees (16h) max one a day, herbs (~80m) many more.</span>
+          <span style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted })}>Each run type is capped to what its grow time allows — fruit trees (16h) max one a day, herbs (~80m) many more. Edit the Runs/day cell on any row to set a per-type target (0 = skip that run; clear the cell to go back to this default).</span>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
           <Card>
@@ -3125,7 +3130,12 @@ export default class Almanac extends React.Component {
                     <td className="num" style={mono({ fontSize: 12 })}>{r.patches}</td>
                     <td className="num"><div style={mono({ fontSize: 12 })}>{this.fmt(r.xpRun)}</div><Bar pct={Math.min(100, (r.xpRun / runMax) * 100)} c1={TH.accent} c2={TH.lite} h={4} /></td>
                     <td className="num" style={mono({ fontSize: 12, color: r.gpRun >= 0 ? C.green : C.red })}>{r.gpRun >= 0 ? "+" + this.short(r.gpRun) : this.signed(r.gpRun)}</td>
-                    <td className="num" style={mono({ fontSize: 12 })}>{r.effRuns}<span style={{ color: C.muted }}>/{r.maxRunsDay}</span></td>
+                    <td className="num">
+                      <span style={{ display: "inline-flex", alignItems: "baseline", gap: 3 }}>
+                        <input className="led" key={r.crop + ":" + r.effRuns + ":" + (r.rdOverride ? 1 : 0)} defaultValue={r.effRuns} onBlur={(e) => this.setRunsPerDay(r.crop, e.target.value)} title="Runs/day for this run type · empty = global default · 0 = skip" style={{ width: 44, padding: "3px 5px", textAlign: "right", fontWeight: r.rdOverride ? 700 : 400, borderColor: r.rdOverride ? TH.accent : undefined }} />
+                        <span style={mono({ fontSize: 12, color: C.muted })}>/{r.maxRunsDay}</span>
+                      </span>
+                    </td>
                     <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{r.growHrs < 1.5 ? Math.round(r.growHrs * 60) + "m" : r.growHrs + "h"}</td>
                   </tr>
                 ))}
