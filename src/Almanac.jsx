@@ -108,10 +108,12 @@ export default class Almanac extends React.Component {
   // (24h ÷ growHrs). Herbs ~80 min, fruit trees 16h, trees ~hours, hardwoods slow.
   farmRunDefs = [
     { name: "Herb run", crop: "Snapdragon", type: "Herb", req: 62, xpRun: 6981, gpRun: 80260, timeMin: 6, growHrs: 1.33, patches: 6, teles: "Ectophial · Explorer ring · Ardy cloak · Catherby · Hosidius", seeds: "6× Snapdragon seed + compost" },
-    { name: "Fruit tree run", crop: "Palm", type: "Fruit", req: 68, xpRun: 51303, gpRun: -32000, sapItem: "Palm sapling", timeMin: 13, growHrs: 16, patches: 6, teles: "Gnome Stronghold · Tree Gnome Village · Brimhaven · Catherby · Lletya · Farming Guild", seeds: "6× Palm sapling" },
-    { name: "Tree run", crop: "Yew", type: "Tree", req: 60, xpRun: 35755, gpRun: -14000, sapItem: "Yew sapling", timeMin: 14, growHrs: 8, patches: 5, teles: "Lumbridge · Varrock · Falador · Gnome Stronghold · Farming Guild", seeds: "5× Yew sapling" },
-    { name: "Hardwood run", crop: "Mahogany", type: "Hardwood", req: 55, xpRun: 31500, gpRun: -9000, sapItem: "Mahogany sapling", timeMin: 6, growHrs: 24, patches: 2, teles: "Fossil Island · Mushroom forest", seeds: "2× Mahogany sapling" },
-    { name: "Tree run", crop: "Magic", type: "Tree", req: 75, xpRun: 69569, gpRun: -58000, sapItem: "Magic sapling", timeMin: 14, growHrs: 8, patches: 5, teles: "Lumbridge · Varrock · Falador · Gnome Stronghold · Farming Guild", seeds: "5× Magic sapling" },
+    // payItem/payQty = the farmer's protection payment PER PATCH (guarantees the
+    // tree can't die); priced into gpRun on a live refresh alongside saplings.
+    { name: "Fruit tree run", crop: "Palm", type: "Fruit", req: 68, xpRun: 51303, gpRun: -32000, sapItem: "Palm sapling", payItem: "Papaya fruit", payQty: 15, timeMin: 13, growHrs: 16, patches: 6, teles: "Gnome Stronghold · Tree Gnome Village · Brimhaven · Catherby · Lletya · Farming Guild", seeds: "6× Palm sapling" },
+    { name: "Tree run", crop: "Yew", type: "Tree", req: 60, xpRun: 35755, gpRun: -14000, sapItem: "Yew sapling", payItem: "Cactus spine", payQty: 10, timeMin: 14, growHrs: 8, patches: 5, teles: "Lumbridge · Varrock · Falador · Gnome Stronghold · Farming Guild", seeds: "5× Yew sapling" },
+    { name: "Hardwood run", crop: "Mahogany", type: "Hardwood", req: 55, xpRun: 31500, gpRun: -9000, sapItem: "Mahogany sapling", payItem: "Yanillian hops", payQty: 25, timeMin: 6, growHrs: 24, patches: 2, teles: "Fossil Island · Mushroom forest", seeds: "2× Mahogany sapling" },
+    { name: "Tree run", crop: "Magic", type: "Tree", req: 75, xpRun: 69569, gpRun: -58000, sapItem: "Magic sapling", payItem: "Coconut", payQty: 25, timeMin: 14, growHrs: 8, patches: 5, teles: "Lumbridge · Varrock · Falador · Gnome Stronghold · Farming Guild", seeds: "5× Magic sapling" },
   ];
   farmMilestones = [
     { lvl: 72, label: "Snapdragons · Mahogany hardwoods", tag: "CURRENT" },
@@ -555,7 +557,11 @@ export default class Almanac extends React.Component {
       this.farmRunDefs.forEach((r) => {
         if (/herb/i.test(r.type || "")) return; // herb run net comes from farmNet()
         const sap = byName[(r.sapItem || "").toLowerCase()];
-        if (sap && (sap.high || sap.low)) r.gpRun = -Math.round((r.patches || 1) * (sap.high || sap.low));
+        const pay = r.payItem ? byName[r.payItem.toLowerCase()] : null;
+        if (sap && (sap.high || sap.low)) {
+          const payCost = pay && (pay.high || pay.low) ? (r.payQty || 0) * (pay.high || pay.low) : 0;
+          r.gpRun = -Math.round((r.patches || 1) * ((sap.high || sap.low) + payCost));
+        }
       });
       // Keep the whole tradeable market so the scanner ranks real flips, not just
       // a handful of seed items. Drop items with no live buy & sell.
@@ -3141,12 +3147,13 @@ export default class Almanac extends React.Component {
             <Kicker color={C.goldDeep}>Daily run circuit · unlocked at Farming {farmLvl}</Kicker>
             <div className="sheetwrap" style={{ marginTop: 10 }}>
               <table className="sheet">
-                <thead><tr>{["Run", "Crop", "Patches", "XP/run", "GP/run", "Runs/day", "Grow"].map((h, i) => <th key={i} className={i > 2 ? "num" : ""}>{h}</th>)}</tr></thead>
+                <thead><tr>{["Run", "Crop", "Patches", "Protection", "XP/run", "GP/run", "Runs/day", "Grow"].map((h, i) => <th key={i} className={i > 3 ? "num" : ""}>{h}</th>)}</tr></thead>
                 <tbody>{unlockedRuns.map((r, k) => (
                   <tr key={k}>
                     <td><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{r.name}</div><div style={serif({ fontSize: 10.5, fontStyle: "normal", color: C.muted })}>{r.teles}</div></td>
                     <td style={serif({ fontSize: 13 })}>{r.crop}</td>
                     <td className="num" style={mono({ fontSize: 12 })}>{r.patches}</td>
+                    <td>{r.payItem ? <span title={"Farmer payment per patch — guarantees the tree can't die; priced into GP/run"} style={mono({ fontSize: 11, color: C.muted2 })}>{r.payQty}× {r.payItem} <span style={{ color: C.muted }}>/patch</span></span> : <span style={mono({ fontSize: 11, color: C.muted })}>{(this.herbCompost[this.farmcfg.compost] || {}).label} + {Y.df} disease-free</span>}</td>
                     <td className="num"><div style={mono({ fontSize: 12 })}>{this.fmt(r.xpRun)}</div><Bar pct={Math.min(100, (r.xpRun / runMax) * 100)} c1={TH.accent} c2={TH.lite} h={4} /></td>
                     <td className="num" style={mono({ fontSize: 12, color: r.gpRun >= 0 ? C.green : C.red })}>{r.gpRun >= 0 ? "+" + this.short(r.gpRun) : this.signed(r.gpRun)}</td>
                     <td className="num">
@@ -3158,7 +3165,7 @@ export default class Almanac extends React.Component {
                     <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{r.growHrs < 1.5 ? Math.round(r.growHrs * 60) + "m" : r.growHrs + "h"}</td>
                   </tr>
                 ))}
-                {unlockedRuns.length === 0 && <tr><td colSpan={7} style={serif({ fontStyle: "normal", color: C.muted, padding: 14 })}>No runs unlocked yet at Farming {farmLvl}.</td></tr>}</tbody>
+                {unlockedRuns.length === 0 && <tr><td colSpan={8} style={serif({ fontStyle: "normal", color: C.muted, padding: 14 })}>No runs unlocked yet at Farming {farmLvl}.</td></tr>}</tbody>
               </table>
             </div>
             {lockedRuns.length > 0 && <div style={{ marginTop: 10, ...serif({ fontSize: 12, color: C.muted }) }}>Upcoming: {lockedRuns.map((r) => `${r.crop} ${r.name.toLowerCase()} (lvl ${r.req})`).join(" · ")}</div>}
