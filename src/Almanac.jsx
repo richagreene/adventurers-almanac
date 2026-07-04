@@ -67,14 +67,28 @@ export default class Almanac extends React.Component {
     { item: "Rune javelin tips", alch: 810, buy: 370, limit: 10000 },
     { item: "Yew longbow", alch: 768, buy: 475, limit: 18000 },
   ];
-  // Herb tiers. seed/herb/net are snapshots until "⟳ Live prices" re-prices them:
-  // net = patches × (yield × herb-after-tax − seed). yield ≈ avg grimy herbs per
-  // patch with magic secateurs + ultracompost; 6 herb patches on the circuit.
+  // Herb tiers. seed/herb prices are snapshots until "⟳ Live prices" re-prices
+  // them; net/run is always computed live from the yield model in herbYield()
+  // (harvest lives × chance-to-save × disease survival) via farmNet().
   farmDefs = [
-    { tier: "Ranarr", lvl: 32, unlocked: true, seedItem: "Ranarr seed", herbItem: "Grimy ranarr weed", yield: 6.8, patches: 6, seed: 26678, herb: 5346, net: 56199 },
-    { tier: "Snapdragon", lvl: 62, unlocked: true, seedItem: "Snapdragon seed", herbItem: "Grimy snapdragon", yield: 6.8, patches: 6, seed: 53508, herb: 8393, net: 80260 },
-    { tier: "Torstol", lvl: 85, unlocked: false, seedItem: "Torstol seed", herbItem: "Grimy torstol", yield: 6.8, patches: 6, seed: 15900, herb: 3155, net: 143793 },
+    { tier: "Ranarr", lvl: 32, unlocked: true, seedItem: "Ranarr seed", herbItem: "Grimy ranarr weed", seed: 26678, herb: 5346 },
+    { tier: "Snapdragon", lvl: 62, unlocked: true, seedItem: "Snapdragon seed", herbItem: "Grimy snapdragon", seed: 53508, herb: 8393 },
+    { tier: "Torstol", lvl: 85, unlocked: false, seedItem: "Torstol seed", herbItem: "Grimy torstol", seed: 15900, herb: 3155 },
   ];
+  // Herb yield model (OSRS Wiki "Crop yield" mechanics):
+  //   chance to save a harvest life  p = (1 + floor(interp × bonuses)) / 256
+  //     interp = (CTS1·(99−L) + CTS99·(L−1)) / 98 — all herbs share CTS1=25, CTS99=80
+  //     bonuses: magic secateurs ×1.10 · farming cape ×1.05 · attas plant ×1.05
+  //   expected herbs from a LIVE patch  E = lives / (1 − p)
+  //     lives = 3, +1 compost / +2 super / +3 ultra
+  //   disease: 3 growth checkpoints; per-stage chance by compost — survival = (1−d)³
+  //   (Trollheim · Weiss · Hosidius patches never roll disease → "disease-free" count)
+  herbCompost = {
+    none: { label: "No compost", lives: 3, d: 27 / 128, item: null },
+    compost: { label: "Compost", lives: 4, d: 14 / 128, item: "Compost" },
+    super: { label: "Supercompost", lives: 5, d: 6 / 128, item: "Supercompost" },
+    ultra: { label: "Ultracompost", lives: 6, d: 3 / 128, item: "Ultracompost" },
+  };
   // growHrs = real grow time; caps how many runs/day are actually possible
   // (24h ÷ growHrs). Herbs ~80 min, fruit trees 16h, trees ~hours, hardwoods slow.
   farmRunDefs = [
@@ -278,7 +292,8 @@ export default class Almanac extends React.Component {
     if (!this.questOv) { this.questOv = {}; (D.quests || []).forEach((q) => { if (q.status === "Done") this.questOv[q.n] = true; }); this._save("almanac.questdone.v1", this.questOv); }
     this.flipcfg = this._load("almanac.flipcfg.v1", null) || { ...this.flipDefaults };
     this.alchcfg = this._load("almanac.alchcfg.v1", null) || { castsPerHour: 1200, fireSource: "staff", natRune: 127, fireRune: 5 };
-    this.farmcfg = this._load("almanac.farmcfg.v1", null) || { lapsPerDay: 1 };
+    this.farmcfg = { lapsPerDay: 1, patchesPerRun: 6, compost: "ultra", secateurs: true, farmCape: false, attas: false, diseaseFree: 1, herbsOverride: 0, ...(this._load("almanac.farmcfg.v1", null) || {}) };
+    this.compostPrices = this.compostPrices || { compost: 80, super: 450, ultra: 750 };
     this.gcfg = this._load("almanac.gcfg.v1", null) || { hoursPerDay: 2, bankGoal: 10000000000, baseGoal: 70 };
     this.blocks = this._load("almanac.blocks.v1", null);
     if (!this.blocks) { this.blocks = {}; (D.slayer || []).forEach((t) => { if (t.verdict === "Block") this.blocks[t.task] = true; }); }
@@ -388,6 +403,35 @@ export default class Almanac extends React.Component {
   }
   alchCost() { const c = this.alchcfg; return c.fireSource === "staff" ? c.natRune : c.natRune + 5 * c.fireRune; }
 
+  // ---------- farming yield model ----------
+  // Everything the herb net/run needs, derived from the mechanics above +
+  // your live Farming level + the run-mechanics controls.
+  herbYield() {
+    const cfg = this.farmcfg;
+    const L = Math.max(1, (this.skillMap.Farming || { l: 1 }).l);
+    const co = this.herbCompost[cfg.compost] || this.herbCompost.ultra;
+    const bonus = (cfg.secateurs ? 1.1 : 1) * (cfg.farmCape ? 1.05 : 1) * (cfg.attas ? 1.05 : 1);
+    const interp = (25 * (99 - L) + 80 * (L - 1)) / 98;
+    const p = Math.min(0.9, (1 + Math.floor(interp * bonus)) / 256);
+    const perLive = co.lives / (1 - p);
+    const surv = Math.pow(1 - co.d, 3);
+    const P = Math.max(1, Math.min(9, cfg.patchesPerRun || 6));
+    const df = Math.max(0, Math.min(P, cfg.diseaseFree != null ? cfg.diseaseFree : 1));
+    const ov = (cfg.herbsOverride || 0) > 0;
+    // survival-weighted average herbs per patch across the circuit; an override
+    // is treated as your OWN realized average (deaths already baked in).
+    const eff = ov ? cfg.herbsOverride : perLive * ((df + (P - df) * surv) / P);
+    const compostCost = cfg.compost === "none" ? 0 : (this.compostPrices || {})[cfg.compost] || 0;
+    return { L, p, lives: co.lives, perLive, surv, P, df, eff, ov, compostCost };
+  }
+  // Net gp for one full herb run of a tier: every patch pays seed + compost,
+  // harvested herbs (yield model) sell after the 2% GE tax.
+  farmNet(f) {
+    const y = this.herbYield();
+    return Math.round(y.P * (y.eff * geSellNet(f.herb) - f.seed - y.compostCost));
+  }
+  setFarmOpt = (k, v) => { this.farmcfg[k] = v; this._save("almanac.farmcfg.v1", this.farmcfg); this.bump(); };
+
   // ---------- generic table sort/filter engine ----------
   gSort = (table, col) => this.setState((s) => { const cur = (s.tSort && s.tSort[table]) || {}; let nx; if (cur.c === col) nx = cur.d > 0 ? { c: col, d: -1 } : null; else nx = { c: col, d: 1 }; const tS = { ...s.tSort }; if (nx) tS[table] = nx; else delete tS[table]; return { tSort: tS, tOpen: "" }; });
   gOpenFilter = (table, col) => this.setState((s) => ({ tOpen: s.tOpen === table + ":" + col ? "" : table + ":" + col }));
@@ -437,18 +481,18 @@ export default class Almanac extends React.Component {
       this.logs.scan.forEach((it) => { const m = byName[(it.name || "").toLowerCase()]; if (m) { if (m.low) it.buy = m.low; if (m.high) it.sell = m.high; if (m.limit) it.limit = m.limit; if (m.volume) it.vol = m.volume; it.age = quoteAge(m); n++; } });
       this.alchItems.forEach((a) => { const m = byName[a.item.toLowerCase()]; if (m) { if (m.high) a.buy = m.high; if (m.highalch) a.alch = m.highalch; if (m.limit) a.limit = m.limit; } });
       const nat = byName["nature rune"]; if (nat && (nat.high || nat.low)) { this.alchcfg.natRune = nat.high || nat.low; this._save("almanac.alchcfg.v1", this.alchcfg); }
-      // Farming: re-price herb tiers + run costs from the live feed.
-      // net/run = patches × (yield × herb value after GE tax − seed cost).
+      // Farming: re-price seeds, herbs, compost and saplings from the live feed.
+      // (net/run itself is always computed on demand by farmNet() from the
+      // yield model, so the run-mechanics controls react instantly.)
       this.farmDefs.forEach((f) => {
         const s = byName[(f.seedItem || "").toLowerCase()], h = byName[(f.herbItem || "").toLowerCase()];
         if (!s || !h) return;
         const seed = s.high || s.low, herb = h.low || h.high; // pay the ask for seeds, insta-sell the grimys
-        if (!seed || !herb) return;
-        f.seed = seed; f.herb = herb;
-        f.net = Math.round((f.patches || 6) * ((f.yield || 6.8) * geSellNet(herb) - seed));
+        if (seed) f.seed = seed; if (herb) f.herb = herb;
       });
+      Object.entries(this.herbCompost).forEach(([k, co]) => { if (!co.item) return; const m = byName[co.item.toLowerCase()]; if (m && (m.high || m.low)) this.compostPrices[k] = m.high || m.low; });
       this.farmRunDefs.forEach((r) => {
-        if (/herb/i.test(r.type || "")) { const def = this.farmDefs.find((f) => f.tier === r.crop); if (def) r.gpRun = def.net; return; }
+        if (/herb/i.test(r.type || "")) return; // herb run net comes from farmNet()
         const sap = byName[(r.sapItem || "").toLowerCase()];
         if (sap && (sap.high || sap.low)) r.gpRun = -Math.round((r.patches || 1) * (sap.high || sap.low));
       });
@@ -539,7 +583,7 @@ export default class Almanac extends React.Component {
     return { manual, auto, byName, perf };
   }
   addAlch = () => { const casts = this.num("alch_casts"); if (casts <= 0) return; const item = this.val("alch_item") || "High alch", alchVal = this.num("alch_alch"), buy = this.num("alch_buy"); this.logs.alch.unshift({ date: this.today(), item, casts, alchVal, buy, net: (alchVal - buy - this.alchCost()) * casts, xp: casts * 65 }); this.saveLogs(); this.setState({ openForm: null }); };
-  addHerb = () => { const tier = this.val("herb_tier") || "Snapdragon", runs = this.num("herb_runs") || 1, netOv = this.num("herb_net"); const def = this.farmDefs.find((f) => f.tier === tier); this.logs.herb.unshift({ date: this.today(), tier, runs, net: netOv > 0 ? netOv : def ? def.net * runs : 0 }); this.saveLogs(); this.setState({ openForm: null }); };
+  addHerb = () => { const tier = this.val("herb_tier") || "Snapdragon", runs = this.num("herb_runs") || 1, netOv = this.num("herb_net"); const def = this.farmDefs.find((f) => f.tier === tier); this.logs.herb.unshift({ date: this.today(), tier, runs, net: netOv > 0 ? netOv : def ? this.farmNet(def) * runs : 0 }); this.saveLogs(); this.setState({ openForm: null }); };
   editHerb = (i, key, raw) => { const h = this.logs.herb[i]; if (!h) return; const v = Math.round(this.parseNum(raw)); if (key === "runs") h.runs = Math.max(1, v); else if (key === "net") h.net = v; else if (key === "tier") h.tier = raw; this.saveLogs(); this.bump(); };
   addBoss = () => { const boss = this.val("boss_name") || D.bosses[0].n, kills = this.num("boss_kills") || 1; this.logs.boss.unshift({ date: this.today(), boss, kills, note: this.val("boss_note") }); this.saveLogs(); this.setState({ openForm: null }); };
   addSlay = () => { const task = this.val("slay_task") || D.slayer[0].task; this.logs.slayerLog.unshift({ date: this.today(), task, xp: this.num("slay_xp"), gp: this.num("slay_gp") }); this.saveLogs(); this.setState({ openForm: null }); };
@@ -890,10 +934,8 @@ export default class Almanac extends React.Component {
     if (!a) return null; const id = a.id;
     if (id === "herb-run") {
       const fl = (lv && lv.farming) || 1;
-      const runs = (this.farmRunDefs || []).filter((f) => /herb/i.test(f.type || "") && f.gpRun > 0 && fl >= (f.req || 1)).sort((x, y) => y.gpRun - x.gpRun);
-      if (runs[0]) return { perRun: runs[0].gpRun };
-      const defs = (this.farmDefs || []).filter((d) => d.unlocked && d.net > 0).sort((x, y) => y.net - x.net);
-      if (defs[0]) return { perRun: defs[0].net };
+      const best = (this.farmDefs || []).filter((d) => fl >= d.lvl).map((d) => this.farmNet(d)).sort((a, b) => b - a)[0];
+      if (best > 0) return { perRun: best };
     } else if (id === "high-alch") {
       const cost = this.alchCost ? this.alchCost() : 180; let best = 0;
       (this.alchItems || []).forEach((it) => { const m = (it.alch || 0) - (it.buy || 0) - cost; if (m > best) best = m; });
@@ -1364,7 +1406,8 @@ export default class Almanac extends React.Component {
     const alchBest = this.alchItems.map((a) => (a.alch - a.buy - aCost) * cphr).reduce((m, v) => Math.max(m, v), 0);
     const slay = this.slayWeighted();
     const accBoss = D.bosses.filter((b) => this.bossEff(b).acc).map((b) => this.bossEff(b).estGp).reduce((m, v) => Math.max(m, v), 0);
-    const herbBest = Math.max(...this.farmDefs.filter((f) => f.unlocked).map((f) => f.net));
+    const farmLvlDash = (sm.Farming || { l: 1 }).l;
+    const herbBest = Math.max(0, ...this.farmDefs.filter((f) => farmLvlDash >= f.lvl).map((f) => this.farmNet(f)));
     const flipNet = d.logs.flips.map((f) => this.computeFlip(f)).reduce((a, f) => a + f.net, 0);
     const money = [
       { name: "High Alchemy", note: "magic XP + steady gp, AFK-friendly", rate: this.short(alchBest), unit: "gp / hr", c: C.purple, skill: "Magic" },
@@ -2872,12 +2915,15 @@ export default class Almanac extends React.Component {
     const sm = this.skillMap; const farmLvl = (sm.Farming || { l: 1 }).l, farmXp = (sm.Farming || { x: 0 }).x;
     const goal = (this.goals.find((g) => g.skill === "Farming") || { tgt: 85 }).tgt;
     const laps = this.farmcfg.lapsPerDay || 1;
+    const Y = this.herbYield();
     // Per run-type realistic daily cap = 24h ÷ grow time; effective = min(your laps, cap).
+    // Herb rows take patches + net/run live from the yield model.
     const runDefs = this.farmRunDefs.map((r) => {
       const unlocked = r.req <= farmLvl;
       const maxRunsDay = Math.max(1, Math.floor(24 / (r.growHrs || 1)));
       const effRuns = Math.min(laps, maxRunsDay);
-      return { ...r, unlocked, maxRunsDay, effRuns };
+      const herbDef = /herb/i.test(r.type || "") ? this.farmDefs.find((f) => f.tier === r.crop) : null;
+      return { ...r, unlocked, maxRunsDay, effRuns, gpRun: herbDef ? this.farmNet(herbDef) : r.gpRun, patches: herbDef ? Y.P : r.patches };
     });
     const unlockedRuns = runDefs.filter((r) => r.unlocked);
     const lockedRuns = runDefs.filter((r) => !r.unlocked);
@@ -2889,7 +2935,7 @@ export default class Almanac extends React.Component {
     const days = xpDay > 0 ? Math.ceil(xpLeft / xpDay) : 0;
     const agg = {}; this.logs.herb.forEach((h) => { if (!agg[h.tier]) agg[h.tier] = { runs: 0, net: 0 }; agg[h.tier].runs += h.runs || 1; agg[h.tier].net += h.net; });
     const TH = themeFor("farming");
-    const bestFarm = this.farmDefs.filter((f) => farmLvl >= f.lvl).slice().sort((a, b) => b.net - a.net)[0] || this.farmDefs[0];
+    const bestFarm = this.farmDefs.filter((f) => farmLvl >= f.lvl).map((f) => ({ ...f, net: this.farmNet(f) })).sort((a, b) => b.net - a.net)[0] || { ...this.farmDefs[0], net: this.farmNet(this.farmDefs[0]) };
     const loggedNet = this.logs.herb.reduce((a, h) => a + h.net, 0), loggedRuns = this.logs.herb.reduce((a, h) => a + (h.runs || 1), 0);
     return (
       <div>
@@ -2913,6 +2959,48 @@ export default class Almanac extends React.Component {
             </div>
           </Card>
         )}
+        <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
+          <Kicker color={TH.accent}>Run mechanics · these feed every net/run</Kicker>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10, marginTop: 10 }}>
+            <div style={{ background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
+              <Kicker>Patches / run</Kicker>
+              <input className="led" defaultValue={Y.P} onBlur={(e) => this.setCfg("farmcfg", "patchesPerRun", e.target.value)} style={{ width: "100%", marginTop: 6, fontWeight: 600 }} />
+              <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted, marginTop: 6, lineHeight: 1.3 })}>9 exist: Falador · Catherby · Ardougne · Morytania · Hosidius · Trollheim · Weiss · Farming Guild · Varlamore</div>
+            </div>
+            <div style={{ background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
+              <Kicker>Disease-free patches</Kicker>
+              <input className="led" defaultValue={Y.df} onBlur={(e) => this.setCfg("farmcfg", "diseaseFree", e.target.value)} style={{ width: "100%", marginTop: 6, fontWeight: 600 }} />
+              <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted, marginTop: 6, lineHeight: 1.3 })}>Trollheim, Weiss & Hosidius never roll disease</div>
+            </div>
+            <div style={{ background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
+              <Kicker>Compost</Kicker>
+              <select className="led" value={this.farmcfg.compost} onChange={(e) => this.setFarmOpt("compost", e.target.value)} style={{ width: "100%", marginTop: 6 }}>
+                {Object.entries(this.herbCompost).map(([k, co]) => <option key={k} value={k}>{co.label}</option>)}
+              </select>
+              <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted, marginTop: 6, lineHeight: 1.3 })}>+{(this.herbCompost[this.farmcfg.compost] || {}).lives - 3 || 0} harvest lives · {this.short(Y.compostCost)} gp/patch (live)</div>
+            </div>
+            <div style={{ background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
+              <Kicker>Herbs / patch override</Kicker>
+              <input className="led" defaultValue={this.farmcfg.herbsOverride || 0} onBlur={(e) => this.setCfg("farmcfg", "herbsOverride", e.target.value)} style={{ width: "100%", marginTop: 6, fontWeight: 600 }} />
+              <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted, marginTop: 6, lineHeight: 1.3 })}>0 = use the model · set your own realized average to replace it</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
+            {[["secateurs", "Magic secateurs · +10% yield"], ["farmCape", "Farming cape · +5%"], ["attas", "Attas plant · +5%"]].map(([k, label]) => (
+              <label key={k} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", ...mono({ fontSize: 11, color: C.muted2 }) }}>
+                <input type="checkbox" checked={!!this.farmcfg[k]} onChange={(e) => this.setFarmOpt(k, e.target.checked)} style={{ accentColor: TH.accent, width: 15, height: 15 }} />{label}
+              </label>
+            ))}
+            <span style={{ marginLeft: "auto", display: "flex", gap: 14, flexWrap: "wrap" }}>
+              {[["save chance", (Y.p * 100).toFixed(1) + "%"], ["harvest lives", "" + Y.lives], ["herbs/patch", Y.eff.toFixed(2) + (Y.ov ? " (override)" : "")], ["patch survival", (Y.surv * 100).toFixed(1) + "%"]].map(([l, v]) => (
+                <span key={l} style={{ background: "rgba(92,110,53,.12)", border: "1px solid rgba(92,110,53,.3)", borderRadius: 5, padding: "4px 10px", ...mono({ fontSize: 10.5, color: "#3c5322" }) }}>{l} <strong>{v}</strong></span>
+              ))}
+            </span>
+          </div>
+          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 10, lineHeight: 1.45 })}>
+            The model (OSRS crop-yield mechanics): chance to save a harvest life at Farming {Y.L} = (1 + ⌊(25·(99−L) + 80·(L−1))/98 × bonuses⌋)/256 = <strong>{(Y.p * 100).toFixed(1)}%</strong> — all herbs share the 25/80 constants. Each patch has {Y.lives} harvest lives ({(this.herbCompost[this.farmcfg.compost] || {}).label?.toLowerCase()}), each life yields 1/(1−p) herbs → <strong>{Y.perLive.toFixed(2)} herbs from a live patch</strong>. Herbs roll disease at 3 growth checks → {(Y.surv * 100).toFixed(1)}% survive ({Y.df} of your {Y.P} patches are disease-free). Net/run = {Y.P} × ({Y.eff.toFixed(2)} herbs × herb price after 2% tax − seed − compost).
+          </div>
+        </Card>
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
           <span style={mono({ fontSize: 11, color: C.muted2 })}>TARGET RUNS / DAY</span>
           <input className="led" defaultValue={laps} onBlur={(e) => this.setCfg("farmcfg", "lapsPerDay", e.target.value)} style={{ width: 70 }} />
@@ -2957,18 +3045,18 @@ export default class Almanac extends React.Component {
           <div className="sheetwrap" style={{ marginTop: 8 }}>
             <table className="sheet">
               <thead><tr>{["Tier", "Plant lvl", "Seed cost", "Herb (ea)", "Net/run", "Runs logged", "Total net", "Status"].map((h, i) => <th key={i} className={i > 1 && i < 7 ? "num" : ""}>{h}</th>)}</tr></thead>
-              <tbody>{this.farmDefs.map((f, k) => { const a = agg[f.tier] || { runs: 0, net: 0 }; const fU = farmLvl >= f.lvl; return (
+              <tbody>{this.farmDefs.map((f, k) => { const a = agg[f.tier] || { runs: 0, net: 0 }; const fU = farmLvl >= f.lvl; const net = this.farmNet(f); return (
                 <tr key={k}>
                   <td style={cinzel({ fontWeight: 600, fontSize: 13 })}>{f.tier}</td><td className="num" style={mono({ fontSize: 12 })}>Lv {f.lvl}</td>
                   <td className="num" style={mono({ fontSize: 12, color: C.red })}>{this.short(f.seed)}</td>
                   <td className="num" style={mono({ fontSize: 12 })}>{this.short(f.herb)}</td>
-                  <td className="num" style={mono({ fontSize: 12, color: f.net >= 0 ? C.green : C.red })}>{this.short(f.net)}</td><td className="num" style={mono({ fontSize: 12 })}>{a.runs}</td><td className="num" style={mono({ fontSize: 12 })}>{a.net > 0 ? this.short(a.net) : "—"}</td>
+                  <td className="num" style={mono({ fontSize: 12, color: net >= 0 ? C.green : C.red })}>{this.short(net)}</td><td className="num" style={mono({ fontSize: 12 })}>{a.runs}</td><td className="num" style={mono({ fontSize: 12 })}>{a.net > 0 ? this.short(a.net) : "—"}</td>
                   <td><Tag color={fU ? C.green : C.red} bg={fU ? "rgba(92,110,53,.16)" : "rgba(150,58,44,.12)"}>{fU ? "unlocked" : "locked"}</Tag></td>
                 </tr>
               ); })}</tbody>
             </table>
           </div>
-          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Net/run = {this.farmDefs[0].patches} patches × ({this.farmDefs[0].yield} avg herbs × herb value after the 2% GE tax − seed cost). Hit ⟳ Live prices to re-price; before that these are snapshots.</div>
+          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Net/run = {Y.P} patches × ({Y.eff.toFixed(2)} herbs/patch from the run-mechanics model above × herb value after the 2% GE tax − seed − compost). Seed & herb prices re-price with ⟳ Live prices; the yield reacts instantly to the controls.</div>
         </Card>
         <Card style={{ marginTop: 14 }}>
           <Kicker color={C.goldDeep}>Herb-run log · {this.short(loggedNet)} over {loggedRuns} runs · edit or delete entries</Kicker>
