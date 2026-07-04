@@ -647,7 +647,6 @@ export default class Almanac extends React.Component {
     if (filled) { entry.herbs = herbs; entry.patchN = y.P; entry.perPatch = perPatch; }
     this.logs.herb.unshift(entry); this.saveLogs(); this.setState({ openForm: null });
   };
-  editHerb = (i, key, raw) => { const h = this.logs.herb[i]; if (!h) return; const v = Math.round(this.parseNum(raw)); if (key === "runs") h.runs = Math.max(1, v); else if (key === "net") h.net = v; else if (key === "tier") h.tier = raw; this.saveLogs(); this.bump(); };
   addBoss = () => { const boss = this.val("boss_name") || D.bosses[0].n, kills = this.num("boss_kills") || 1; this.logs.boss.unshift({ date: this.today(), boss, kills, note: this.val("boss_note") }); this.saveLogs(); this.setState({ openForm: null }); };
   addSlay = () => { const task = this.val("slay_task") || D.slayer[0].task; this.logs.slayerLog.unshift({ date: this.today(), task, xp: this.num("slay_xp"), gp: this.num("slay_gp") }); this.saveLogs(); this.setState({ openForm: null }); };
   addDrop = () => { const boss = this.val("drop_boss") || this.state.bossFocus, drop = this.val("drop_name"); if (!boss || !drop) return; this.logs.drop.unshift({ date: this.today(), boss, drop, kc: this.num("drop_kc") }); this.saveLogs(); this.setState({ openForm: null }); };
@@ -3175,21 +3174,34 @@ export default class Almanac extends React.Component {
           <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Net/run = {Y.P} patches × ({Y.eff.toFixed(2)} herbs/patch from the run-mechanics model above × herb value after the 2% GE tax − seed − compost). Seed & herb prices re-price with ⟳ Live prices; the yield reacts instantly to the controls.</div>
         </Card>
         <Card style={{ marginTop: 14 }}>
-          <Kicker color={C.goldDeep}>Herb-run log · {this.short(loggedNet)} over {loggedRuns} runs · edit or delete entries</Kicker>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+            <Kicker color={C.goldDeep}>Run history · newest first · delete a bad entry and re-log it (undo has your back)</Kicker>
+            <span style={mono({ fontSize: 10.5, color: C.muted2 })}>{loggedRuns} runs · {this.short(loggedNet)} total · {loggedRuns ? this.short(loggedNet / loggedRuns) + "/run avg" : "—"}</span>
+          </div>
           <div className="sheetwrap" style={{ marginTop: 8 }}>
             <table className="sheet">
-              <thead><tr>{["Date", "Tier", "Runs", "Herbs", "Net", ""].map((h, i) => <th key={i} className={i > 1 && i < 5 ? "num" : ""}>{h}</th>)}</tr></thead>
-              <tbody>{this.logs.herb.map((h, i) => (
-                <tr key={i}>
-                  <td style={mono({ fontSize: 12 })}>{this.dShort(h.date)}</td>
-                  <td><select className="led" defaultValue={h.tier} onChange={(e) => this.editHerb(i, "tier", e.target.value)} style={{ width: 130, padding: "4px 6px" }}>{this.farmDefs.map((f) => <option key={f.tier} value={f.tier}>{f.tier}</option>)}</select></td>
-                  <td className="num"><input className="led" defaultValue={h.runs || 1} onBlur={(e) => this.editHerb(i, "runs", e.target.value)} style={{ width: 56, padding: "4px 6px", textAlign: "right" }} /></td>
-                  <td className="num" title={h.perPatch ? Object.entries(h.perPatch).filter(([, n]) => n >= 0).map(([id, n]) => { const pt = this.herbPatches.find((x) => x.id === id); return (pt ? pt.name : id) + ": " + n; }).join(" · ") : ""} style={mono({ fontSize: 12, color: h.herbs != null ? C.ink : C.muted })}>{h.herbs != null ? h.herbs + (h.patchN ? " / " + h.patchN + "p" : "") : "—"}</td>
-                  <td className="num"><input className="led" defaultValue={h.net} onBlur={(e) => this.editHerb(i, "net", e.target.value)} style={{ width: 96, padding: "4px 6px", textAlign: "right" }} /></td>
-                  <td><span onClick={() => this.delLog("herb", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 12 }) }}>✕</span></td>
-                </tr>
-              ))}
-              {this.logs.herb.length === 0 && <tr><td colSpan={5} style={serif({ fontStyle: "normal", color: C.muted, padding: 14 })}>No runs logged yet — hit “+ Log herb run”.</td></tr>}</tbody>
+              <thead><tr>{["Date", "Tier", "Runs", "Herbs", "Patch breakdown", "Net / run", "Net", ""].map((h, i) => <th key={i} className={i === 2 || i === 3 || i === 5 || i === 6 ? "num" : ""}>{h}</th>)}</tr></thead>
+              <tbody>{this.logs.herb.map((h, i) => {
+                const runs = h.runs || 1;
+                const detail = h.perPatch ? Object.entries(h.perPatch).map(([id, n]) => { const pt = this.herbPatches.find((x) => x.id === id); return { name: pt ? pt.name : id, n: n || 0 }; }) : null;
+                return (
+                  <tr key={(h.date || "") + "-" + i}>
+                    <td style={mono({ fontSize: 12 })}>{this.dShort(h.date)}</td>
+                    <td style={cinzel({ fontWeight: 600, fontSize: 13 })}>{h.tier}</td>
+                    <td className="num" style={mono({ fontSize: 12 })}>{runs}</td>
+                    <td className="num" style={mono({ fontSize: 12, color: h.herbs != null ? C.ink : C.muted })}>{h.herbs != null ? h.herbs + (h.patchN ? " / " + h.patchN + "p" : "") : "—"}</td>
+                    <td>{detail ? (
+                      <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
+                        {detail.map((d, j) => <span key={j} title={d.name} style={{ padding: "1px 6px", borderRadius: 4, background: d.n > 0 ? "rgba(92,110,53,.14)" : "rgba(150,58,44,.12)", ...mono({ fontSize: 10, color: d.n > 0 ? "#3c5322" : C.red }) }}>{d.name.slice(0, 3)} {d.n}</span>)}
+                      </span>
+                    ) : <span style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted })}>model estimate</span>}</td>
+                    <td className="num" style={mono({ fontSize: 12, color: C.muted2 })}>{this.short(h.net / runs)}</td>
+                    <td className="num" style={mono({ fontSize: 12, fontWeight: 600, color: h.net >= 0 ? C.green : C.red })}>{this.signed(h.net)}</td>
+                    <td><span onClick={() => this.delLog("herb", i)} title="Delete entry" style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 12 }) }}>✕</span></td>
+                  </tr>
+                );
+              })}
+              {this.logs.herb.length === 0 && <tr><td colSpan={8} style={serif({ fontStyle: "normal", color: C.muted, padding: 14 })}>No runs logged yet — hit “+ Log herb run”.</td></tr>}</tbody>
             </table>
           </div>
         </Card>
