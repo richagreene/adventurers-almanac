@@ -2990,6 +2990,8 @@ export default class Almanac extends React.Component {
     const xpCircuit = unlockedRuns.reduce((a, r) => a + r.xpRun, 0);
     const xpDay = unlockedRuns.reduce((a, r) => a + r.xpRun * r.effRuns, 0);
     const gpDay = unlockedRuns.reduce((a, r) => a + r.gpRun * r.effRuns, 0);
+    const herbGpDay = unlockedRuns.filter((r) => /herb/i.test(r.type || "")).reduce((a, r) => a + r.gpRun * r.effRuns, 0);
+    const treeGpDay = gpDay - herbGpDay;
     const xpLeft = Math.max(0, this.xpFor(goal) - farmXp);
     const days = xpDay > 0 ? Math.ceil(xpLeft / xpDay) : 0;
     const agg = {}; this.logs.herb.forEach((h) => { if (!agg[h.tier]) agg[h.tier] = { runs: 0, net: 0 }; agg[h.tier].runs += h.runs || 1; agg[h.tier].net += h.net; });
@@ -3004,10 +3006,11 @@ export default class Almanac extends React.Component {
         {bestFarm && <Hero theme={TH} icon="🌱" kicker={`Farming ${farmLvl} · herb-run verdict`} title={`Plant ${bestFarm.tier}`}
           blurb={`${this.short(bestFarm.net)} net per run at Farming ${farmLvl} — ${days > 0 ? days + " days to " + goal + " at " + this.short(xpDay) + " xp/day" : "goal reached"}`}
           statLabel="Logged net" statValue={loggedRuns ? this.signed(loggedNet) : "—"} statSub={loggedRuns ? loggedRuns + " runs" : "no runs yet"} />}
-        <StatCards cols={4} items={[
+        <StatCards cols={5} items={[
           { label: "Farming level", value: "" + farmLvl, sub: "→ goal " + goal, color: TH.accent },
+          { label: "Net GP / day (runs)", value: this.signed(gpDay), sub: "herbs " + this.signed(herbGpDay) + " · trees " + this.signed(treeGpDay), color: gpDay >= 0 ? C.green : C.red, subColor: gpDay >= 0 ? C.green : C.red },
+          { label: "XP / day (capped)", value: this.short(xpDay), sub: unlockedRuns.reduce((a, r) => a + r.effRuns, 0) + " runs across the circuit" },
           { label: "XP to Farming " + goal, value: this.short(xpLeft) },
-          { label: "XP / day (capped)", value: this.short(xpDay), sub: this.signed(gpDay) + " gp/day" },
           { label: "Days to target", value: days > 0 ? "" + days : "—", color: C.green },
         ]} />
         {this.state.openForm === "herb" && (
