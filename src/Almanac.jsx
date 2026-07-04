@@ -444,6 +444,20 @@ export default class Almanac extends React.Component {
     });
   }
   movePatch = (id, dir) => { const order = this.activePatches().map((p) => p.id); const i = order.indexOf(id), j = i + dir; if (j < 0 || j >= order.length) return; [order[i], order[j]] = [order[j], order[i]]; this.setFarmOpt("patchOrder", order); };
+  // Drag-and-drop reordering: dropping INSERTS at the slot (everything below
+  // shifts down one), unlike the arrows' single-step swap.
+  dropPatch = (overIdx) => {
+    // _pDrag is an instance field (not state): drop can fire before React
+    // commits the dragover's setState, so state would be stale here.
+    const id = this._pDrag; if (!id) return;
+    const order = this.activePatches().map((p) => p.id);
+    const from = order.indexOf(id); if (from < 0) return;
+    let to = overIdx; order.splice(from, 1); if (to > from) to--;
+    order.splice(Math.max(0, Math.min(order.length, to)), 0, id);
+    this._pDrag = null;
+    this.setState({ pDrag: null, pOver: -1 });
+    this.setFarmOpt("patchOrder", order);
+  };
   // Per-run-type runs/day override. Empty input = back to the global default;
   // 0 = deliberately skip that run type.
   setRunsPerDay = (crop, raw) => { const m = { ...(this.farmcfg.runsPerDay || {}) }; if (("" + raw).trim() === "") delete m[crop]; else m[crop] = Math.max(0, Math.round(this.parseNum(raw) || 0)); this.setFarmOpt("runsPerDay", m); };
@@ -3090,9 +3104,15 @@ export default class Almanac extends React.Component {
             <Kicker color={C.goldDeep}>Patch roster · your run route, in order · access auto-read from quests, level & diaries</Kicker>
             <span style={mono({ fontSize: 10.5, color: C.muted2 })}>{Y.P} on the route · {Y.df} disease-free</span>
           </div>
-          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 5 }}>
+          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 5 }} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) this.setState({ pOver: -1 }); }}>
             {this.activePatches().map((p, i, arr) => (
-              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", borderRadius: 6, background: p.active ? "rgba(92,110,53,.10)" : C.cardLight, border: p.active ? "1px solid rgba(92,110,53,.3)" : "1px dashed rgba(44,32,19,.18)", opacity: p.active ? 1 : 0.7 }}>
+              <div key={p.id} draggable
+                onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", p.id); } catch (err) {} this._pDrag = p.id; this.setState({ pDrag: p.id }); }}
+                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; const r = e.currentTarget.getBoundingClientRect(); const over = e.clientY - r.top < r.height / 2 ? i : i + 1; if (over !== this.state.pOver) this.setState({ pOver: over }); }}
+                onDrop={(e) => { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); this.dropPatch(e.clientY - r.top < r.height / 2 ? i : i + 1); }}
+                onDragEnd={() => { this._pDrag = null; this.setState({ pDrag: null, pOver: -1 }); }}
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", borderRadius: 6, background: p.active ? "rgba(92,110,53,.10)" : C.cardLight, border: p.active ? "1px solid rgba(92,110,53,.3)" : "1px dashed rgba(44,32,19,.18)", opacity: this.state.pDrag === p.id ? 0.35 : p.active ? 1 : 0.7, boxShadow: this.state.pOver === i ? `0 -2px 0 0 ${TH.accent}` : this.state.pOver === i + 1 && i === arr.length - 1 ? `0 2px 0 0 ${TH.accent}` : "none", cursor: "grab" }}>
+                <span title="Drag to reorder" style={{ cursor: "grab", userSelect: "none", ...mono({ fontSize: 13, color: C.muted2, letterSpacing: "-1px" }) }}>⠿</span>
                 <span style={{ display: "flex", flexDirection: "column", gap: 1 }}>
                   <span onClick={() => this.movePatch(p.id, -1)} style={{ cursor: i > 0 ? "pointer" : "default", opacity: i > 0 ? 1 : 0.25, lineHeight: 1, ...mono({ fontSize: 10, color: C.muted2 }) }}>▲</span>
                   <span onClick={() => this.movePatch(p.id, 1)} style={{ cursor: i < arr.length - 1 ? "pointer" : "default", opacity: i < arr.length - 1 ? 1 : 0.25, lineHeight: 1, ...mono({ fontSize: 10, color: C.muted2 }) }}>▼</span>
@@ -3109,7 +3129,7 @@ export default class Almanac extends React.Component {
               </div>
             ))}
           </div>
-          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Access is read from your quest log (Priest in Peril → Morytania, My Arm's Big Adventure → Trollheim, Making Friends with My Arm → Weiss, Children of the Sun → Varlamore, The Great Brain Robbery + Morytania Elite → Harmony) and Farming 65 for the Guild. The checkbox overrides the auto-detection either way; ▲▼ set your route order, which the run logger follows.</div>
+          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Access is read from your quest log (Priest in Peril → Morytania, My Arm's Big Adventure → Trollheim, Making Friends with My Arm → Weiss, Children of the Sun → Varlamore, The Great Brain Robbery + Morytania Elite → Harmony) and Farming 65 for the Guild. The checkbox overrides the auto-detection either way. Drag a row (⠿) to any spot — the rest shift down — or nudge with ▲▼; the order is your route, and the run logger follows it.</div>
         </Card>
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
           <span style={mono({ fontSize: 11, color: C.muted2 })}>DEFAULT RUNS / DAY</span>
