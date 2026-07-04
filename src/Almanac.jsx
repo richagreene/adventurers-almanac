@@ -70,10 +70,12 @@ export default class Almanac extends React.Component {
   // Herb tiers. seed/herb prices are snapshots until "⟳ Live prices" re-prices
   // them; net/run is always computed live from the yield model in herbYield()
   // (harvest lives × chance-to-save × disease survival) via farmNet().
+  // plantXp/harvestXp are the game's per-crop constants (harvest xp is per herb
+  // picked), so xp/run = patches × (plant + harvest × yield-model herbs).
   farmDefs = [
-    { tier: "Ranarr", lvl: 32, unlocked: true, seedItem: "Ranarr seed", herbItem: "Grimy ranarr weed", seed: 26678, herb: 5346 },
-    { tier: "Snapdragon", lvl: 62, unlocked: true, seedItem: "Snapdragon seed", herbItem: "Grimy snapdragon", seed: 53508, herb: 8393 },
-    { tier: "Torstol", lvl: 85, unlocked: false, seedItem: "Torstol seed", herbItem: "Grimy torstol", seed: 15900, herb: 3155 },
+    { tier: "Ranarr", lvl: 32, unlocked: true, seedItem: "Ranarr seed", herbItem: "Grimy ranarr weed", seed: 26678, herb: 5346, plantXp: 27, harvestXp: 30.5 },
+    { tier: "Snapdragon", lvl: 62, unlocked: true, seedItem: "Snapdragon seed", herbItem: "Grimy snapdragon", seed: 53508, herb: 8393, plantXp: 87.5, harvestXp: 98.5 },
+    { tier: "Torstol", lvl: 85, unlocked: false, seedItem: "Torstol seed", herbItem: "Grimy torstol", seed: 15900, herb: 3155, plantXp: 199.5, harvestXp: 224.5 },
   ];
   // Herb yield model (OSRS Wiki "Crop yield" mechanics):
   //   chance to save a harvest life  p = (1 + floor(interp × bonuses)) / 256
@@ -107,13 +109,19 @@ export default class Almanac extends React.Component {
   // growHrs = real grow time; caps how many runs/day are actually possible
   // (24h ÷ growHrs). Herbs ~80 min, fruit trees 16h, trees ~hours, hardwoods slow.
   farmRunDefs = [
-    { name: "Herb run", crop: "Snapdragon", type: "Herb", req: 62, xpRun: 6981, gpRun: 80260, timeMin: 6, growHrs: 1.33, patches: 6, teles: "Ectophial · Explorer ring · Ardy cloak · Catherby · Hosidius", seeds: "6× Snapdragon seed + compost" },
     // payItem/payQty = the farmer's protection payment PER PATCH (guarantees the
-    // tree can't die); priced into gpRun on a live refresh alongside saplings.
-    { name: "Fruit tree run", crop: "Palm", type: "Fruit", req: 68, xpRun: 51303, gpRun: -32000, sapItem: "Palm sapling", payItem: "Papaya fruit", payQty: 15, timeMin: 13, growHrs: 16, patches: 6, teles: "Gnome Stronghold · Tree Gnome Village · Brimhaven · Catherby · Lletya · Farming Guild", seeds: "6× Palm sapling" },
-    { name: "Tree run", crop: "Yew", type: "Tree", req: 60, xpRun: 35755, gpRun: -14000, sapItem: "Yew sapling", payItem: "Cactus spine", payQty: 10, timeMin: 14, growHrs: 8, patches: 5, teles: "Lumbridge · Varrock · Falador · Gnome Stronghold · Farming Guild", seeds: "5× Yew sapling" },
-    { name: "Hardwood run", crop: "Mahogany", type: "Hardwood", req: 55, xpRun: 31500, gpRun: -9000, sapItem: "Mahogany sapling", payItem: "Yanillian hops", payQty: 25, timeMin: 6, growHrs: 24, patches: 2, teles: "Fossil Island · Mushroom forest", seeds: "2× Mahogany sapling" },
-    { name: "Tree run", crop: "Magic", type: "Tree", req: 75, xpRun: 69569, gpRun: -58000, sapItem: "Magic sapling", payItem: "Coconut", payQty: 25, timeMin: 14, growHrs: 8, patches: 5, teles: "Lumbridge · Varrock · Falador · Gnome Stronghold · Farming Guild", seeds: "5× Magic sapling" },
+    // tree can't die); priced into gpRun on a live refresh alongside saplings —
+    // the static gpRun fallbacks below include a payment estimate too.
+    // rdKey = stable key for runs/day overrides (the herb row's crop changes).
+    // optIn rows (Hespori · Tithe) count toward the daily KPIs only when you
+    // set a runs/day on them.
+    { rdKey: "Herb", name: "Herb run", crop: "Snapdragon", type: "Herb", req: 62, xpRun: 6981, gpRun: 80260, timeMin: 6, growHrs: 1.33, patches: 6, teles: "Ectophial · Explorer ring · Ardy cloak · Catherby · Hosidius", seeds: "6× seed + compost" },
+    { rdKey: "Palm", name: "Fruit tree run", crop: "Palm", type: "Fruit", req: 68, xpRun: 51303, gpRun: -59000, sapItem: "Palm sapling", payItem: "Papaya fruit", payQty: 15, timeMin: 13, growHrs: 16, patches: 6, teles: "Gnome Stronghold · Tree Gnome Village · Brimhaven · Catherby · Lletya · Farming Guild", seeds: "6× Palm sapling" },
+    { rdKey: "Yew", name: "Tree run", crop: "Yew", type: "Tree", req: 60, xpRun: 35755, gpRun: -36000, sapItem: "Yew sapling", payItem: "Cactus spine", payQty: 10, timeMin: 14, growHrs: 8, patches: 5, teles: "Lumbridge · Varrock · Falador · Gnome Stronghold · Farming Guild", seeds: "5× Yew sapling" },
+    { rdKey: "Mahogany", name: "Hardwood run", crop: "Mahogany", type: "Hardwood", req: 55, xpRun: 31500, gpRun: -12000, sapItem: "Mahogany sapling", payItem: "Yanillian hops", payQty: 25, timeMin: 6, growHrs: 24, patches: 2, teles: "Fossil Island · Mushroom forest", seeds: "2× Mahogany sapling" },
+    { rdKey: "Magic", name: "Tree run", crop: "Magic", type: "Tree", req: 75, xpRun: 69569, gpRun: -78000, sapItem: "Magic sapling", payItem: "Coconut", payQty: 25, timeMin: 14, growHrs: 8, patches: 5, teles: "Lumbridge · Varrock · Falador · Gnome Stronghold · Farming Guild", seeds: "5× Magic sapling" },
+    { rdKey: "Hespori", name: "Hespori", crop: "Hespori", type: "Boss patch", req: 65, xpRun: 13100, gpRun: 45000, timeMin: 8, growHrs: 32, patches: 1, optIn: true, teles: "Farming Guild basement · seed drops from PvM & skilling", seeds: "1× Hespori seed (untradeable)", note: "avg kill loot, estimate" },
+    { rdKey: "Tithe", name: "Tithe Farm", crop: "—", type: "Minigame", req: 34, xpRun: 0, gpRun: 0, timeMin: 60, growHrs: 0, patches: 0, optIn: true, teles: "Farming Guild lobby · points buy farmer's outfit, herb sack, seed box", seeds: "Seeds provided free", note: "xp scales with fruit tier (34/54/74)" },
   ];
   farmMilestones = [
     { lvl: 72, label: "Snapdragons · Mahogany hardwoods", tag: "CURRENT" },
@@ -309,7 +317,7 @@ export default class Almanac extends React.Component {
     if (!this.questOv) { this.questOv = {}; (D.quests || []).forEach((q) => { if (q.status === "Done") this.questOv[q.n] = true; }); this._save("almanac.questdone.v1", this.questOv); }
     this.flipcfg = this._load("almanac.flipcfg.v1", null) || { ...this.flipDefaults };
     this.alchcfg = this._load("almanac.alchcfg.v1", null) || { castsPerHour: 1200, fireSource: "staff", natRune: 127, fireRune: 5 };
-    this.farmcfg = { lapsPerDay: 1, compost: "ultra", secateurs: true, farmCape: false, attas: false, herbsOverride: 0, patchOrder: null, patchOv: {}, runsPerDay: {}, ...(this._load("almanac.farmcfg.v1", null) || {}) };
+    this.farmcfg = { lapsPerDay: 1, compost: "ultra", secateurs: true, farmCape: false, attas: false, herbsOverride: 0, patchOrder: null, patchOv: {}, runsPerDay: {}, herbCrop: "Snapdragon", runPriority: "gp", ...(this._load("almanac.farmcfg.v1", null) || {}) };
     if (!this.farmcfg.patchOv) this.farmcfg.patchOv = {};
     if (!this.farmcfg.runsPerDay) this.farmcfg.runsPerDay = {};
     this.compostPrices = this.compostPrices || { compost: 80, super: 450, ultra: 750 };
@@ -492,6 +500,46 @@ export default class Almanac extends React.Component {
   farmNet(f) {
     const y = this.herbYield();
     return Math.round(y.P * (y.eff * geSellNet(f.herb) - f.seed - y.compostCost));
+  }
+  // XP for one herb run of a tier, from the same yield model.
+  herbXpRun(f) { const y = this.herbYield(); return Math.round(y.P * ((f.plantXp || 0) + (f.harvestXp || 0) * y.eff)); }
+  // Tithe Farm xp per 1h session, by unlocked fruit tier (34/54/74).
+  titheXpRun() { const l = (this.skillMap.Farming || { l: 1 }).l; return l >= 74 ? 90000 : l >= 54 ? 55000 : l >= 34 ? 34000 : 0; }
+  // The herb crop you've CHOSEN to run (feeds the circuit + KPIs); falls back
+  // to the best tier you can plant.
+  selHerbCrop() { const f = this.farmDefs.find((x) => x.tier === this.farmcfg.herbCrop); if (f) return f; const lvl = (this.skillMap.Farming || { l: 1 }).l; return this.farmDefs.filter((x) => lvl >= x.lvl).pop() || this.farmDefs[0]; }
+  // ---------- run advisor ----------
+  // Scores every run type by your ACTIVE minutes — grow time is free, attention
+  // isn't. gp includes seeds, compost and protection payments at live prices;
+  // money-losing runs are judged as XP PURCHASES by their gp-per-xp price.
+  farmAdvisor() {
+    const farmLvl = (this.skillMap.Farming || { l: 1 }).l;
+    const mode = this.farmcfg.runPriority === "xp" ? "xp" : "gp";
+    const sel = this.selHerbCrop();
+    const rows = [];
+    this.farmDefs.forEach((f) => rows.push({ key: "herb-" + f.tier, name: "Herb run · " + f.tier, req: f.lvl, time: 6, growHrs: 1.33, xpRun: this.herbXpRun(f), gpRun: this.farmNet(f), herbTier: f.tier, selected: sel.tier === f.tier }));
+    this.farmRunDefs.filter((r) => !/herb/i.test(r.type || "")).forEach((r) => rows.push({ key: r.rdKey, name: r.name + (r.crop && r.crop !== "—" ? " · " + r.crop : ""), req: r.req, time: r.timeMin, growHrs: r.growHrs, xpRun: r.rdKey === "Tithe" ? this.titheXpRun() : r.xpRun, gpRun: r.gpRun, note: r.note }));
+    rows.forEach((c) => {
+      c.unlocked = farmLvl >= c.req;
+      c.gpm = Math.round(c.gpRun / Math.max(1, c.time));
+      c.xpm = Math.round(c.xpRun / Math.max(1, c.time));
+      c.capDay = c.growHrs > 0 ? +(24 / c.growHrs).toFixed(2) : 24;
+      c.costPerXp = c.gpRun < 0 && c.xpRun > 0 ? +(-c.gpRun / c.xpRun).toFixed(1) : 0;
+    });
+    const act = rows.filter((c) => c.unlocked).sort((a, b) => (mode === "gp" ? b.gpm - a.gpm : b.xpm - a.xpm));
+    const locked = rows.filter((c) => !c.unlocked).sort((a, b) => a.req - b.req);
+    act.forEach((c, i) => {
+      if (mode === "gp") {
+        c.verdict = c.gpRun > 0 ? (i === 0 ? "BEST MONEY" : "PROFITABLE") : "XP PURCHASE";
+        c.vc = c.gpRun > 0 ? C.green : C.red;
+        c.why = c.gpRun > 0 ? this.short(c.gpm) + "/active min · up to " + this.short(c.gpRun * Math.min(c.capDay, 24)) + "/day at " + c.capDay + " runs" : "loses " + this.short(-c.gpRun) + "/run — do it for the xp (" + c.costPerXp + " gp/xp), not the gp";
+      } else {
+        c.verdict = i === 0 ? "BEST XP" : c.costPerXp === 0 ? "FREE XP" : c.costPerXp <= 15 ? "EFFICIENT XP" : c.costPerXp <= 30 ? "FAIR PRICE" : "PREMIUM XP";
+        c.vc = i === 0 || c.costPerXp <= 15 ? C.green : c.costPerXp <= 30 ? "#9a7530" : C.red;
+        c.why = this.fmt(c.xpm) + " xp/active min" + (c.costPerXp ? " · " + c.costPerXp + " gp/xp" : c.gpRun > 0 ? " · PAYS you " + this.short(c.gpRun) + "/run" : " · costs nothing") + (c.capDay < 24 ? " · max " + c.capDay + "/day" : "");
+      }
+    });
+    return { mode, rows: act, locked, top: act[0] || null };
   }
   setFarmOpt = (k, v) => { this.farmcfg[k] = v; this._save("almanac.farmcfg.v1", this.farmcfg); this.bump(); };
 
@@ -2998,15 +3046,19 @@ export default class Almanac extends React.Component {
     const goal = (this.goals.find((g) => g.skill === "Farming") || { tgt: 85 }).tgt;
     const laps = this.farmcfg.lapsPerDay || 1;
     const Y = this.herbYield();
-    // Per run-type realistic daily cap = 24h ÷ grow time; effective = min(your laps, cap).
-    // Herb rows take patches + net/run live from the yield model.
+    const selCrop = this.selHerbCrop();
+    const adv = this.farmAdvisor();
+    // Per run-type realistic daily cap = 24h ÷ grow time (fractional — Hespori's
+    // 32h grow is 0.75/day, not 1); effective = min(your target, cap). The herb
+    // row runs YOUR SELECTED crop; opt-in rows (Hespori/Tithe) default to 0.
     const runDefs = this.farmRunDefs.map((r) => {
       const unlocked = r.req <= farmLvl;
-      const maxRunsDay = Math.max(1, Math.floor(24 / (r.growHrs || 1)));
-      const want = (this.farmcfg.runsPerDay || {})[r.crop];
-      const effRuns = Math.min(want != null ? want : laps, maxRunsDay);
-      const herbDef = /herb/i.test(r.type || "") ? this.farmDefs.find((f) => f.tier === r.crop) : null;
-      return { ...r, unlocked, maxRunsDay, effRuns, rdOverride: want != null, gpRun: herbDef ? this.farmNet(herbDef) : r.gpRun, patches: herbDef ? Y.P : r.patches };
+      const maxRunsDay = r.growHrs > 0 ? +(24 / r.growHrs).toFixed(2) : 24;
+      const rd = this.farmcfg.runsPerDay || {};
+      const want = rd[r.rdKey] != null ? rd[r.rdKey] : rd[r.crop];
+      const effRuns = Math.min(want != null ? want : r.optIn ? 0 : laps, maxRunsDay);
+      const isHerb = /herb/i.test(r.type || "");
+      return { ...r, unlocked, maxRunsDay, effRuns, rdOverride: want != null, crop: isHerb ? selCrop.tier : r.crop, gpRun: isHerb ? this.farmNet(selCrop) : r.gpRun, xpRun: isHerb ? this.herbXpRun(selCrop) : r.rdKey === "Tithe" ? this.titheXpRun() : r.xpRun, patches: isHerb ? Y.P : r.patches, isHerb };
     });
     const unlockedRuns = runDefs.filter((r) => r.unlocked);
     const lockedRuns = runDefs.filter((r) => !r.unlocked);
@@ -3020,27 +3072,73 @@ export default class Almanac extends React.Component {
     const days = xpDay > 0 ? Math.ceil(xpLeft / xpDay) : 0;
     const agg = {}; this.logs.herb.forEach((h) => { if (!agg[h.tier]) agg[h.tier] = { runs: 0, net: 0 }; agg[h.tier].runs += h.runs || 1; agg[h.tier].net += h.net; });
     const TH = themeFor("farming");
-    const bestFarm = this.farmDefs.filter((f) => farmLvl >= f.lvl).map((f) => ({ ...f, net: this.farmNet(f) })).sort((a, b) => b.net - a.net)[0] || { ...this.farmDefs[0], net: this.farmNet(this.farmDefs[0]) };
     const loggedNet = this.logs.herb.reduce((a, h) => a + h.net, 0), loggedRuns = this.logs.herb.reduce((a, h) => a + (h.runs || 1), 0);
+    // Selection-mismatch note: the advisor may prefer a different herb crop than
+    // the one you're set to run.
+    const topHerb = adv.rows.find((c) => c.herbTier);
+    const selNote = topHerb && !topHerb.selected ? ` You're set to ${selCrop.tier} — ${topHerb.name.replace("Herb run · ", "")} ${adv.mode === "gp" ? "nets " + this.short(this.farmNet(this.farmDefs.find((f) => f.tier === topHerb.herbTier)) - this.farmNet(selCrop)) + " more/run" : "gives more xp/run"}; switch in the advisor below.` : "";
     return (
       <div>
         <SectionTitle kicker="The Allotments · grow-time, not play-time" title="Farming Engine" accent={TH.accent}
           right={<div style={{ display: "flex", gap: 8 }}><Btn onClick={this.refreshPrices}>⟳ Live prices</Btn><Btn tone="gold" onClick={() => this.toggleForm("herb")}>+ Log herb run</Btn></div>} />
         {this.state.priceStatus && <div style={{ marginBottom: 14, padding: "8px 14px", background: "rgba(92,110,53,.10)", borderRadius: 5, ...mono({ fontSize: 11, color: "#5c6e35" }) }}>{this.state.priceStatus} — seed costs, herb values and run nets re-priced from the live GE.</div>}
-        {bestFarm && <Hero theme={TH} icon="🌱" kicker={`Farming ${farmLvl} · herb-run verdict`} title={`Plant ${bestFarm.tier}`}
-          blurb={`${this.short(bestFarm.net)} net per run at Farming ${farmLvl} — ${days > 0 ? days + " days to " + goal + " at " + this.short(xpDay) + " xp/day" : "goal reached"}`}
+        {adv.top && <Hero theme={TH} icon="🌱" kicker={`Farming ${farmLvl} · ${adv.mode === "gp" ? "gp-priority" : "xp-priority"} verdict`} title={adv.top.name}
+          blurb={`${adv.top.why}.${selNote} ${days > 0 ? days + " days to " + goal + " at " + this.short(xpDay) + " xp/day." : ""}`}
           statLabel="Logged net" statValue={loggedRuns ? this.signed(loggedNet) : "—"} statSub={loggedRuns ? loggedRuns + " runs" : "no runs yet"} />}
         <StatCards cols={5} items={[
           { label: "Farming level", value: "" + farmLvl, sub: "→ goal " + goal, color: TH.accent },
-          { label: "Net GP / day (runs)", value: this.signed(gpDay), sub: "herbs " + this.signed(herbGpDay) + " · trees " + this.signed(treeGpDay), color: gpDay >= 0 ? C.green : C.red, subColor: gpDay >= 0 ? C.green : C.red },
+          { label: "Net GP / day (runs)", value: this.signed(gpDay), sub: "herbs " + this.signed(herbGpDay) + " · other runs " + this.signed(treeGpDay), color: gpDay >= 0 ? C.green : C.red, subColor: gpDay >= 0 ? C.green : C.red },
           { label: "XP / day (capped)", value: this.short(xpDay), sub: unlockedRuns.reduce((a, r) => a + r.effRuns, 0) + " runs across the circuit" },
           { label: "XP to Farming " + goal, value: this.short(xpLeft) },
           { label: "Days to target", value: days > 0 ? "" + days : "—", color: C.green },
         ]} />
+        {/* run advisor — every run type scored by your active minutes */}
+        <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+            <Kicker color={TH.accent}>Run advisor · every run priced per ACTIVE minute (grow time is free, your attention isn't)</Kicker>
+            <Seg options={[{ key: "gp", label: "GP PRIORITY" }, { key: "xp", label: "XP PRIORITY" }]} active={adv.mode} onPick={(v) => this.setFarmOpt("runPriority", v)} size={9} />
+          </div>
+          <div className="sheetwrap">
+            <table className="sheet">
+              <thead><tr>{["#", "Run", "XP/run", "GP/run", "Active", adv.mode === "gp" ? "GP/min" : "XP/min", "GP/XP", "Cap/day", "Verdict", ""].map((h, i) => <th key={i} className={i >= 2 && i <= 7 ? "num" : ""}>{h}</th>)}</tr></thead>
+              <tbody>
+                {adv.rows.map((c, i) => (
+                  <tr key={c.key} style={c.selected ? { background: "rgba(92,110,53,.10)" } : undefined}>
+                    <td style={mono({ fontSize: 12, color: C.muted2 })}>{i + 1}</td>
+                    <td><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{c.name}</div><div style={serif({ fontSize: 10.5, fontStyle: "normal", color: C.muted })}>{c.why}{c.note ? " · " + c.note : ""}</div></td>
+                    <td className="num" style={mono({ fontSize: 12 })}>{this.short(c.xpRun)}</td>
+                    <td className="num" style={mono({ fontSize: 12, color: c.gpRun >= 0 ? C.green : C.red })}>{this.signed(c.gpRun)}</td>
+                    <td className="num" style={mono({ fontSize: 12, color: C.muted2 })}>{c.time}m</td>
+                    <td className="num" style={mono({ fontSize: 12, fontWeight: 600 })}>{adv.mode === "gp" ? this.signed(c.gpm) : this.fmt(c.xpm)}</td>
+                    <td className="num" style={mono({ fontSize: 12, color: c.costPerXp ? c.costPerXp <= 15 ? C.green : c.costPerXp <= 30 ? "#9a7530" : C.red : C.muted })}>{c.costPerXp ? c.costPerXp : "—"}</td>
+                    <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{c.capDay >= 24 ? "∞" : c.capDay}</td>
+                    <td><Tag color={c.vc} bg={c.vc === C.green ? "rgba(92,110,53,.16)" : c.vc === C.red ? "rgba(150,58,44,.12)" : "rgba(201,162,74,.16)"}>{c.verdict}</Tag></td>
+                    <td>{c.herbTier ? (c.selected ? <span style={mono({ fontSize: 10, color: C.green })}>✓ running</span> : <a href="#" onClick={(e) => { e.preventDefault(); this.setFarmOpt("herbCrop", c.herbTier); }} style={{ textDecoration: "none", ...mono({ fontSize: 10, color: "#9a7530" }) }}>→ run this</a>) : null}</td>
+                  </tr>
+                ))}
+                {adv.locked.map((c) => (
+                  <tr key={c.key} style={{ opacity: 0.55 }}>
+                    <td style={mono({ fontSize: 12, color: C.muted })}>·</td>
+                    <td><div style={cinzel({ fontWeight: 600, fontSize: 13, color: C.muted2 })}>{c.name}</div></td>
+                    <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{this.short(c.xpRun)}</td>
+                    <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{this.signed(c.gpRun)}</td>
+                    <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{c.time}m</td>
+                    <td className="num" style={mono({ fontSize: 12, color: C.muted })}>—</td>
+                    <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{c.costPerXp || "—"}</td>
+                    <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{c.capDay >= 24 ? "∞" : c.capDay}</td>
+                    <td><Tag color={C.red} bg="rgba(150,58,44,.10)">Farming {c.req}</Tag></td>
+                    <td />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>GP/run includes seeds, compost and protection payments at live prices. <strong>GP priority</strong> ranks by gp per active minute — money-losing runs are flagged as XP purchases. <strong>XP priority</strong> ranks by xp per active minute and prices each run's cost in gp/xp (≤15 efficient · ≤30 fair · above that premium). Cap/day is what grow times physically allow; “→ run this” switches the herb crop your circuit and KPIs are computed from.</div>
+        </Card>
         {this.state.openForm === "herb" && (
           <Card style={{ marginBottom: 14 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <select className="led" id="herb_tier" style={{ width: 150 }}>{this.farmDefs.map((f) => <option key={f.tier} value={f.tier}>{f.tier}</option>)}</select>
+              <select className="led" id="herb_tier" defaultValue={selCrop.tier} style={{ width: 150 }}>{this.farmDefs.map((f) => <option key={f.tier} value={f.tier}>{f.tier}</option>)}</select>
               {this.field("herb_runs", "Runs", { w: 80, def: 1 })}{this.field("herb_net", "Net override (gp)", { w: 150 })}<Btn tone="gold" onClick={this.addHerb}>Save</Btn>
             </div>
             <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(44,32,19,.12)" }}>
@@ -3151,15 +3249,23 @@ export default class Almanac extends React.Component {
                 <tbody>{unlockedRuns.map((r, k) => (
                   <tr key={k}>
                     <td><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{r.name}</div><div style={serif({ fontSize: 10.5, fontStyle: "normal", color: C.muted })}>{r.teles}</div></td>
-                    <td style={serif({ fontSize: 13 })}>{r.crop}</td>
-                    <td className="num" style={mono({ fontSize: 12 })}>{r.patches}</td>
-                    <td>{r.payItem ? <span title={"Farmer payment per patch — guarantees the tree can't die; priced into GP/run"} style={mono({ fontSize: 11, color: C.muted2 })}>{r.payQty}× {r.payItem} <span style={{ color: C.muted }}>/patch</span></span> : <span style={mono({ fontSize: 11, color: C.muted })}>{(this.herbCompost[this.farmcfg.compost] || {}).label} + {Y.df} disease-free</span>}</td>
+                    <td>{r.isHerb ? (
+                      <select className="led" value={selCrop.tier} onChange={(e) => this.setFarmOpt("herbCrop", e.target.value)} title="The herb crop your circuit + KPIs are computed from" style={{ padding: "3px 5px", fontSize: 12 }}>
+                        {this.farmDefs.map((f) => <option key={f.tier} value={f.tier} disabled={farmLvl < f.lvl}>{f.tier}{farmLvl < f.lvl ? " (lv " + f.lvl + ")" : ""}</option>)}
+                      </select>
+                    ) : <span style={serif({ fontSize: 13 })}>{r.crop}</span>}</td>
+                    <td className="num" style={mono({ fontSize: 12 })}>{r.patches || "—"}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{r.payItem
+                      ? <span title={`${r.payQty}× ${r.payItem} per patch — farmer protection, guarantees the tree can't die; priced into GP/run live`} style={mono({ fontSize: 10, color: C.muted2 })}>{r.payQty}× {r.payItem}</span>
+                      : r.isHerb
+                        ? <span title={`${(this.herbCompost[this.farmcfg.compost] || {}).label} + ${Y.df} disease-free patches (herbs can't be farmer-protected)`} style={mono({ fontSize: 10, color: C.muted })}>{({ none: "no compost", compost: "Compost", super: "Supercmp", ultra: "Ultracmp" })[this.farmcfg.compost] || "—"} · {Y.df} DF</span>
+                        : <span style={mono({ fontSize: 10, color: C.muted })}>—</span>}</td>
                     <td className="num"><div style={mono({ fontSize: 12 })}>{this.fmt(r.xpRun)}</div><Bar pct={Math.min(100, (r.xpRun / runMax) * 100)} c1={TH.accent} c2={TH.lite} h={4} /></td>
                     <td className="num" style={mono({ fontSize: 12, color: r.gpRun >= 0 ? C.green : C.red })}>{r.gpRun >= 0 ? "+" + this.short(r.gpRun) : this.signed(r.gpRun)}</td>
                     <td className="num">
                       <span style={{ display: "inline-flex", alignItems: "baseline", gap: 3 }}>
-                        <input className="led" key={r.crop + ":" + r.effRuns + ":" + (r.rdOverride ? 1 : 0)} defaultValue={r.effRuns} onBlur={(e) => this.setRunsPerDay(r.crop, e.target.value)} title="Runs/day for this run type · empty = global default · 0 = skip" style={{ width: 44, padding: "3px 5px", textAlign: "right", fontWeight: r.rdOverride ? 700 : 400, borderColor: r.rdOverride ? TH.accent : undefined }} />
-                        <span style={mono({ fontSize: 12, color: C.muted })}>/{r.maxRunsDay}</span>
+                        <input className="led" key={r.rdKey + ":" + r.effRuns + ":" + (r.rdOverride ? 1 : 0)} defaultValue={r.effRuns} onBlur={(e) => this.setRunsPerDay(r.rdKey, e.target.value)} title="Runs/day for this run type · empty = global default · 0 = skip" style={{ width: 44, padding: "3px 5px", textAlign: "right", fontWeight: r.rdOverride ? 700 : 400, borderColor: r.rdOverride ? TH.accent : undefined }} />
+                        <span style={mono({ fontSize: 12, color: C.muted })}>/{r.maxRunsDay >= 24 ? "∞" : r.maxRunsDay}</span>
                       </span>
                     </td>
                     <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{r.growHrs < 1.5 ? Math.round(r.growHrs * 60) + "m" : r.growHrs + "h"}</td>
