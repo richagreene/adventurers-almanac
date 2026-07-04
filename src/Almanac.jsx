@@ -56,7 +56,7 @@ export default class Almanac extends React.Component {
     slayView: "planner", slayMaster: "Duradel", gearStyle: "melee", gearSlot: "Weapon", gearItem: null, gearStatMode: "set", gearDetail: null,
     questMethod: "optimal", qsortCol: "", qsortDir: 1, qFilterOpen: "", qfSeries: [], qfType: [], qfStatus: [], qName: "", qGate: "",
     tSort: {}, tFilt: {}, tOpen: "", flipPrefill: null, objType: "bank", objBoss: "", flipShowWatch: false, flipCfgVer: 0, _v: 0,
-    counselLens: "balanced", goalId: "none", pfSort: "lev",
+    counselLens: "balanced", goalId: "none", pfSort: "lev", farmView: "planner",
   };
 
   // ---- static reference tables (ported from the workbook / design) ----
@@ -121,7 +121,7 @@ export default class Almanac extends React.Component {
     { rdKey: "Mahogany", name: "Hardwood run", crop: "Mahogany", type: "Hardwood", req: 55, xpRun: 31500, gpRun: -12000, sapItem: "Mahogany sapling", payItem: "Yanillian hops", payQty: 25, timeMin: 6, growHrs: 24, patches: 2, teles: "Fossil Island · Mushroom forest", seeds: "2× Mahogany sapling" },
     { rdKey: "Magic", name: "Tree run", crop: "Magic", type: "Tree", req: 75, xpRun: 69569, gpRun: -78000, sapItem: "Magic sapling", payItem: "Coconut", payQty: 25, timeMin: 14, growHrs: 8, patches: 5, teles: "Lumbridge · Varrock · Falador · Gnome Stronghold · Farming Guild", seeds: "5× Magic sapling" },
     { rdKey: "Hespori", name: "Hespori", crop: "Hespori", type: "Boss patch", req: 65, xpRun: 13100, gpRun: 45000, timeMin: 8, growHrs: 32, patches: 1, optIn: true, teles: "Farming Guild basement · seed drops from PvM & skilling", seeds: "1× Hespori seed (untradeable)", note: "avg kill loot, estimate" },
-    { rdKey: "Tithe", name: "Tithe Farm", crop: "—", type: "Minigame", req: 34, xpRun: 0, gpRun: 0, timeMin: 60, growHrs: 0, patches: 0, optIn: true, teles: "Farming Guild lobby · points buy farmer's outfit, herb sack, seed box", seeds: "Seeds provided free", note: "xp scales with fruit tier (34/54/74)" },
+    { rdKey: "Tithe", name: "Tithe Farm", crop: "—", type: "Minigame", req: 34, xpRun: 0, gpRun: 0, timeMin: 60, growHrs: 0, patches: 0, optIn: true, teles: "Farming Guild lobby", seeds: "Seeds provided free", note: "points buy farmer's outfit (+2.5% xp), herb sack & seed box — worth focused sessions until owned" },
   ];
   farmMilestones = [
     { lvl: 72, label: "Snapdragons · Mahogany hardwoods", tag: "CURRENT" },
@@ -530,9 +530,9 @@ export default class Almanac extends React.Component {
     const locked = rows.filter((c) => !c.unlocked).sort((a, b) => a.req - b.req);
     act.forEach((c, i) => {
       if (mode === "gp") {
-        c.verdict = c.gpRun > 0 ? (i === 0 ? "BEST MONEY" : "PROFITABLE") : "XP PURCHASE";
-        c.vc = c.gpRun > 0 ? C.green : C.red;
-        c.why = c.gpRun > 0 ? this.short(c.gpm) + "/active min · up to " + this.short(c.gpRun * Math.min(c.capDay, 24)) + "/day at " + c.capDay + " runs" : "loses " + this.short(-c.gpRun) + "/run — do it for the xp (" + c.costPerXp + " gp/xp), not the gp";
+        c.verdict = c.gpRun > 0 ? (i === 0 ? "BEST MONEY" : "PROFITABLE") : c.gpRun === 0 ? "XP / REWARDS" : "XP PURCHASE";
+        c.vc = c.gpRun > 0 ? C.green : c.gpRun === 0 ? "#9a7530" : C.red;
+        c.why = c.gpRun > 0 ? this.short(c.gpm) + "/active min · up to " + this.short(c.gpRun * Math.min(c.capDay, 24)) + "/day at " + c.capDay + " runs" : c.gpRun === 0 ? "costs nothing — do it for the xp & unlocks, not the gp" : "loses " + this.short(-c.gpRun) + "/run — do it for the xp (" + c.costPerXp + " gp/xp), not the gp";
       } else {
         c.verdict = i === 0 ? "BEST XP" : c.costPerXp === 0 ? "FREE XP" : c.costPerXp <= 15 ? "EFFICIENT XP" : c.costPerXp <= 30 ? "FAIR PRICE" : "PREMIUM XP";
         c.vc = i === 0 || c.costPerXp <= 15 ? C.green : c.costPerXp <= 30 ? "#9a7530" : C.red;
@@ -3048,10 +3048,10 @@ export default class Almanac extends React.Component {
     const Y = this.herbYield();
     const selCrop = this.selHerbCrop();
     const adv = this.farmAdvisor();
-    // Per run-type realistic daily cap = 24h ÷ grow time (fractional — Hespori's
-    // 32h grow is 0.75/day, not 1); effective = min(your target, cap). The herb
-    // row runs YOUR SELECTED crop; opt-in rows (Hespori/Tithe) default to 0.
-    const runDefs = this.farmRunDefs.map((r) => {
+    // Per run-type realistic daily cap = 24h ÷ grow time (fractional); effective
+    // = min(your target, cap). The herb row runs YOUR SELECTED crop. Hespori and
+    // Tithe (optIn) live in the ADVISOR only — the circuit is the daily loop.
+    const runDefs = this.farmRunDefs.filter((r) => !r.optIn).map((r) => {
       const unlocked = r.req <= farmLvl;
       const maxRunsDay = r.growHrs > 0 ? +(24 / r.growHrs).toFixed(2) : 24;
       const rd = this.farmcfg.runsPerDay || {};
@@ -3080,7 +3080,7 @@ export default class Almanac extends React.Component {
     return (
       <div>
         <SectionTitle kicker="The Allotments · grow-time, not play-time" title="Farming Engine" accent={TH.accent}
-          right={<div style={{ display: "flex", gap: 8 }}><Btn onClick={this.refreshPrices}>⟳ Live prices</Btn><Btn tone="gold" onClick={() => this.toggleForm("herb")}>+ Log herb run</Btn></div>} />
+          right={<div style={{ display: "flex", gap: 8 }}><Btn onClick={this.refreshPrices}>⟳ Live prices</Btn><Btn tone="gold" onClick={() => this.setState({ farmView: "log", openForm: "herb" })}>+ Log herb run</Btn></div>} />
         {this.state.priceStatus && <div style={{ marginBottom: 14, padding: "8px 14px", background: "rgba(92,110,53,.10)", borderRadius: 5, ...mono({ fontSize: 11, color: "#5c6e35" }) }}>{this.state.priceStatus} — seed costs, herb values and run nets re-priced from the live GE.</div>}
         {adv.top && <Hero theme={TH} icon="🌱" kicker={`Farming ${farmLvl} · ${adv.mode === "gp" ? "gp-priority" : "xp-priority"} verdict`} title={adv.top.name}
           blurb={`${adv.top.why}.${selNote} ${days > 0 ? days + " days to " + goal + " at " + this.short(xpDay) + " xp/day." : ""}`}
@@ -3092,252 +3092,267 @@ export default class Almanac extends React.Component {
           { label: "XP to Farming " + goal, value: this.short(xpLeft) },
           { label: "Days to target", value: days > 0 ? "" + days : "—", color: C.green },
         ]} />
-        {/* run advisor — every run type scored by your active minutes */}
-        <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-            <Kicker color={TH.accent}>Run advisor · every run priced per ACTIVE minute (grow time is free, your attention isn't)</Kicker>
-            <Seg options={[{ key: "gp", label: "GP PRIORITY" }, { key: "xp", label: "XP PRIORITY" }]} active={adv.mode} onPick={(v) => this.setFarmOpt("runPriority", v)} size={9} />
-          </div>
-          <div className="sheetwrap">
-            <table className="sheet">
-              <thead><tr>{["#", "Run", "XP/run", "GP/run", "Active", adv.mode === "gp" ? "GP/min" : "XP/min", "GP/XP", "Cap/day", "Verdict", ""].map((h, i) => <th key={i} className={i >= 2 && i <= 7 ? "num" : ""}>{h}</th>)}</tr></thead>
-              <tbody>
-                {adv.rows.map((c, i) => (
-                  <tr key={c.key} style={c.selected ? { background: "rgba(92,110,53,.10)" } : undefined}>
-                    <td style={mono({ fontSize: 12, color: C.muted2 })}>{i + 1}</td>
-                    <td><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{c.name}</div><div style={serif({ fontSize: 10.5, fontStyle: "normal", color: C.muted })}>{c.why}{c.note ? " · " + c.note : ""}</div></td>
-                    <td className="num" style={mono({ fontSize: 12 })}>{this.short(c.xpRun)}</td>
-                    <td className="num" style={mono({ fontSize: 12, color: c.gpRun >= 0 ? C.green : C.red })}>{this.signed(c.gpRun)}</td>
-                    <td className="num" style={mono({ fontSize: 12, color: C.muted2 })}>{c.time}m</td>
-                    <td className="num" style={mono({ fontSize: 12, fontWeight: 600 })}>{adv.mode === "gp" ? this.signed(c.gpm) : this.fmt(c.xpm)}</td>
-                    <td className="num" style={mono({ fontSize: 12, color: c.costPerXp ? c.costPerXp <= 15 ? C.green : c.costPerXp <= 30 ? "#9a7530" : C.red : C.muted })}>{c.costPerXp ? c.costPerXp : "—"}</td>
-                    <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{c.capDay >= 24 ? "∞" : c.capDay}</td>
-                    <td><Tag color={c.vc} bg={c.vc === C.green ? "rgba(92,110,53,.16)" : c.vc === C.red ? "rgba(150,58,44,.12)" : "rgba(201,162,74,.16)"}>{c.verdict}</Tag></td>
-                    <td>{c.herbTier ? (c.selected ? <span style={mono({ fontSize: 10, color: C.green })}>✓ running</span> : <a href="#" onClick={(e) => { e.preventDefault(); this.setFarmOpt("herbCrop", c.herbTier); }} style={{ textDecoration: "none", ...mono({ fontSize: 10, color: "#9a7530" }) }}>→ run this</a>) : null}</td>
-                  </tr>
-                ))}
-                {adv.locked.map((c) => (
-                  <tr key={c.key} style={{ opacity: 0.55 }}>
-                    <td style={mono({ fontSize: 12, color: C.muted })}>·</td>
-                    <td><div style={cinzel({ fontWeight: 600, fontSize: 13, color: C.muted2 })}>{c.name}</div></td>
-                    <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{this.short(c.xpRun)}</td>
-                    <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{this.signed(c.gpRun)}</td>
-                    <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{c.time}m</td>
-                    <td className="num" style={mono({ fontSize: 12, color: C.muted })}>—</td>
-                    <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{c.costPerXp || "—"}</td>
-                    <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{c.capDay >= 24 ? "∞" : c.capDay}</td>
-                    <td><Tag color={C.red} bg="rgba(150,58,44,.10)">Farming {c.req}</Tag></td>
-                    <td />
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>GP/run includes seeds, compost and protection payments at live prices. <strong>GP priority</strong> ranks by gp per active minute — money-losing runs are flagged as XP purchases. <strong>XP priority</strong> ranks by xp per active minute and prices each run's cost in gp/xp (≤15 efficient · ≤30 fair · above that premium). Cap/day is what grow times physically allow; “→ run this” switches the herb crop your circuit and KPIs are computed from.</div>
-        </Card>
-        {this.state.openForm === "herb" && (
-          <Card style={{ marginBottom: 14 }}>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <select className="led" id="herb_tier" defaultValue={selCrop.tier} style={{ width: 150 }}>{this.farmDefs.map((f) => <option key={f.tier} value={f.tier}>{f.tier}</option>)}</select>
-              {this.field("herb_runs", "Runs", { w: 80, def: 1 })}{this.field("herb_net", "Net override (gp)", { w: 150 })}<Btn tone="gold" onClick={this.addHerb}>Save</Btn>
-            </div>
-            <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(44,32,19,.12)" }}>
-              <Kicker>Herbs picked per patch · your route order · optional — leave empty to log the model estimate</Kicker>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-                {Y.patches.map((p, i) => (
-                  <div key={p.id} style={{ width: 108 }}>
-                    <div style={mono({ fontSize: 9, letterSpacing: ".06em", color: C.muted2, marginBottom: 3 })}>{i + 1} · {p.name}{p.df ? " ✦" : ""}</div>
-                    <input className="led" id={"herb_p_" + p.id} placeholder={"~" + Y.perLive.toFixed(1)} style={{ width: "100%" }} />
-                  </div>
-                ))}
-              </div>
-              <div style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted, marginTop: 8 })}>0 (or empty) = the patch died / was skipped. Filled counts price the run from your ACTUAL harvest — herbs × live price after the 2% tax, minus seed + compost on all {Y.P} patches — and feed your realized herbs/patch average in the mechanics panel.</div>
-            </div>
-          </Card>
-        )}
-        <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
-          <Kicker color={TH.accent}>Run mechanics · these feed every net/run</Kicker>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10, marginTop: 10 }}>
-            <div style={{ background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
-              <Kicker>Patches / run</Kicker>
-              <div style={cinzel({ fontWeight: 800, fontSize: 24, color: C.ink, marginTop: 4 })}>{Y.P}</div>
-              <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted, marginTop: 4, lineHeight: 1.3 })}>from your patch roster below — toggle patches on/off there</div>
-            </div>
-            <div style={{ background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
-              <Kicker>Disease-free patches</Kicker>
-              <div style={cinzel({ fontWeight: 800, fontSize: 24, color: "#5c6e35", marginTop: 4 })}>{Y.df}</div>
-              <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted, marginTop: 4, lineHeight: 1.3 })}>Trollheim, Weiss & Hosidius never roll disease</div>
-            </div>
-            <div style={{ background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
-              <Kicker>Compost</Kicker>
-              <select className="led" value={this.farmcfg.compost} onChange={(e) => this.setFarmOpt("compost", e.target.value)} style={{ width: "100%", marginTop: 6 }}>
-                {Object.entries(this.herbCompost).map(([k, co]) => <option key={k} value={k}>{co.label}</option>)}
-              </select>
-              <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted, marginTop: 6, lineHeight: 1.3 })}>+{(this.herbCompost[this.farmcfg.compost] || {}).lives - 3 || 0} harvest lives · {this.short(Y.compostCost)} gp/patch (live)</div>
-            </div>
-            <div style={{ background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
-              <Kicker>Herbs / patch override</Kicker>
-              <input className="led" defaultValue={this.farmcfg.herbsOverride || 0} onBlur={(e) => this.setCfg("farmcfg", "herbsOverride", e.target.value)} style={{ width: "100%", marginTop: 6, fontWeight: 600 }} />
-              <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted, marginTop: 6, lineHeight: 1.3 })}>0 = use the model · set your own realized average to replace it</div>
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
-            {[["secateurs", "Magic secateurs · +10% yield"], ["farmCape", "Farming cape · +5%"], ["attas", "Attas plant · +5%"]].map(([k, label]) => (
-              <label key={k} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", ...mono({ fontSize: 11, color: C.muted2 }) }}>
-                <input type="checkbox" checked={!!this.farmcfg[k]} onChange={(e) => this.setFarmOpt(k, e.target.checked)} style={{ accentColor: TH.accent, width: 15, height: 15 }} />{label}
-              </label>
-            ))}
-            <span style={{ marginLeft: "auto", display: "flex", gap: 14, flexWrap: "wrap" }}>
-              {(() => {
-                const withDetail = this.logs.herb.filter((h) => h.herbs != null && h.patchN > 0);
-                const totH = withDetail.reduce((a, h) => a + h.herbs, 0), totP = withDetail.reduce((a, h) => a + h.patchN, 0);
-                const chips = [["save chance", (Y.p * 100).toFixed(1) + "%"], ["harvest lives", "" + Y.lives], ["herbs/patch", Y.eff.toFixed(2) + (Y.ov ? " (override)" : "")], ["patch survival", (Y.surv * 100).toFixed(1) + "%"]];
-                if (totP > 0) chips.push(["your logged avg", (totH / totP).toFixed(2) + "/patch · " + totP + "p"]);
-                return chips.map(([l, v]) => (
-                  <span key={l} style={{ background: "rgba(92,110,53,.12)", border: "1px solid rgba(92,110,53,.3)", borderRadius: 5, padding: "4px 10px", ...mono({ fontSize: 10.5, color: "#3c5322" }) }}>{l} <strong>{v}</strong></span>
-                ));
-              })()}
-            </span>
-          </div>
-          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 10, lineHeight: 1.45 })}>
-            The model (OSRS crop-yield mechanics): chance to save a harvest life at Farming {Y.L} = (1 + ⌊(25·(99−L) + 80·(L−1))/98 × bonuses⌋)/256 = <strong>{(Y.p * 100).toFixed(1)}%</strong> — all herbs share the 25/80 constants. Each patch has {Y.lives} harvest lives ({(this.herbCompost[this.farmcfg.compost] || {}).label?.toLowerCase()}), each life yields 1/(1−p) herbs → <strong>{Y.perLive.toFixed(2)} herbs from a live patch</strong>. Herbs roll disease at 3 growth checks → {(Y.surv * 100).toFixed(1)}% survive ({Y.df} of your {Y.P} patches are disease-free). Net/run = {Y.P} × ({Y.eff.toFixed(2)} herbs × herb price after 2% tax − seed − compost).
-          </div>
-        </Card>
-        <Card style={{ marginBottom: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
-            <Kicker color={C.goldDeep}>Patch roster · your run route, in order · access auto-read from quests, level & diaries</Kicker>
-            <span style={mono({ fontSize: 10.5, color: C.muted2 })}>{Y.P} on the route · {Y.df} disease-free</span>
-          </div>
-          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 5 }} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) this.setState({ pOver: -1 }); }}>
-            {this.activePatches().map((p, i, arr) => (
-              <div key={p.id} draggable
-                onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", p.id); } catch (err) {} this._pDrag = p.id; this.setState({ pDrag: p.id }); }}
-                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; const r = e.currentTarget.getBoundingClientRect(); const over = e.clientY - r.top < r.height / 2 ? i : i + 1; if (over !== this.state.pOver) this.setState({ pOver: over }); }}
-                onDrop={(e) => { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); this.dropPatch(e.clientY - r.top < r.height / 2 ? i : i + 1); }}
-                onDragEnd={() => { this._pDrag = null; this.setState({ pDrag: null, pOver: -1 }); }}
-                style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", borderRadius: 6, background: p.active ? "rgba(92,110,53,.10)" : C.cardLight, border: p.active ? "1px solid rgba(92,110,53,.3)" : "1px dashed rgba(44,32,19,.18)", opacity: this.state.pDrag === p.id ? 0.35 : p.active ? 1 : 0.7, boxShadow: this.state.pOver === i ? `0 -2px 0 0 ${TH.accent}` : this.state.pOver === i + 1 && i === arr.length - 1 ? `0 2px 0 0 ${TH.accent}` : "none", cursor: "grab" }}>
-                <span title="Drag to reorder" style={{ cursor: "grab", userSelect: "none", ...mono({ fontSize: 13, color: C.muted2, letterSpacing: "-1px" }) }}>⠿</span>
-                <span style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                  <span onClick={() => this.movePatch(p.id, -1)} style={{ cursor: i > 0 ? "pointer" : "default", opacity: i > 0 ? 1 : 0.25, lineHeight: 1, ...mono({ fontSize: 10, color: C.muted2 }) }}>▲</span>
-                  <span onClick={() => this.movePatch(p.id, 1)} style={{ cursor: i < arr.length - 1 ? "pointer" : "default", opacity: i < arr.length - 1 ? 1 : 0.25, lineHeight: 1, ...mono({ fontSize: 10, color: C.muted2 }) }}>▼</span>
-                </span>
-                <span style={{ width: 20, textAlign: "center", ...mono({ fontSize: 11, color: p.active ? "#5c6e35" : C.muted }) }}>{p.active ? i + 1 : "·"}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <span style={cinzel({ fontWeight: 600, fontSize: 13.5, color: C.ink })}>{p.name}</span>
-                  {p.df && <span style={{ marginLeft: 8, ...mono({ fontSize: 8.5, letterSpacing: ".08em", color: "#3c5322", background: "rgba(92,110,53,.16)", borderRadius: 4, padding: "2px 6px" }) }}>DISEASE-FREE</span>}
-                  <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted, marginTop: 1 })}>{p.tele}</div>
-                </div>
-                <span style={mono({ fontSize: 10, color: p.auto ? C.green : C.red })}>{p.auto ? "✓ unlocked" : "✗ " + p.why}</span>
-                {p.overridden && <span onClick={() => this.autoPatch(p.id)} title="Back to auto (quest/level detection)" style={{ cursor: "pointer", ...mono({ fontSize: 9.5, color: "#9a7530" }) }}>manual · reset</span>}
-                <input type="checkbox" checked={p.active} onChange={(e) => this.togglePatch(p.id, e.target.checked)} style={{ accentColor: TH.accent, width: 16, height: 16, cursor: "pointer" }} />
-              </div>
-            ))}
-          </div>
-          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Access is read from your quest log (Priest in Peril → Morytania, My Arm's Big Adventure → Trollheim, Making Friends with My Arm → Weiss, Children of the Sun → Varlamore, The Great Brain Robbery + Morytania Elite → Harmony) and Farming 65 for the Guild. The checkbox overrides the auto-detection either way. Drag a row (⠿) to any spot — the rest shift down — or nudge with ▲▼; the order is your route, and the run logger follows it.</div>
-        </Card>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
-          <span style={mono({ fontSize: 11, color: C.muted2 })}>DEFAULT RUNS / DAY</span>
-          <input className="led" defaultValue={laps} onBlur={(e) => this.setCfg("farmcfg", "lapsPerDay", e.target.value)} style={{ width: 70 }} />
-          <span style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted })}>Each run type is capped to what its grow time allows — fruit trees (16h) max one a day, herbs (~80m) many more. Edit the Runs/day cell on any row to set a per-type target (0 = skip that run; clear the cell to go back to this default).</span>
+        <div style={{ margin: "2px 0 16px" }}>
+          <Seg options={[{ key: "planner", label: "PLANNER" }, { key: "setup", label: "SETUP" }, { key: "log", label: "RUN LOG" }]} active={this.state.farmView || "planner"} onPick={(v) => this.setState({ farmView: v })} />
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
-          <Card>
-            <Kicker color={C.goldDeep}>Daily run circuit · unlocked at Farming {farmLvl}</Kicker>
-            <div className="sheetwrap" style={{ marginTop: 10 }}>
+        {(this.state.farmView || "planner") === "planner" && (
+          <div>
+          {/* run advisor — every run type scored by your active minutes */}
+          <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+              <Kicker color={TH.accent}>Run advisor · every run priced per ACTIVE minute (grow time is free, your attention isn't)</Kicker>
+              <Seg options={[{ key: "gp", label: "GP PRIORITY" }, { key: "xp", label: "XP PRIORITY" }]} active={adv.mode} onPick={(v) => this.setFarmOpt("runPriority", v)} size={9} />
+            </div>
+            <div className="sheetwrap">
               <table className="sheet">
-                <thead><tr>{["Run", "Crop", "Patches", "Protection", "XP/run", "GP/run", "Runs/day", "Grow"].map((h, i) => <th key={i} className={i > 3 ? "num" : ""}>{h}</th>)}</tr></thead>
-                <tbody>{unlockedRuns.map((r, k) => (
-                  <tr key={k}>
-                    <td><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{r.name}</div><div style={serif({ fontSize: 10.5, fontStyle: "normal", color: C.muted })}>{r.teles}</div></td>
-                    <td>{r.isHerb ? (
-                      <select className="led" value={selCrop.tier} onChange={(e) => this.setFarmOpt("herbCrop", e.target.value)} title="The herb crop your circuit + KPIs are computed from" style={{ padding: "3px 5px", fontSize: 12 }}>
-                        {this.farmDefs.map((f) => <option key={f.tier} value={f.tier} disabled={farmLvl < f.lvl}>{f.tier}{farmLvl < f.lvl ? " (lv " + f.lvl + ")" : ""}</option>)}
-                      </select>
-                    ) : <span style={serif({ fontSize: 13 })}>{r.crop}</span>}</td>
-                    <td className="num" style={mono({ fontSize: 12 })}>{r.patches || "—"}</td>
-                    <td style={{ whiteSpace: "nowrap" }}>{r.payItem
-                      ? <span title={`${r.payQty}× ${r.payItem} per patch — farmer protection, guarantees the tree can't die; priced into GP/run live`} style={mono({ fontSize: 10, color: C.muted2 })}>{r.payQty}× {r.payItem}</span>
-                      : r.isHerb
-                        ? <span title={`${(this.herbCompost[this.farmcfg.compost] || {}).label} + ${Y.df} disease-free patches (herbs can't be farmer-protected)`} style={mono({ fontSize: 10, color: C.muted })}>{({ none: "no compost", compost: "Compost", super: "Supercmp", ultra: "Ultracmp" })[this.farmcfg.compost] || "—"} · {Y.df} DF</span>
-                        : <span style={mono({ fontSize: 10, color: C.muted })}>—</span>}</td>
-                    <td className="num"><div style={mono({ fontSize: 12 })}>{this.fmt(r.xpRun)}</div><Bar pct={Math.min(100, (r.xpRun / runMax) * 100)} c1={TH.accent} c2={TH.lite} h={4} /></td>
-                    <td className="num" style={mono({ fontSize: 12, color: r.gpRun >= 0 ? C.green : C.red })}>{r.gpRun >= 0 ? "+" + this.short(r.gpRun) : this.signed(r.gpRun)}</td>
-                    <td className="num">
-                      <span style={{ display: "inline-flex", alignItems: "baseline", gap: 3 }}>
-                        <input className="led" key={r.rdKey + ":" + r.effRuns + ":" + (r.rdOverride ? 1 : 0)} defaultValue={r.effRuns} onBlur={(e) => this.setRunsPerDay(r.rdKey, e.target.value)} title="Runs/day for this run type · empty = global default · 0 = skip" style={{ width: 44, padding: "3px 5px", textAlign: "right", fontWeight: r.rdOverride ? 700 : 400, borderColor: r.rdOverride ? TH.accent : undefined }} />
-                        <span style={mono({ fontSize: 12, color: C.muted })}>/{r.maxRunsDay >= 24 ? "∞" : r.maxRunsDay}</span>
-                      </span>
-                    </td>
-                    <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{r.growHrs < 1.5 ? Math.round(r.growHrs * 60) + "m" : r.growHrs + "h"}</td>
-                  </tr>
-                ))}
-                {unlockedRuns.length === 0 && <tr><td colSpan={8} style={serif({ fontStyle: "normal", color: C.muted, padding: 14 })}>No runs unlocked yet at Farming {farmLvl}.</td></tr>}</tbody>
+                <thead><tr>{["#", "Run", "XP/run", "GP/run", "Active", adv.mode === "gp" ? "GP/min" : "XP/min", "GP/XP", "Cap/day", "Verdict", ""].map((h, i) => <th key={i} className={i >= 2 && i <= 7 ? "num" : ""}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {adv.rows.map((c, i) => (
+                    <tr key={c.key} style={c.selected ? { background: "rgba(92,110,53,.10)" } : undefined}>
+                      <td style={mono({ fontSize: 12, color: C.muted2 })}>{i + 1}</td>
+                      <td><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{c.name}</div><div style={serif({ fontSize: 10.5, fontStyle: "normal", color: C.muted })}>{c.why}{c.note ? " · " + c.note : ""}</div></td>
+                      <td className="num" style={mono({ fontSize: 12 })}>{this.short(c.xpRun)}</td>
+                      <td className="num" style={mono({ fontSize: 12, color: c.gpRun >= 0 ? C.green : C.red })}>{this.signed(c.gpRun)}</td>
+                      <td className="num" style={mono({ fontSize: 12, color: C.muted2 })}>{c.time}m</td>
+                      <td className="num" style={mono({ fontSize: 12, fontWeight: 600 })}>{adv.mode === "gp" ? this.signed(c.gpm) : this.fmt(c.xpm)}</td>
+                      <td className="num" style={mono({ fontSize: 12, color: c.costPerXp ? c.costPerXp <= 15 ? C.green : c.costPerXp <= 30 ? "#9a7530" : C.red : C.muted })}>{c.costPerXp ? c.costPerXp : "—"}</td>
+                      <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{c.capDay >= 24 ? "∞" : c.capDay}</td>
+                      <td><Tag color={c.vc} bg={c.vc === C.green ? "rgba(92,110,53,.16)" : c.vc === C.red ? "rgba(150,58,44,.12)" : "rgba(201,162,74,.16)"}>{c.verdict}</Tag></td>
+                      <td>{c.herbTier ? (c.selected ? <span style={mono({ fontSize: 10, color: C.green })}>✓ running</span> : <a href="#" onClick={(e) => { e.preventDefault(); this.setFarmOpt("herbCrop", c.herbTier); }} style={{ textDecoration: "none", ...mono({ fontSize: 10, color: "#9a7530" }) }}>→ run this</a>) : null}</td>
+                    </tr>
+                  ))}
+                  {adv.locked.map((c) => (
+                    <tr key={c.key} style={{ opacity: 0.55 }}>
+                      <td style={mono({ fontSize: 12, color: C.muted })}>·</td>
+                      <td><div style={cinzel({ fontWeight: 600, fontSize: 13, color: C.muted2 })}>{c.name}</div></td>
+                      <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{this.short(c.xpRun)}</td>
+                      <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{this.signed(c.gpRun)}</td>
+                      <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{c.time}m</td>
+                      <td className="num" style={mono({ fontSize: 12, color: C.muted })}>—</td>
+                      <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{c.costPerXp || "—"}</td>
+                      <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{c.capDay >= 24 ? "∞" : c.capDay}</td>
+                      <td><Tag color={C.red} bg="rgba(150,58,44,.10)">Farming {c.req}</Tag></td>
+                      <td />
+                    </tr>
+                  ))}
+                </tbody>
               </table>
             </div>
-            {lockedRuns.length > 0 && <div style={{ marginTop: 10, ...serif({ fontSize: 12, color: C.muted }) }}>Upcoming: {lockedRuns.map((r) => `${r.crop} ${r.name.toLowerCase()} (lvl ${r.req})`).join(" · ")}</div>}
+            <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>GP/run includes seeds, compost and protection payments at live prices. <strong>GP priority</strong> ranks by gp per active minute — money-losing runs are flagged as XP purchases. <strong>XP priority</strong> ranks by xp per active minute and prices each run's cost in gp/xp (≤15 efficient · ≤30 fair · above that premium). Cap/day is what grow times physically allow; “→ run this” switches the herb crop your circuit and KPIs are computed from.</div>
           </Card>
-          <Card>
-            <Kicker color={C.goldDeep}>Milestones</Kicker>
-            <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-              {this.farmMilestones.map((m, i) => { const done = m.lvl <= farmLvl; return (
-                <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                  <span style={{ width: 9, height: 9, borderRadius: "50%", marginTop: 5, background: done ? C.green : m.lvl === goal ? C.purple : "#c2a877" }} />
-                  <div style={{ flex: 1 }}><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>Lvl {m.lvl} {m.tag && <Tag color={m.tag === "GOAL" ? C.purple : C.green} bg="transparent">{m.tag}</Tag>}</div><div style={serif({ fontSize: 12, color: C.muted })}>{m.label}</div></div>
-                </div>
-              ); })}
+          <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
+            <Card>
+              <Kicker color={C.goldDeep}>Daily run circuit · unlocked at Farming {farmLvl}</Kicker>
+              <div className="sheetwrap" style={{ marginTop: 10 }}>
+                <table className="sheet">
+                  <thead><tr>{["Run", "Crop", "Patches", "Protection", "XP/run", "GP/run", "Runs/day", "Grow"].map((h, i) => <th key={i} className={i > 3 ? "num" : ""}>{h}</th>)}</tr></thead>
+                  <tbody>{unlockedRuns.map((r, k) => (
+                    <tr key={k}>
+                      <td><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>{r.name}</div><div title={r.teles} style={{ maxWidth: 190, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", ...serif({ fontSize: 10.5, fontStyle: "normal", color: C.muted }) }}>{r.teles}</div></td>
+                      <td>{r.isHerb ? (
+                        <select className="led" value={selCrop.tier} onChange={(e) => this.setFarmOpt("herbCrop", e.target.value)} title="The herb crop your circuit + KPIs are computed from" style={{ padding: "3px 5px", fontSize: 12 }}>
+                          {this.farmDefs.map((f) => <option key={f.tier} value={f.tier} disabled={farmLvl < f.lvl}>{f.tier}{farmLvl < f.lvl ? " (lv " + f.lvl + ")" : ""}</option>)}
+                        </select>
+                      ) : <span style={serif({ fontSize: 13 })}>{r.crop}</span>}</td>
+                      <td className="num" style={mono({ fontSize: 12 })}>{r.patches || "—"}</td>
+                      <td style={{ whiteSpace: "nowrap" }}>{r.payItem
+                        ? <span title={`${r.payQty}× ${r.payItem} per patch — farmer protection, guarantees the tree can't die; priced into GP/run live`} style={mono({ fontSize: 10, color: C.muted2 })}>{r.payQty}× {r.payItem}</span>
+                        : r.isHerb
+                          ? <span title={`${(this.herbCompost[this.farmcfg.compost] || {}).label} + ${Y.df} disease-free patches (herbs can't be farmer-protected)`} style={mono({ fontSize: 10, color: C.muted })}>{({ none: "no compost", compost: "Compost", super: "Supercmp", ultra: "Ultracmp" })[this.farmcfg.compost] || "—"} · {Y.df} DF</span>
+                          : <span style={mono({ fontSize: 10, color: C.muted })}>—</span>}</td>
+                      <td className="num"><div style={mono({ fontSize: 12 })}>{this.fmt(r.xpRun)}</div><Bar pct={Math.min(100, (r.xpRun / runMax) * 100)} c1={TH.accent} c2={TH.lite} h={4} /></td>
+                      <td className="num" style={mono({ fontSize: 12, color: r.gpRun >= 0 ? C.green : C.red })}>{r.gpRun >= 0 ? "+" + this.short(r.gpRun) : this.signed(r.gpRun)}</td>
+                      <td className="num">
+                        <span style={{ display: "inline-flex", alignItems: "baseline", gap: 3 }}>
+                          <input className="led" key={r.rdKey + ":" + r.effRuns + ":" + (r.rdOverride ? 1 : 0)} defaultValue={r.effRuns} onBlur={(e) => this.setRunsPerDay(r.rdKey, e.target.value)} title="Runs/day for this run type · empty = global default · 0 = skip" style={{ width: 44, padding: "3px 5px", textAlign: "right", fontWeight: r.rdOverride ? 700 : 400, borderColor: r.rdOverride ? TH.accent : undefined }} />
+                          <span style={mono({ fontSize: 12, color: C.muted })}>/{r.maxRunsDay >= 24 ? "∞" : r.maxRunsDay}</span>
+                        </span>
+                      </td>
+                      <td className="num" style={mono({ fontSize: 12, color: C.muted })}>{r.growHrs < 1.5 ? Math.round(r.growHrs * 60) + "m" : r.growHrs + "h"}</td>
+                    </tr>
+                  ))}
+                  {unlockedRuns.length === 0 && <tr><td colSpan={8} style={serif({ fontStyle: "normal", color: C.muted, padding: 14 })}>No runs unlocked yet at Farming {farmLvl}.</td></tr>}</tbody>
+                </table>
+              </div>
+              {lockedRuns.length > 0 && <div style={{ marginTop: 10, ...serif({ fontSize: 12, color: C.muted }) }}>Upcoming: {lockedRuns.map((r) => `${r.crop} ${r.name.toLowerCase()} (lvl ${r.req})`).join(" · ")}</div>}
+              <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 12, flexWrap: "wrap" }}>
+                <span style={mono({ fontSize: 11, color: C.muted2 })}>DEFAULT RUNS / DAY</span>
+                <input className="led" defaultValue={laps} onBlur={(e) => this.setCfg("farmcfg", "lapsPerDay", e.target.value)} style={{ width: 70 }} />
+                <span style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted })}>Each run type is capped to what its grow time allows — fruit trees (16h) max one a day, herbs (~80m) many more. Edit the Runs/day cell on any row to set a per-type target (0 = skip that run; clear the cell to go back to this default).</span>
+              </div>
+            </Card>
+            <Card>
+              <Kicker color={C.goldDeep}>Milestones</Kicker>
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                {this.farmMilestones.map((m, i) => { const done = m.lvl <= farmLvl; return (
+                  <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                    <span style={{ width: 9, height: 9, borderRadius: "50%", marginTop: 5, background: done ? C.green : m.lvl === goal ? C.purple : "#c2a877" }} />
+                    <div style={{ flex: 1 }}><div style={cinzel({ fontWeight: 600, fontSize: 13 })}>Lvl {m.lvl} {m.tag && <Tag color={m.tag === "GOAL" ? C.purple : C.green} bg="transparent">{m.tag}</Tag>}</div><div style={serif({ fontSize: 12, color: C.muted })}>{m.label}</div></div>
+                  </div>
+                ); })}
+              </div>
+            </Card>
+          </div>
+          <Card style={{ marginTop: 14 }}>
+            <Kicker color={C.goldDeep}>Herb tiers · net/run by plant level · ⟳ re-prices from the live GE</Kicker>
+            <div className="sheetwrap" style={{ marginTop: 8 }}>
+              <table className="sheet">
+                <thead><tr>{["Tier", "Plant lvl", "Seed cost", "Herb (ea)", "Net/run", "Runs logged", "Total net", "Status"].map((h, i) => <th key={i} className={i > 1 && i < 7 ? "num" : ""}>{h}</th>)}</tr></thead>
+                <tbody>{this.farmDefs.map((f, k) => { const a = agg[f.tier] || { runs: 0, net: 0 }; const fU = farmLvl >= f.lvl; const net = this.farmNet(f); return (
+                  <tr key={k}>
+                    <td style={cinzel({ fontWeight: 600, fontSize: 13 })}>{f.tier}</td><td className="num" style={mono({ fontSize: 12 })}>Lv {f.lvl}</td>
+                    <td className="num" style={mono({ fontSize: 12, color: C.red })}>{this.short(f.seed)}</td>
+                    <td className="num" style={mono({ fontSize: 12 })}>{this.short(f.herb)}</td>
+                    <td className="num" style={mono({ fontSize: 12, color: net >= 0 ? C.green : C.red })}>{this.short(net)}</td><td className="num" style={mono({ fontSize: 12 })}>{a.runs}</td><td className="num" style={mono({ fontSize: 12 })}>{a.net > 0 ? this.short(a.net) : "—"}</td>
+                    <td><Tag color={fU ? C.green : C.red} bg={fU ? "rgba(92,110,53,.16)" : "rgba(150,58,44,.12)"}>{fU ? "unlocked" : "locked"}</Tag></td>
+                  </tr>
+                ); })}</tbody>
+              </table>
+            </div>
+            <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Net/run = {Y.P} patches × ({Y.eff.toFixed(2)} herbs/patch from the run-mechanics model above × herb value after the 2% GE tax − seed − compost). Seed & herb prices re-price with ⟳ Live prices; the yield reacts instantly to the controls.</div>
+          </Card>
+          </div>
+        )}
+        {this.state.farmView === "setup" && (
+          <div>
+          <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
+            <Kicker color={TH.accent}>Run mechanics · these feed every net/run</Kicker>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10, marginTop: 10 }}>
+              <div style={{ background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
+                <Kicker>Patches / run</Kicker>
+                <div style={cinzel({ fontWeight: 800, fontSize: 24, color: C.ink, marginTop: 4 })}>{Y.P}</div>
+                <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted, marginTop: 4, lineHeight: 1.3 })}>from your patch roster below — toggle patches on/off there</div>
+              </div>
+              <div style={{ background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
+                <Kicker>Disease-free patches</Kicker>
+                <div style={cinzel({ fontWeight: 800, fontSize: 24, color: "#5c6e35", marginTop: 4 })}>{Y.df}</div>
+                <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted, marginTop: 4, lineHeight: 1.3 })}>Trollheim, Weiss & Hosidius never roll disease</div>
+              </div>
+              <div style={{ background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
+                <Kicker>Compost</Kicker>
+                <select className="led" value={this.farmcfg.compost} onChange={(e) => this.setFarmOpt("compost", e.target.value)} style={{ width: "100%", marginTop: 6 }}>
+                  {Object.entries(this.herbCompost).map(([k, co]) => <option key={k} value={k}>{co.label}</option>)}
+                </select>
+                <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted, marginTop: 6, lineHeight: 1.3 })}>+{(this.herbCompost[this.farmcfg.compost] || {}).lives - 3 || 0} harvest lives · {this.short(Y.compostCost)} gp/patch (live)</div>
+              </div>
+              <div style={{ background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
+                <Kicker>Herbs / patch override</Kicker>
+                <input className="led" defaultValue={this.farmcfg.herbsOverride || 0} onBlur={(e) => this.setCfg("farmcfg", "herbsOverride", e.target.value)} style={{ width: "100%", marginTop: 6, fontWeight: 600 }} />
+                <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted, marginTop: 6, lineHeight: 1.3 })}>0 = use the model · set your own realized average to replace it</div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
+              {[["secateurs", "Magic secateurs · +10% yield"], ["farmCape", "Farming cape · +5%"], ["attas", "Attas plant · +5%"]].map(([k, label]) => (
+                <label key={k} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", ...mono({ fontSize: 11, color: C.muted2 }) }}>
+                  <input type="checkbox" checked={!!this.farmcfg[k]} onChange={(e) => this.setFarmOpt(k, e.target.checked)} style={{ accentColor: TH.accent, width: 15, height: 15 }} />{label}
+                </label>
+              ))}
+              <span style={{ marginLeft: "auto", display: "flex", gap: 14, flexWrap: "wrap" }}>
+                {(() => {
+                  const withDetail = this.logs.herb.filter((h) => h.herbs != null && h.patchN > 0);
+                  const totH = withDetail.reduce((a, h) => a + h.herbs, 0), totP = withDetail.reduce((a, h) => a + h.patchN, 0);
+                  const chips = [["save chance", (Y.p * 100).toFixed(1) + "%"], ["harvest lives", "" + Y.lives], ["herbs/patch", Y.eff.toFixed(2) + (Y.ov ? " (override)" : "")], ["patch survival", (Y.surv * 100).toFixed(1) + "%"]];
+                  if (totP > 0) chips.push(["your logged avg", (totH / totP).toFixed(2) + "/patch · " + totP + "p"]);
+                  return chips.map(([l, v]) => (
+                    <span key={l} style={{ background: "rgba(92,110,53,.12)", border: "1px solid rgba(92,110,53,.3)", borderRadius: 5, padding: "4px 10px", ...mono({ fontSize: 10.5, color: "#3c5322" }) }}>{l} <strong>{v}</strong></span>
+                  ));
+                })()}
+              </span>
+            </div>
+            <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 10, lineHeight: 1.45 })}>
+              The model (OSRS crop-yield mechanics): chance to save a harvest life at Farming {Y.L} = (1 + ⌊(25·(99−L) + 80·(L−1))/98 × bonuses⌋)/256 = <strong>{(Y.p * 100).toFixed(1)}%</strong> — all herbs share the 25/80 constants. Each patch has {Y.lives} harvest lives ({(this.herbCompost[this.farmcfg.compost] || {}).label?.toLowerCase()}), each life yields 1/(1−p) herbs → <strong>{Y.perLive.toFixed(2)} herbs from a live patch</strong>. Herbs roll disease at 3 growth checks → {(Y.surv * 100).toFixed(1)}% survive ({Y.df} of your {Y.P} patches are disease-free). Net/run = {Y.P} × ({Y.eff.toFixed(2)} herbs × herb price after 2% tax − seed − compost).
             </div>
           </Card>
-        </div>
-        <Card style={{ marginTop: 14 }}>
-          <Kicker color={C.goldDeep}>Herb tiers · net/run by plant level · ⟳ re-prices from the live GE</Kicker>
-          <div className="sheetwrap" style={{ marginTop: 8 }}>
-            <table className="sheet">
-              <thead><tr>{["Tier", "Plant lvl", "Seed cost", "Herb (ea)", "Net/run", "Runs logged", "Total net", "Status"].map((h, i) => <th key={i} className={i > 1 && i < 7 ? "num" : ""}>{h}</th>)}</tr></thead>
-              <tbody>{this.farmDefs.map((f, k) => { const a = agg[f.tier] || { runs: 0, net: 0 }; const fU = farmLvl >= f.lvl; const net = this.farmNet(f); return (
-                <tr key={k}>
-                  <td style={cinzel({ fontWeight: 600, fontSize: 13 })}>{f.tier}</td><td className="num" style={mono({ fontSize: 12 })}>Lv {f.lvl}</td>
-                  <td className="num" style={mono({ fontSize: 12, color: C.red })}>{this.short(f.seed)}</td>
-                  <td className="num" style={mono({ fontSize: 12 })}>{this.short(f.herb)}</td>
-                  <td className="num" style={mono({ fontSize: 12, color: net >= 0 ? C.green : C.red })}>{this.short(net)}</td><td className="num" style={mono({ fontSize: 12 })}>{a.runs}</td><td className="num" style={mono({ fontSize: 12 })}>{a.net > 0 ? this.short(a.net) : "—"}</td>
-                  <td><Tag color={fU ? C.green : C.red} bg={fU ? "rgba(92,110,53,.16)" : "rgba(150,58,44,.12)"}>{fU ? "unlocked" : "locked"}</Tag></td>
-                </tr>
-              ); })}</tbody>
-            </table>
+          <Card style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+              <Kicker color={C.goldDeep}>Patch roster · your run route, in order · access auto-read from quests, level & diaries</Kicker>
+              <span style={mono({ fontSize: 10.5, color: C.muted2 })}>{Y.P} on the route · {Y.df} disease-free</span>
+            </div>
+            <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 5 }} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) this.setState({ pOver: -1 }); }}>
+              {this.activePatches().map((p, i, arr) => (
+                <div key={p.id} draggable
+                  onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", p.id); } catch (err) {} this._pDrag = p.id; this.setState({ pDrag: p.id }); }}
+                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; const r = e.currentTarget.getBoundingClientRect(); const over = e.clientY - r.top < r.height / 2 ? i : i + 1; if (over !== this.state.pOver) this.setState({ pOver: over }); }}
+                  onDrop={(e) => { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); this.dropPatch(e.clientY - r.top < r.height / 2 ? i : i + 1); }}
+                  onDragEnd={() => { this._pDrag = null; this.setState({ pDrag: null, pOver: -1 }); }}
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", borderRadius: 6, background: p.active ? "rgba(92,110,53,.10)" : C.cardLight, border: p.active ? "1px solid rgba(92,110,53,.3)" : "1px dashed rgba(44,32,19,.18)", opacity: this.state.pDrag === p.id ? 0.35 : p.active ? 1 : 0.7, boxShadow: this.state.pOver === i ? `0 -2px 0 0 ${TH.accent}` : this.state.pOver === i + 1 && i === arr.length - 1 ? `0 2px 0 0 ${TH.accent}` : "none", cursor: "grab" }}>
+                  <span title="Drag to reorder" style={{ cursor: "grab", userSelect: "none", ...mono({ fontSize: 13, color: C.muted2, letterSpacing: "-1px" }) }}>⠿</span>
+                  <span style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                    <span onClick={() => this.movePatch(p.id, -1)} style={{ cursor: i > 0 ? "pointer" : "default", opacity: i > 0 ? 1 : 0.25, lineHeight: 1, ...mono({ fontSize: 10, color: C.muted2 }) }}>▲</span>
+                    <span onClick={() => this.movePatch(p.id, 1)} style={{ cursor: i < arr.length - 1 ? "pointer" : "default", opacity: i < arr.length - 1 ? 1 : 0.25, lineHeight: 1, ...mono({ fontSize: 10, color: C.muted2 }) }}>▼</span>
+                  </span>
+                  <span style={{ width: 20, textAlign: "center", ...mono({ fontSize: 11, color: p.active ? "#5c6e35" : C.muted }) }}>{p.active ? i + 1 : "·"}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span style={cinzel({ fontWeight: 600, fontSize: 13.5, color: C.ink })}>{p.name}</span>
+                    {p.df && <span style={{ marginLeft: 8, ...mono({ fontSize: 8.5, letterSpacing: ".08em", color: "#3c5322", background: "rgba(92,110,53,.16)", borderRadius: 4, padding: "2px 6px" }) }}>DISEASE-FREE</span>}
+                    <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted, marginTop: 1 })}>{p.tele}</div>
+                  </div>
+                  <span style={mono({ fontSize: 10, color: p.auto ? C.green : C.red })}>{p.auto ? "✓ unlocked" : "✗ " + p.why}</span>
+                  {p.overridden && <span onClick={() => this.autoPatch(p.id)} title="Back to auto (quest/level detection)" style={{ cursor: "pointer", ...mono({ fontSize: 9.5, color: "#9a7530" }) }}>manual · reset</span>}
+                  <input type="checkbox" checked={p.active} onChange={(e) => this.togglePatch(p.id, e.target.checked)} style={{ accentColor: TH.accent, width: 16, height: 16, cursor: "pointer" }} />
+                </div>
+              ))}
+            </div>
+            <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Access is read from your quest log (Priest in Peril → Morytania, My Arm's Big Adventure → Trollheim, Making Friends with My Arm → Weiss, Children of the Sun → Varlamore, The Great Brain Robbery + Morytania Elite → Harmony) and Farming 65 for the Guild. The checkbox overrides the auto-detection either way. Drag a row (⠿) to any spot — the rest shift down — or nudge with ▲▼; the order is your route, and the run logger follows it.</div>
+          </Card>
           </div>
-          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Net/run = {Y.P} patches × ({Y.eff.toFixed(2)} herbs/patch from the run-mechanics model above × herb value after the 2% GE tax − seed − compost). Seed & herb prices re-price with ⟳ Live prices; the yield reacts instantly to the controls.</div>
-        </Card>
-        <Card style={{ marginTop: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
-            <Kicker color={C.goldDeep}>Run history · newest first · delete a bad entry and re-log it (undo has your back)</Kicker>
-            <span style={mono({ fontSize: 10.5, color: C.muted2 })}>{loggedRuns} runs · {this.short(loggedNet)} total · {loggedRuns ? this.short(loggedNet / loggedRuns) + "/run avg" : "—"}</span>
+        )}
+        {this.state.farmView === "log" && (
+          <div>
+          {this.state.openForm === "herb" && (
+            <Card style={{ marginBottom: 14 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <select className="led" id="herb_tier" defaultValue={selCrop.tier} style={{ width: 150 }}>{this.farmDefs.map((f) => <option key={f.tier} value={f.tier}>{f.tier}</option>)}</select>
+                {this.field("herb_runs", "Runs", { w: 80, def: 1 })}{this.field("herb_net", "Net override (gp)", { w: 150 })}<Btn tone="gold" onClick={this.addHerb}>Save</Btn>
+              </div>
+              <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(44,32,19,.12)" }}>
+                <Kicker>Herbs picked per patch · your route order · optional — leave empty to log the model estimate</Kicker>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                  {Y.patches.map((p, i) => (
+                    <div key={p.id} style={{ width: 108 }}>
+                      <div style={mono({ fontSize: 9, letterSpacing: ".06em", color: C.muted2, marginBottom: 3 })}>{i + 1} · {p.name}{p.df ? " ✦" : ""}</div>
+                      <input className="led" id={"herb_p_" + p.id} placeholder={"~" + Y.perLive.toFixed(1)} style={{ width: "100%" }} />
+                    </div>
+                  ))}
+                </div>
+                <div style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted, marginTop: 8 })}>0 (or empty) = the patch died / was skipped. Filled counts price the run from your ACTUAL harvest — herbs × live price after the 2% tax, minus seed + compost on all {Y.P} patches — and feed your realized herbs/patch average in the mechanics panel.</div>
+              </div>
+            </Card>
+          )}
+          <Card style={{ marginTop: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+              <Kicker color={C.goldDeep}>Run history · newest first · delete a bad entry and re-log it (undo has your back)</Kicker>
+              <span style={mono({ fontSize: 10.5, color: C.muted2 })}>{loggedRuns} runs · {this.short(loggedNet)} total · {loggedRuns ? this.short(loggedNet / loggedRuns) + "/run avg" : "—"}</span>
+            </div>
+            <div className="sheetwrap" style={{ marginTop: 8 }}>
+              <table className="sheet">
+                <thead><tr>{["Date", "Tier", "Runs", "Herbs", "Patch breakdown", "Net / run", "Net", ""].map((h, i) => <th key={i} className={i === 2 || i === 3 || i === 5 || i === 6 ? "num" : ""}>{h}</th>)}</tr></thead>
+                <tbody>{this.logs.herb.map((h, i) => {
+                  const runs = h.runs || 1;
+                  const detail = h.perPatch ? Object.entries(h.perPatch).map(([id, n]) => { const pt = this.herbPatches.find((x) => x.id === id); return { name: pt ? pt.name : id, n: n || 0 }; }) : null;
+                  return (
+                    <tr key={(h.date || "") + "-" + i}>
+                      <td style={mono({ fontSize: 12 })}>{this.dShort(h.date)}</td>
+                      <td style={cinzel({ fontWeight: 600, fontSize: 13 })}>{h.tier}</td>
+                      <td className="num" style={mono({ fontSize: 12 })}>{runs}</td>
+                      <td className="num" style={mono({ fontSize: 12, color: h.herbs != null ? C.ink : C.muted })}>{h.herbs != null ? h.herbs + (h.patchN ? " / " + h.patchN + "p" : "") : "—"}</td>
+                      <td>{detail ? (
+                        <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
+                          {detail.map((d, j) => <span key={j} title={d.name} style={{ padding: "1px 6px", borderRadius: 4, background: d.n > 0 ? "rgba(92,110,53,.14)" : "rgba(150,58,44,.12)", ...mono({ fontSize: 10, color: d.n > 0 ? "#3c5322" : C.red }) }}>{d.name.slice(0, 3)} {d.n}</span>)}
+                        </span>
+                      ) : <span style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted })}>model estimate</span>}</td>
+                      <td className="num" style={mono({ fontSize: 12, color: C.muted2 })}>{this.short(h.net / runs)}</td>
+                      <td className="num" style={mono({ fontSize: 12, fontWeight: 600, color: h.net >= 0 ? C.green : C.red })}>{this.signed(h.net)}</td>
+                      <td><span onClick={() => this.delLog("herb", i)} title="Delete entry" style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 12 }) }}>✕</span></td>
+                    </tr>
+                  );
+                })}
+                {this.logs.herb.length === 0 && <tr><td colSpan={8} style={serif({ fontStyle: "normal", color: C.muted, padding: 14 })}>No runs logged yet — hit “+ Log herb run”.</td></tr>}</tbody>
+              </table>
+            </div>
+          </Card>
           </div>
-          <div className="sheetwrap" style={{ marginTop: 8 }}>
-            <table className="sheet">
-              <thead><tr>{["Date", "Tier", "Runs", "Herbs", "Patch breakdown", "Net / run", "Net", ""].map((h, i) => <th key={i} className={i === 2 || i === 3 || i === 5 || i === 6 ? "num" : ""}>{h}</th>)}</tr></thead>
-              <tbody>{this.logs.herb.map((h, i) => {
-                const runs = h.runs || 1;
-                const detail = h.perPatch ? Object.entries(h.perPatch).map(([id, n]) => { const pt = this.herbPatches.find((x) => x.id === id); return { name: pt ? pt.name : id, n: n || 0 }; }) : null;
-                return (
-                  <tr key={(h.date || "") + "-" + i}>
-                    <td style={mono({ fontSize: 12 })}>{this.dShort(h.date)}</td>
-                    <td style={cinzel({ fontWeight: 600, fontSize: 13 })}>{h.tier}</td>
-                    <td className="num" style={mono({ fontSize: 12 })}>{runs}</td>
-                    <td className="num" style={mono({ fontSize: 12, color: h.herbs != null ? C.ink : C.muted })}>{h.herbs != null ? h.herbs + (h.patchN ? " / " + h.patchN + "p" : "") : "—"}</td>
-                    <td>{detail ? (
-                      <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
-                        {detail.map((d, j) => <span key={j} title={d.name} style={{ padding: "1px 6px", borderRadius: 4, background: d.n > 0 ? "rgba(92,110,53,.14)" : "rgba(150,58,44,.12)", ...mono({ fontSize: 10, color: d.n > 0 ? "#3c5322" : C.red }) }}>{d.name.slice(0, 3)} {d.n}</span>)}
-                      </span>
-                    ) : <span style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted })}>model estimate</span>}</td>
-                    <td className="num" style={mono({ fontSize: 12, color: C.muted2 })}>{this.short(h.net / runs)}</td>
-                    <td className="num" style={mono({ fontSize: 12, fontWeight: 600, color: h.net >= 0 ? C.green : C.red })}>{this.signed(h.net)}</td>
-                    <td><span onClick={() => this.delLog("herb", i)} title="Delete entry" style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 12 }) }}>✕</span></td>
-                  </tr>
-                );
-              })}
-              {this.logs.herb.length === 0 && <tr><td colSpan={8} style={serif({ fontStyle: "normal", color: C.muted, padding: 14 })}>No runs logged yet — hit “+ Log herb run”.</td></tr>}</tbody>
-            </table>
-          </div>
-        </Card>
+        )}
       </div>
     );
   }
