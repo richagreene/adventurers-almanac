@@ -175,14 +175,17 @@ export function LineChart({ points, theme, height = 220, yFmt = (v) => v, valueL
 }
 
 // Item / skill icon with graceful fallback to a 2-letter badge.
+// `url` may be a single source or an array — each is tried in turn on load
+// error before falling back to the 2-letter badge.
 export function Icon({ url, name, size = 28, abbr, style }) {
-  const [err, setErr] = React.useState(false);
-  React.useEffect(() => { setErr(false); }, [url]);
+  const urls = React.useMemo(() => (Array.isArray(url) ? url.filter(Boolean) : url ? [url] : []), [Array.isArray(url) ? url.join("|") : url]);
+  const [idx, setIdx] = React.useState(0);
+  React.useEffect(() => { setIdx(0); }, [urls]);
   const ab = abbr != null ? abbr : (name ? name.replace(/[^a-zA-Z ]/g, "").trim().split(/\s+/).slice(0, 2).map((w) => w[0] || "").join("").toUpperCase() : "");
-  if (err || !url) {
+  if (idx >= urls.length) {
     return <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: size, height: size, borderRadius: 6, background: "rgba(44,32,19,.10)", flex: `0 0 ${size}px`, ...mono({ fontSize: Math.max(8, size * 0.32), fontWeight: 700, color: C.muted2 }), ...style }}>{ab}</span>;
   }
-  return <img src={url} alt={name || ""} referrerPolicy="no-referrer" onError={() => setErr(true)} style={{ width: size, height: size, objectFit: "contain", flex: `0 0 ${size}px`, ...style }} />;
+  return <img src={urls[idx]} alt={name || ""} referrerPolicy="no-referrer" onError={() => setIdx(idx + 1)} style={{ width: size, height: size, objectFit: "contain", flex: `0 0 ${size}px`, ...style }} />;
 }
 
 // Donut / ring chart. segments: [{ value, color, label }].

@@ -32,12 +32,17 @@ export async function loadItemIndex() {
 
 export function itemId(name) { return _itemIds ? _itemIds[itemKey(name)] : undefined; }
 
+// Returns a fallback CHAIN (the <Icon> component tries each in turn): the
+// RuneLite id-keyed icon when the name resolves, then the Wiki's file for the
+// exact item name — so a name missing from the id index still gets its image.
 export function itemIconUrl(name) {
   if (!name) return "";
+  const urls = [];
   const id = itemId(name);
-  if (id != null) return "https://static.runelite.net/cache/item/icon/" + id + ".png";
+  if (id != null) urls.push("https://static.runelite.net/cache/item/icon/" + id + ".png");
   const f = itemKey(name).replace(/ /g, "_") + ".png";
-  return "https://oldschool.runescape.wiki/w/Special:FilePath/" + encodeURIComponent(f);
+  urls.push("https://oldschool.runescape.wiki/w/Special:FilePath/" + encodeURIComponent(f));
+  return urls;
 }
 
 export function skillIconUrl(name) {

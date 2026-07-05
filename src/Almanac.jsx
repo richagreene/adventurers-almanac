@@ -336,13 +336,14 @@ export default class Almanac extends React.Component {
     this.objectives = this._load("almanac.objectives.v1", null) || this.defaultObjectives();
     this.avoidDismiss = this._load("almanac.avoiddismiss.v1", null) || {};
     this.loadout = this._load("almanac.loadout.v1", null) || { melee: {}, ranged: {}, magic: {} };
+    this.gearOwned = this._load("almanac.gearowned.v1", null) || {};
   }
 
   // ---------- undo / redo ----------
   // Every persisted key. _save snapshots the *pre-mutation* state of these keys
   // (localStorage lags the in-memory mutation by one write), grouped per
   // synchronous action, so any add/edit/delete/config change is one undo step.
-  _undoKeys = ["almanac.logs.v1", "almanac.goals.v1", "almanac.objectives.v1", "almanac.flipcfg.v1", "almanac.alchcfg.v1", "almanac.farmcfg.v1", "almanac.gcfg.v1", "almanac.blocks.v1", "almanac.bossov.v1", "almanac.questdone.v1", "almanac.stats.v1", "almanac.avoiddismiss.v1", "almanac.loadout.v1"];
+  _undoKeys = ["almanac.logs.v1", "almanac.goals.v1", "almanac.objectives.v1", "almanac.flipcfg.v1", "almanac.alchcfg.v1", "almanac.farmcfg.v1", "almanac.gcfg.v1", "almanac.blocks.v1", "almanac.bossov.v1", "almanac.questdone.v1", "almanac.stats.v1", "almanac.avoiddismiss.v1", "almanac.loadout.v1", "almanac.gearowned.v1"];
   _snap() { const s = {}; this._undoKeys.forEach((k) => { s[k] = localStorage.getItem(k); }); return s; }
   _restore(snap) {
     this._undoSuspended = true;
@@ -2517,7 +2518,14 @@ export default class Almanac extends React.Component {
     const styleColor = { Melee: C.red, Ranged: C.green, Magic: C.purple };
     const prayColor = (p) => (/range/i.test(p) ? C.green : /magic/i.test(p) ? C.purple : /melee/i.test(p) ? C.red : /flick/i.test(p) ? "#9a7530" : C.muted);
     const gearStyle = styles.all.includes(this.state.bossGearStyle) ? this.state.bossGearStyle : styles.primary;
-    const recs = this.bestGearForStyle(gearStyle).map((it) => { const price = this.gearPrices[it.n] != null ? this.gearPrices[it.n] : it.gp; return { slot: it.slot, n: it.n, price: price > 0 ? this.short(price) : "obtain" }; });
+    // Owned-first setup: recommend what the player HAS; slots with nothing
+    // owned show the best usable piece as the buy suggestion.
+    const setup = this.bestOwnedGearForStyle(gearStyle).map((s) => {
+      const it = s.owned || s.best;
+      const price = this.gearPrices[it.n] != null ? this.gearPrices[it.n] : it.gp;
+      return { slot: s.slot, n: it.n, owned: !!s.owned, price: price > 0 ? this.short(price) : "obtain", upgrade: s.owned && s.owned.n !== s.best.n ? s.best.n : null };
+    });
+    const ownedN = setup.filter((s) => s.owned).length;
     // drop-table rows (same math as the Focus tab)
     const drops = this.bossDrops[name] || [];
     const dropCount = {}; this.logs.drop.forEach((dd) => { if (dd.boss === name) dropCount[dd.drop] = (dropCount[dd.drop] || 0) + 1; });
@@ -2526,6 +2534,7 @@ export default class Almanac extends React.Component {
     const dropRows = drops.slice().sort((a2, b2) => (catRank[a2.cat] ?? 3) - (catRank[b2.cat] ?? 3) || a2.rate - b2.rate).slice(0, 12).map((dr) => { const got = dropCount[dr.n] || 0; const v = this.luckVerdict(kc, dr.rate, got); return { name: dr.n, cat: dr.cat || "common", rate: dr.rate <= 1 ? "common" : "1/" + this.fmt(dr.rate), got, verdict: v.t, vc: v.c, value: dr.v > 0 ? this.short(dr.v) : "—" }; });
     const imgName = name.replace(/\s*\(.*\)$/, "");
     const wikiBase = "https://oldschool.runescape.wiki/w/";
+    const bossImgs = [g.img, imgName + ".png"].filter(Boolean).map((f) => wikiBase.replace("/w/", "/w/Special:FilePath/") + encodeURIComponent(f));
     const stars = "★★★★★".slice(0, g.difficulty) + "☆☆☆☆☆".slice(0, 5 - g.difficulty);
     return (
       <div>
@@ -2535,7 +2544,7 @@ export default class Almanac extends React.Component {
           <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 18, padding: "18px 22px", flexWrap: "wrap" }}>
             <a href="#" onClick={(ev) => { ev.preventDefault(); this.setState({ bossPage: "" }); }} style={{ textDecoration: "none", padding: "7px 13px", borderRadius: 6, border: "1px solid rgba(213,122,90,.4)", ...mono({ fontSize: 10, letterSpacing: ".08em", color: "#d5a08a" }) }}>← COMPENDIUM</a>
             <div style={{ width: 74, height: 74, flex: "0 0 74px", borderRadius: 10, background: "rgba(0,0,0,.35)", border: "1px solid rgba(213,122,90,.35)", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-              <Icon url={wikiBase.replace("/w/", "/w/Special:FilePath/") + encodeURIComponent(imgName + ".png")} name={imgName} size={66} style={{ color: "#e8b49a" }} />
+              <Icon url={bossImgs} name={imgName} size={66} style={{ color: "#e8b49a" }} />
             </div>
             <div style={{ flex: 1, minWidth: 260 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
@@ -2603,20 +2612,20 @@ export default class Almanac extends React.Component {
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <Card>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <Kicker color={C.goldDeep}>Your best {gearStyle.toLowerCase()} setup</Kicker>
+                <Kicker color={C.goldDeep}>Your {gearStyle.toLowerCase()} setup · own {ownedN}/{setup.length} slots</Kicker>
                 <Seg options={styles.all.map((s) => ({ key: s, label: s.toUpperCase() }))} active={gearStyle} onPick={(v) => this.setState({ bossGearStyle: v })} size={8.5} />
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
-                {recs.map((r, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, padding: "4px 8px", borderRadius: 5, background: C.cardLight }}>
+                {setup.map((r, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, padding: "4px 8px", borderRadius: 5, background: r.owned ? "rgba(92,110,53,.10)" : C.cardLight, border: r.owned ? "1px solid rgba(92,110,53,.28)" : "1px solid transparent", opacity: r.owned ? 1 : 0.85 }}>
                     <Icon url={itemIconUrl(r.n)} name={r.n} size={22} />
-                    <span style={{ flex: 1, ...serif({ fontSize: 12.5, fontStyle: "normal", color: C.ink }) }}>{r.n}</span>
+                    <span style={{ flex: 1, minWidth: 0, ...serif({ fontSize: 12.5, fontStyle: "normal", color: C.ink }) }}>{r.n}{r.upgrade && <span title={"Best-in-slot you could wear: " + r.upgrade} style={mono({ fontSize: 9, color: "#9a7530" })}> · upgrade: {r.upgrade}</span>}</span>
                     <span style={mono({ fontSize: 9.5, color: C.muted })}>{r.slot}</span>
-                    <span style={mono({ fontSize: 10.5, color: C.green })}>{r.price}</span>
+                    {r.owned ? <span style={mono({ fontSize: 9.5, color: "#3c5322" })}>◆ owned</span> : <span title="You haven't marked this owned — price to buy" style={mono({ fontSize: 10, color: C.red })}>buy {r.price}</span>}
                   </div>
                 ))}
               </div>
-              <div style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Highest tier your current stats allow, priced live. Wiki-recommended style: <strong style={{ color: styleColor[styles.primary] }}>{styles.primary}</strong>.</div>
+              <div style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Built from the gear you've marked <strong style={{ color: "#3c5322" }}>◆ owned</strong> on the Gear Path — unowned slots show the best piece your stats allow, priced live. Wiki style: <strong style={{ color: styleColor[styles.primary] }}>{styles.primary}</strong>. <a href="#" onClick={(e) => { e.preventDefault(); this.go("gear"); }} style={{ color: "#9a7530" }}>Track your gear →</a></div>
             </Card>
             <Card>
               <Kicker color={C.goldDeep}>Inventory · what to bring</Kicker>
@@ -3013,6 +3022,24 @@ export default class Almanac extends React.Component {
   closeGearDetail = () => this.setState({ gearDetail: null });
   equipItem = (slot, name) => { const st = this.state.gearStyle; if (!this.loadout[st]) this.loadout[st] = {}; this.loadout[st][slot] = name; this._save("almanac.loadout.v1", this.loadout); ensureItemStats(name, () => this.bump()); this.setState({ gearItem: name, gearSlot: slot, gearStatMode: "item" }); };
   resetLoadout = () => { const st = this.state.gearStyle; this.loadout[st] = {}; this._save("almanac.loadout.v1", this.loadout); this.bump(); };
+  // Ownership ledger: which gear-path pieces the player actually HAS (banked or
+  // equipped) — independent of what their stats unlock. Feeds the boss guides.
+  toggleOwned = (name) => { if (this.gearOwned[name]) delete this.gearOwned[name]; else this.gearOwned[name] = true; this._save("almanac.gearowned.v1", this.gearOwned); this.bump(); };
+  // Best piece per slot for a style that the player OWNS (and can wear); when a
+  // slot has nothing owned, carries the best usable piece as the buy suggestion.
+  bestOwnedGearForStyle(styleName) {
+    const key = { Melee: "melee", Ranged: "ranged", Magic: "magic" }[styleName] || "melee";
+    const lvlFor = { att: "Attack", str: "Strength", def: "Defence", range: "Ranged", mage: "Magic", pray: "Prayer", hp: "Hitpoints" };
+    const sm = this.skillMap;
+    return (GEAR_DATA[key] || []).map((s) => {
+      const usable = (s.items || []).filter((it) => { const sk = lvlFor[it.gs]; const lv = sk ? (sm[sk] || { l: 1 }).l : 99; return (it.lvl || 1) <= lv; });
+      const byTier = usable.slice().sort((a, b) => (b.lvl || 0) - (a.lvl || 0));
+      const owned = byTier.find((it) => this.gearOwned[it.n]);
+      const best = byTier[0];
+      if (!best) return null;
+      return { slot: s.slot, owned: owned || null, best };
+    }).filter(Boolean);
+  }
   _normEq(name) {
     const st = getItemStats(name); if (st === undefined) { ensureItemStats(name, () => this.bump()); return undefined; } if (!st || !st.eq) return null;
     const e = st.eq;
@@ -3091,7 +3118,7 @@ export default class Almanac extends React.Component {
           <div style={{ flex: "1 1 440px", minWidth: 320 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
               <span style={cinzel({ fontWeight: 700, fontSize: 21, color: C.ink })}>{sel}</span>
-              <span style={mono({ fontSize: 9, letterSpacing: ".16em", color: C.muted, textTransform: "uppercase" })}>{selData.items.length} tiers</span>
+              <span style={mono({ fontSize: 9, letterSpacing: ".16em", color: C.muted, textTransform: "uppercase" })}>{selData.items.length} tiers · you own {selData.items.filter((x) => this.gearOwned[x.n]).length}</span>
               <span style={{ marginLeft: "auto", ...serif({ fontSize: 13, color: C.muted2 }) }}>equipped: <strong style={{ color: C.green }}>{selData.equippedName || "—"}</strong></span>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(214px,1fr))", gap: 12 }}>
@@ -3105,15 +3132,24 @@ export default class Almanac extends React.Component {
                     </div>
                     <span style={{ width: 18, height: 18, flex: "0 0 18px", borderRadius: "50%", background: "#2a1a10", display: "flex", alignItems: "center", justifyContent: "center", ...mono({ fontSize: 8.5, color: "#e7cf8c" }) }}>{it.order}</span>
                   </div>
-                  {it.current && <div style={{ marginBottom: 6 }}><span style={{ ...mono({ fontSize: 8, letterSpacing: ".1em", color: "#3a2410" }), background: "linear-gradient(180deg,#e3c878,#c9a24a)", borderRadius: 9, padding: "2px 8px" }}>★ BEST IN SLOT</span></div>}
-                  {it.equipped && <div style={{ marginBottom: 6 }}><span style={{ ...mono({ fontSize: 8, letterSpacing: ".1em", color: "#e7cf8c" }), background: "#2a1a10", borderRadius: 9, padding: "2px 8px" }}>✓ EQUIPPED</span></div>}
+                  {(it.current || it.equipped || this.gearOwned[it.n]) && (
+                    <div style={{ marginBottom: 6, display: "flex", gap: 5, flexWrap: "wrap" }}>
+                      {it.current && <span style={{ ...mono({ fontSize: 8, letterSpacing: ".1em", color: "#3a2410" }), background: "linear-gradient(180deg,#e3c878,#c9a24a)", borderRadius: 9, padding: "2px 8px" }}>★ BEST IN SLOT</span>}
+                      {it.equipped && <span style={{ ...mono({ fontSize: 8, letterSpacing: ".1em", color: "#e7cf8c" }), background: "#2a1a10", borderRadius: 9, padding: "2px 8px" }}>✓ EQUIPPED</span>}
+                      {this.gearOwned[it.n] && <span style={{ ...mono({ fontSize: 8, letterSpacing: ".1em", color: "#3c5322" }), background: "rgba(92,110,53,.2)", border: "1px solid rgba(92,110,53,.4)", borderRadius: 9, padding: "2px 8px" }}>◆ OWNED</span>}
+                    </div>
+                  )}
                   {mode === "iron" ? (
                     <div>{it.get && <div style={serif({ fontSize: 11.5, color: C.green, lineHeight: 1.25 })}>{it.get}</div>}{it.price > 0 && <div style={mono({ fontSize: 9, color: C.muted, marginTop: 4 })}>GE ≈ {this.short(it.price)} gp</div>}</div>
                   ) : (
                     it.price > 0 ? <div style={cinzel({ fontWeight: 700, fontSize: 15, color: C.green })}>{this.short(it.price)} <span style={mono({ fontSize: 9.5, color: C.muted })}>gp</span></div> : <div style={serif({ fontSize: 11.5, color: C.muted2, lineHeight: 1.25 })}>{it.get}</div>
                   )}
                   {it.bestFor && <div style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid rgba(44,32,19,.12)", ...serif({ fontSize: 11, color: C.muted2, lineHeight: 1.25 }) }}>{it.bestFor}</div>}
-                  <span onClick={(e) => { e.stopPropagation(); this.openGearDetail(sel, it.n); }} style={{ display: "block", marginTop: 9, paddingTop: 8, borderTop: "1px solid rgba(44,32,19,.12)", textAlign: "center", cursor: "pointer", ...mono({ fontSize: 8.5, letterSpacing: ".1em", color: C.muted, textTransform: "uppercase" }) }}>Full breakdown ▸</span>
+                  <div style={{ display: "flex", marginTop: 9, paddingTop: 8, borderTop: "1px solid rgba(44,32,19,.12)" }}>
+                    <span onClick={(e) => { e.stopPropagation(); this.toggleOwned(it.n); }} title="Track that you actually have this piece — boss guides recommend from your owned gear" style={{ flex: 1, textAlign: "center", cursor: "pointer", ...mono({ fontSize: 8.5, letterSpacing: ".08em", color: this.gearOwned[it.n] ? "#3c5322" : C.muted, textTransform: "uppercase" }) }}>{this.gearOwned[it.n] ? "◆ owned" : "◇ mark owned"}</span>
+                    <span style={{ width: 1, background: "rgba(44,32,19,.12)" }} />
+                    <span onClick={(e) => { e.stopPropagation(); this.openGearDetail(sel, it.n); }} style={{ flex: 1, textAlign: "center", cursor: "pointer", ...mono({ fontSize: 8.5, letterSpacing: ".08em", color: C.muted, textTransform: "uppercase" }) }}>Breakdown ▸</span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -3207,7 +3243,10 @@ export default class Almanac extends React.Component {
                 {deltas.length > 0 && <div style={{ marginBottom: 14, paddingTop: 10, borderTop: "1px solid rgba(44,32,19,.14)" }}>{sub("Trade-offs vs best in slot · " + cmpName)}<div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>{deltas.map((dd, i) => <span key={i} style={{ ...mono({ fontSize: 9.5, color: dd.c }), background: "rgba(44,32,19,.05)", border: "1px solid rgba(44,32,19,.14)", borderRadius: 5, padding: "3px 9px" }}>{dd.k} {dd.v}</span>)}</div></div>}
                 {it.bestFor && <div style={serif({ fontSize: 13, color: C.muted2, lineHeight: 1.4, marginBottom: 8 })}>{it.bestFor}</div>}
                 {it.get && <div style={serif({ fontSize: 13, color: C.muted2, lineHeight: 1.4, marginBottom: 14 })}><strong style={{ color: C.green }}>Obtain:</strong> {it.get}</div>}
-                {!it.equipped ? <a href="#" onClick={(e) => { e.preventDefault(); this.equipItem(sd.slot, name); this.closeGearDetail(); }} style={{ display: "block", textAlign: "center", textDecoration: "none", padding: 9, borderRadius: 6, background: "linear-gradient(180deg,#caa24e,#9a7530)", border: "1px solid " + C.gold, ...mono({ fontSize: 10, letterSpacing: ".1em", color: C.ink, textTransform: "uppercase" }) }}>Equip to armour stand</a> : <div style={{ textAlign: "center", ...mono({ fontSize: 9, letterSpacing: ".1em", color: C.green, textTransform: "uppercase" }) }}>✓ Equipped on your stand</div>}
+                <div style={{ display: "flex", gap: 8 }}>
+                  {!it.equipped ? <a href="#" onClick={(e) => { e.preventDefault(); this.equipItem(sd.slot, name); this.closeGearDetail(); }} style={{ flex: 1, textAlign: "center", textDecoration: "none", padding: 9, borderRadius: 6, background: "linear-gradient(180deg,#caa24e,#9a7530)", border: "1px solid " + C.gold, ...mono({ fontSize: 10, letterSpacing: ".1em", color: C.ink, textTransform: "uppercase" }) }}>Equip to armour stand</a> : <div style={{ flex: 1, textAlign: "center", padding: 9, ...mono({ fontSize: 9, letterSpacing: ".1em", color: C.green, textTransform: "uppercase" }) }}>✓ Equipped on your stand</div>}
+                  <a href="#" onClick={(e) => { e.preventDefault(); this.toggleOwned(name); }} style={{ flex: 1, textAlign: "center", textDecoration: "none", padding: 9, borderRadius: 6, background: this.gearOwned[name] ? "rgba(92,110,53,.16)" : "transparent", border: "1px solid rgba(92,110,53,.45)", ...mono({ fontSize: 10, letterSpacing: ".1em", color: "#3c5322", textTransform: "uppercase" }) }}>{this.gearOwned[name] ? "◆ Owned — untrack" : "◇ Mark owned"}</a>
+                </div>
               </div>
             ) : obj === null ? <div style={serif({ fontSize: 13, color: C.muted, textAlign: "center", padding: "10px 0" })}>Equipment stats unavailable for this item{it.get ? ` — obtain: ${it.get}` : ""}.</div>
               : <div style={serif({ fontSize: 13, color: C.muted, textAlign: "center", padding: "10px 0" })}>Loading equipment stats…</div>}
