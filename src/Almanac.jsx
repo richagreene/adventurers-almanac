@@ -729,7 +729,9 @@ export default class Almanac extends React.Component {
     if (netOv > 0) net = netOv;
     else if (filled && def) net = Math.round(herbs * geSellNet(def.herb) - y.P * (def.seed + y.compostCost)) * runs;
     else net = def ? this.farmNet(def) * runs : 0;
-    const entry = { date: this.today(), tier, runs, net };
+    // Stamp the Farming level the run happened at — straight from the live
+    // hiscores stats of the day, never asked for.
+    const entry = { date: this.today(), tier, runs, net, lvl: (this.skillMap.Farming || { l: 1 }).l };
     if (filled) { entry.herbs = herbs; entry.patchN = y.P; entry.perPatch = perPatch; }
     this.logs.herb.unshift(entry); this.saveLogs(); this.setState({ openForm: null });
   };
@@ -3628,7 +3630,7 @@ export default class Almanac extends React.Component {
             </div>
             <div className="sheetwrap" style={{ marginTop: 8 }}>
               <table className="sheet">
-                <thead><tr>{["Date", "Tier", "Runs", "Herbs", "Patch breakdown", "Net / run", "Net", ""].map((h, i) => <th key={i} className={i === 2 || i === 3 || i === 5 || i === 6 ? "num" : ""}>{h}</th>)}</tr></thead>
+                <thead><tr>{["Date", "Tier", "Farm lvl", "Runs", "Herbs", "Patch breakdown", "Net / run", "Net", ""].map((h, i) => <th key={i} className={i >= 2 && i <= 4 || i === 6 || i === 7 ? "num" : ""}>{h}</th>)}</tr></thead>
                 <tbody>{this.logs.herb.map((h, i) => {
                   const runs = h.runs || 1;
                   const detail = h.perPatch ? Object.entries(h.perPatch).map(([id, n]) => { const pt = this.herbPatches.find((x) => x.id === id); return { name: pt ? pt.name : id, n: n || 0 }; }) : null;
@@ -3636,6 +3638,7 @@ export default class Almanac extends React.Component {
                     <tr key={(h.date || "") + "-" + i}>
                       <td style={mono({ fontSize: 12 })}>{this.dShort(h.date)}</td>
                       <td style={cinzel({ fontWeight: 600, fontSize: 13 })}>{h.tier}</td>
+                      <td className="num" title="Farming level at the time of the run (from that day's hiscores)" style={mono({ fontSize: 12, color: h.lvl ? C.muted2 : C.muted })}>{h.lvl || "—"}</td>
                       <td className="num" style={mono({ fontSize: 12 })}>{runs}</td>
                       <td className="num" style={mono({ fontSize: 12, color: h.herbs != null ? C.ink : C.muted })}>{h.herbs != null ? h.herbs + (h.patchN ? " / " + h.patchN + "p" : "") : "—"}</td>
                       <td>{detail ? (
@@ -3649,7 +3652,7 @@ export default class Almanac extends React.Component {
                     </tr>
                   );
                 })}
-                {this.logs.herb.length === 0 && <tr><td colSpan={8} style={serif({ fontStyle: "normal", color: C.muted, padding: 14 })}>No runs logged yet — hit “+ Log herb run”.</td></tr>}</tbody>
+                {this.logs.herb.length === 0 && <tr><td colSpan={9} style={serif({ fontStyle: "normal", color: C.muted, padding: 14 })}>No runs logged yet — hit “+ Log herb run”.</td></tr>}</tbody>
               </table>
             </div>
           </Card>
