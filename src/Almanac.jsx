@@ -40,6 +40,7 @@ const NAV = [
   { label: "Treasury", items: [["networth", "Net Worth"], ["flipping", "GE Flipping"], ["alchemy", "High Alchemy"]] },
   { label: "Combat", items: [["bossing", "Bossing"], ["slayer", "Slayer"], ["gear", "Gear Path"]] },
   { label: "Skilling", items: [["farming", "Farming"], ["quests", "Quests"], ["diary", "Diary & CA"]] },
+  { label: "Chronicle", items: [["journal", "Journal"]] },
 ];
 const TITLES = {
   dashboard: ["The Adventurer's Almanac", "Account Dashboard"], skills: ["Character Progression", "Skills"],
@@ -48,6 +49,7 @@ const TITLES = {
   bossing: ["Command Centre", "Bossing Compendium"], slayer: ["The Slayer", "Task Planner"],
   gear: ["The Armoury", "Gear Progression"], farming: ["The Allotments", "Farming Engine"],
   quests: ["The Adventure Log", "Quest Sequencer"], diary: ["Regional Renown", "Diary & Combat Achievements"],
+  journal: ["The Chronicle", "Adventurer's Journal"],
 };
 
 export default class Almanac extends React.Component {
@@ -58,6 +60,7 @@ export default class Almanac extends React.Component {
     questMethod: "optimal", qsortCol: "", qsortDir: 1, qFilterOpen: "", qfSeries: [], qfType: [], qfStatus: [], qName: "", qGate: "",
     tSort: {}, tFilt: {}, tOpen: "", flipPrefill: null, objType: "bank", objBoss: "", flipShowWatch: false, flipCfgVer: 0, _v: 0,
     counselLens: "balanced", goalId: "none", pfSort: "lev", farmView: "planner", bossPage: "",
+    jSel: null, jEdit: null, jSeal: "crimson",
   };
 
   // ---- static reference tables (ported from the workbook / design) ----
@@ -342,13 +345,14 @@ export default class Almanac extends React.Component {
     this.avoidDismiss = this._load("almanac.avoiddismiss.v1", null) || {};
     this.loadout = this._load("almanac.loadout.v1", null) || { melee: {}, ranged: {}, magic: {} };
     this.gearOwned = this._load("almanac.gearowned.v1", null) || {};
+    this.journal = this._load("almanac.journal.v1", null) || [];
   }
 
   // ---------- undo / redo ----------
   // Every persisted key. _save snapshots the *pre-mutation* state of these keys
   // (localStorage lags the in-memory mutation by one write), grouped per
   // synchronous action, so any add/edit/delete/config change is one undo step.
-  _undoKeys = ["almanac.logs.v1", "almanac.goals.v1", "almanac.objectives.v1", "almanac.flipcfg.v1", "almanac.alchcfg.v1", "almanac.farmcfg.v1", "almanac.gcfg.v1", "almanac.blocks.v1", "almanac.bossov.v1", "almanac.questdone.v1", "almanac.stats.v1", "almanac.avoiddismiss.v1", "almanac.loadout.v1", "almanac.gearowned.v1", "almanac.diarydone.v1", "almanac.cadone.v1"];
+  _undoKeys = ["almanac.logs.v1", "almanac.goals.v1", "almanac.objectives.v1", "almanac.flipcfg.v1", "almanac.alchcfg.v1", "almanac.farmcfg.v1", "almanac.gcfg.v1", "almanac.blocks.v1", "almanac.bossov.v1", "almanac.questdone.v1", "almanac.stats.v1", "almanac.avoiddismiss.v1", "almanac.loadout.v1", "almanac.gearowned.v1", "almanac.diarydone.v1", "almanac.cadone.v1", "almanac.journal.v1"];
   _snap() { const s = {}; this._undoKeys.forEach((k) => { s[k] = localStorage.getItem(k); }); return s; }
   _restore(snap) {
     this._undoSuspended = true;
@@ -951,6 +955,7 @@ export default class Almanac extends React.Component {
             {sec === "farming" && this.renderFarming()}
             {sec === "quests" && this.renderQuests()}
             {sec === "diary" && this.renderDiary()}
+            {sec === "journal" && this.renderJournal()}
           </div>
         </main>
       </div>
@@ -3718,6 +3723,142 @@ export default class Almanac extends React.Component {
           </Card>
           </div>
         )}
+      </div>
+    );
+  }
+
+  // ===================== JOURNAL (The Chronicle) =====================
+  // Wax seal palette — each entry is pressed closed with one.
+  jrnSeals = {
+    crimson: { c1: "#a03a2a", c2: "#6d2018", sig: "⚔" },
+    forest: { c1: "#5c7a35", c2: "#3a4f1e", sig: "🌿" },
+    gold: { c1: "#b98f3e", c2: "#7c5a22", sig: "✦" },
+    navy: { c1: "#3c5578", c2: "#243650", sig: "🌊" },
+    plum: { c1: "#6a4a6e", c2: "#452e48", sig: "🌙" },
+  };
+  jrnDate(iso) { try { return new Date(iso + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }); } catch (e) { return iso; } }
+  saveJournal = () => {
+    const title = this.val("jrn_title").trim() || "Untitled page";
+    const body = this.val("jrn_body");
+    if (!body.trim()) return;
+    const d = this.derive();
+    const editing = this.state.jEdit && this.state.jEdit !== "new" ? this.journal.find((e) => e.id === this.state.jEdit) : null;
+    if (editing) {
+      editing.title = title; editing.body = body; editing.seal = this.state.jSeal; editing.edited = this.today();
+    } else {
+      // The marginalia: quietly scribe who the character WAS on this day.
+      this.journal.unshift({
+        id: Date.now(), date: this.today(), title, body, seal: this.state.jSeal,
+        stamp: { combat: this.account.combat, total: d.totalLevel, nw: d.netWorth, qp: this.questPoints },
+      });
+    }
+    this._save("almanac.journal.v1", this.journal);
+    this.setState({ jEdit: null, jSel: editing ? editing.id : this.journal[0].id });
+  };
+  deleteJournal = (id) => {
+    if (typeof window !== "undefined" && !window.confirm("Tear this page from the chronicle? (Undo can restore it.)")) return;
+    this.journal = this.journal.filter((e) => e.id !== id);
+    this._save("almanac.journal.v1", this.journal);
+    this.setState({ jSel: this.journal.length ? this.journal[0].id : null, jEdit: null });
+  };
+  renderJournal() {
+    const TH = themeFor("journal");
+    const entries = this.journal;
+    const sel = entries.find((e) => e.id === this.state.jSel) || entries[0] || null;
+    const editing = this.state.jEdit; // "new" | id | null
+    const editEntry = editing && editing !== "new" ? entries.find((e) => e.id === editing) : null;
+    const sealOf = (k) => this.jrnSeals[k] || this.jrnSeals.crimson;
+    const Wax = ({ k, size = 40, active, onClick, title, className }) => {
+      const s = sealOf(k);
+      return <span className={"jrn-seal " + (className || "")} onClick={onClick} title={title} style={{ width: size, height: size, fontSize: size * 0.42, background: `radial-gradient(circle at 34% 30%, ${s.c1}, ${s.c2} 72%)`, outline: active ? "2px solid rgba(227,200,120,.7)" : "none", outlineOffset: 2 }}>{s.sig}</span>;
+    };
+    return (
+      <div>
+        <SectionTitle kicker="The Chronicle · in your own hand" title="Adventurer's Journal" accent={TH.accent}
+          right={<Btn tone="gold" onClick={() => this.setState({ jEdit: "new", jSeal: "crimson" })}>🖋 Write a new page</Btn>} />
+        <div className="jrn-desk">
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 0.85fr) minmax(340px, 1.35fr)", gap: 0, alignItems: "stretch" }}>
+            {/* left page — Table of Days */}
+            <div className="jrn-page jrn-left" style={{ padding: "26px 30px 24px 26px", minHeight: 560 }}>
+              <div className="jrn-crease-l" />
+              <div className="jrn-hand" style={{ fontSize: 27, fontWeight: 600, color: "#4a2f16", transform: "rotate(-1.2deg)" }}>Table of Days</div>
+              <div style={{ height: 2, background: "linear-gradient(90deg, rgba(110,70,30,.4), transparent)", margin: "4px 0 14px", width: "70%" }} />
+              {entries.length === 0 && <div style={serif({ fontSize: 14, color: "#7a5a36", lineHeight: 1.6 })}>No pages yet. Every great account deserves a chronicle — the day you finally got the drop, the death that taught you something, the plan for the month ahead.</div>}
+              <div style={{ display: "flex", flexDirection: "column", gap: 3, maxHeight: 470, overflowY: "auto", paddingRight: 6 }}>
+                {entries.map((e, i) => {
+                  const active = sel && sel.id === e.id && !editing;
+                  return (
+                    <div key={e.id} className="jrn-entry" onClick={() => this.setState({ jSel: e.id, jEdit: null })}
+                      style={{ position: "relative", display: "flex", alignItems: "center", gap: 10, padding: "7px 9px", borderRadius: 4, cursor: "pointer", transform: `rotate(${i % 2 ? 0.25 : -0.25}deg)`, background: active ? "rgba(122,74,42,.13)" : "transparent", boxShadow: active ? "inset 0 0 0 1px rgba(122,74,42,.25)" : "none" }}>
+                      {active && <span className="jrn-ribbon" style={{ right: 6 }} />}
+                      <Wax k={e.seal} size={22} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={serif({ fontSize: 14.5, fontWeight: 600, color: "#3a2818", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" })}>{e.title}</div>
+                        <div className="jrn-hand" style={{ fontSize: 15, color: "#8a6038", lineHeight: 1 }}>{this.jrnDate(e.date)}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {entries.length > 0 && <div className="jrn-hand" style={{ position: "absolute", bottom: 14, left: 26, fontSize: 16, color: "#9a7248" }}>{entries.length} page{entries.length > 1 ? "s" : ""} in this chronicle</div>}
+            </div>
+            {/* right page — the open page */}
+            <div className="jrn-page jrn-right jrn-dogear" style={{ padding: "26px 34px 30px 34px", minHeight: 560 }}>
+              <div className="jrn-crease-r" />
+              {editing ? (
+                <div style={{ position: "relative" }}>
+                  <div className="jrn-hand" style={{ fontSize: 21, color: "#8a6038", marginBottom: 10, transform: "rotate(-0.6deg)" }}>{editEntry ? "amending the page of " + this.jrnDate(editEntry.date) : this.jrnDate(this.today()) + " — a fresh page"}</div>
+                  <input className="jrn-title" id="jrn_title" placeholder="Name this day…" defaultValue={editEntry ? editEntry.title : ""} />
+                  <div className="jrn-lines" style={{ marginTop: 14 }}>
+                    <textarea className="jrn-ink" id="jrn_body" rows={13} placeholder="Dear ledger — today I…" defaultValue={editEntry ? editEntry.body : ""} />
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 16, flexWrap: "wrap" }}>
+                    <span className="jrn-hand" style={{ fontSize: 17, color: "#8a6038" }}>choose your seal —</span>
+                    {Object.keys(this.jrnSeals).map((k) => <Wax key={k} k={k} size={34} active={this.state.jSeal === k} onClick={() => this.setState({ jSeal: k })} title={k} />)}
+                    <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
+                      <a href="#" onClick={(e) => { e.preventDefault(); this.setState({ jEdit: null }); }} style={{ ...serif({ fontSize: 13, color: "#8a6038" }) }}>set down the quill</a>
+                      <span className="jrn-seal jrn-seal-btn" onClick={this.saveJournal} title="Press your seal to save this page" style={{ width: 58, height: 58, fontSize: 22, background: `radial-gradient(circle at 34% 30%, ${sealOf(this.state.jSeal).c1}, ${sealOf(this.state.jSeal).c2} 72%)`, color: "#f4e0c8" }}>{sealOf(this.state.jSeal).sig}</span>
+                    </span>
+                  </div>
+                  <div style={serif({ fontSize: 11.5, color: "#9a7248", marginTop: 10, fontStyle: "italic" })}>Pressing the seal saves the page{editEntry ? "" : " and scribes today's marginalia — your combat, total level and coin — beside it forever"}.</div>
+                </div>
+              ) : sel ? (
+                <div style={{ position: "relative", display: "flex", flexDirection: "column", minHeight: 500 }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+                    <div>
+                      <div className="jrn-hand" style={{ fontSize: 22, color: "#8a6038", lineHeight: 1, transform: "rotate(-0.6deg)" }}>{this.jrnDate(sel.date)}{sel.edited ? " · amended " + this.dShort(sel.edited) : ""}</div>
+                      <div style={cinzel({ fontWeight: 700, fontSize: 24, color: "#33220f", marginTop: 6 })}>{sel.title}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 10, flex: "0 0 auto", marginTop: 4 }}>
+                      <a href="#" title="Amend this page" onClick={(e) => { e.preventDefault(); this.setState({ jEdit: sel.id, jSeal: sel.seal || "crimson" }); }} style={{ textDecoration: "none", fontSize: 15 }}>✎</a>
+                      <a href="#" title="Tear out this page" onClick={(e) => { e.preventDefault(); this.deleteJournal(sel.id); }} style={{ textDecoration: "none", fontSize: 14, opacity: 0.65 }}>🔥</a>
+                    </div>
+                  </div>
+                  {sel.stamp && (
+                    <div style={{ margin: "8px 0 2px", ...mono({ fontSize: 9.5, letterSpacing: ".08em", color: "#a07848" }) }}>
+                      that day · combat {sel.stamp.combat} · {this.fmt(sel.stamp.total)} total · {this.short(sel.stamp.nw)} coin · {sel.stamp.qp} qp
+                    </div>
+                  )}
+                  <div style={{ height: 1, background: "linear-gradient(90deg, rgba(110,70,30,.35), transparent)", margin: "10px 0 4px" }} />
+                  <div className="jrn-lines" style={{ flex: 1, padding: "4px 0 12px", ...serif({ fontSize: 16.5, color: "#3a2818" }) }}>
+                    <div style={{ lineHeight: "28px", whiteSpace: "pre-wrap" }}>{sel.body}</div>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 8 }}>
+                    <span className="jrn-hand" style={{ fontSize: 18, color: "#8a6038" }}>— {(this.stats && this.stats.rsn) || "the adventurer"}</span>
+                    <Wax k={sel.seal} size={46} title="Sealed" />
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 480, gap: 12 }}>
+                  <span style={{ fontSize: 44, opacity: 0.5, filter: "sepia(1)" }}>🖋</span>
+                  <div className="jrn-hand" style={{ fontSize: 26, color: "#8a6038" }}>The first page awaits.</div>
+                  <Btn tone="gold" onClick={() => this.setState({ jEdit: "new" })}>Begin the chronicle</Btn>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        <div style={{ marginTop: 12, textAlign: "center", ...serif({ fontSize: 12, fontStyle: "normal", color: C.muted }) }}>Pages live in your browser with the rest of the ledger, count toward global undo, and each carries the marginalia of who you were that day.</div>
       </div>
     );
   }

@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500;600;700&family=Caveat:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
     <style>
@@ -53,6 +53,72 @@
       .sheetwrap { border: 1px solid rgba(44,32,19,.22); border-radius: 6px; overflow: auto; box-shadow: inset 0 0 0 1px rgba(255,250,235,.4); }
       /* Oracle's Counsel queue rows (hover affordance from the prototype). */
       .cq-row:hover { background: rgba(227,200,120,.07); border-color: rgba(227,200,120,.18) !important; }
+
+      /* ---- The Chronicle (journal): aged paper, leather, wax ---- */
+      .jrn-desk {
+        background:
+          radial-gradient(120% 90% at 20% 0%, rgba(90,58,30,.55), transparent 55%),
+          radial-gradient(100% 100% at 85% 100%, rgba(40,22,10,.65), transparent 60%),
+          linear-gradient(135deg, #4a2c16, #331d0d 55%, #241206);
+        border: 2px solid #5a3a1c; border-radius: 12px; padding: 26px 28px 30px;
+        box-shadow: inset 0 0 60px rgba(0,0,0,.45), 0 14px 40px rgba(20,10,4,.5);
+      }
+      .jrn-page {
+        position: relative;
+        background:
+          radial-gradient(140% 90% at 12% 6%, rgba(255,250,232,.9), transparent 60%),
+          radial-gradient(90% 70% at 90% 92%, rgba(178,146,94,.28), transparent 55%),
+          radial-gradient(45% 30% at 78% 18%, rgba(160,120,70,.14), transparent 70%),
+          radial-gradient(30% 22% at 22% 78%, rgba(150,110,60,.12), transparent 70%),
+          linear-gradient(168deg, #f4e9cd 0%, #ecdcb8 46%, #e2cfa4 100%);
+        box-shadow:
+          inset 0 0 34px rgba(120,84,40,.22),
+          inset 0 0 4px rgba(120,84,40,.18),
+          0 6px 18px rgba(24,12,4,.45);
+      }
+      .jrn-page::after { /* burnt, handled edges */
+        content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+        box-shadow: inset 0 0 0 1px rgba(122,74,42,.25), inset 0 0 14px rgba(100,64,28,.16);
+      }
+      .jrn-left { border-radius: 10px 2px 2px 10px; }
+      .jrn-right { border-radius: 2px 10px 10px 2px; }
+      .jrn-crease-l { position: absolute; top: 0; bottom: 0; right: 0; width: 26px; pointer-events: none;
+        background: linear-gradient(90deg, transparent, rgba(96,62,26,.28) 82%, rgba(60,36,14,.45)); }
+      .jrn-crease-r { position: absolute; top: 0; bottom: 0; left: 0; width: 26px; pointer-events: none;
+        background: linear-gradient(270deg, transparent, rgba(96,62,26,.28) 82%, rgba(60,36,14,.45)); }
+      .jrn-dogear::before { content: ""; position: absolute; top: 0; right: 0; width: 0; height: 0; pointer-events: none;
+        border-style: solid; border-width: 0 26px 26px 0; border-color: transparent #cbb389 transparent transparent;
+        filter: drop-shadow(-2px 2px 2px rgba(90,58,26,.35)); }
+      .jrn-lines {
+        background-image: repeating-linear-gradient(to bottom, transparent 0px, transparent 27px, rgba(110,74,36,.22) 27px, rgba(110,74,36,.22) 28px);
+        background-position: 0 6px;
+      }
+      textarea.jrn-ink {
+        width: 100%; border: none; outline: none; background: transparent; resize: vertical;
+        font-family: 'EB Garamond', Georgia, serif; font-size: 16.5px; line-height: 28px; color: #3a2818;
+        caret-color: #6a3a20; min-height: 336px; padding: 0;
+      }
+      input.jrn-title {
+        width: 100%; border: none; outline: none; background: transparent;
+        border-bottom: 1px solid rgba(110,74,36,.4);
+        font-family: 'Cinzel', serif; font-weight: 700; font-size: 21px; color: #33220f; padding: 2px 0 6px;
+      }
+      input.jrn-title::placeholder, textarea.jrn-ink::placeholder { color: rgba(110,80,46,.45); font-style: italic; }
+      .jrn-seal {
+        position: relative; display: inline-flex; align-items: center; justify-content: center;
+        border-radius: 50%; cursor: pointer; user-select: none;
+        box-shadow: inset 0 2px 3px rgba(255,255,255,.28), inset 0 -3px 5px rgba(0,0,0,.35), 0 3px 7px rgba(30,12,6,.45);
+      }
+      .jrn-seal::before { content: ""; position: absolute; inset: 14%; border-radius: 50%;
+        box-shadow: inset 0 1px 2px rgba(0,0,0,.3), inset 0 -1px 1px rgba(255,255,255,.15); }
+      .jrn-seal-btn { transition: transform .08s ease, box-shadow .08s ease; }
+      .jrn-seal-btn:active { transform: translateY(2px) scale(.97); box-shadow: inset 0 2px 6px rgba(0,0,0,.5), 0 1px 2px rgba(30,12,6,.4); }
+      .jrn-entry { transition: transform .12s ease, box-shadow .12s ease; }
+      .jrn-entry:hover { transform: translateX(3px); }
+      .jrn-ribbon { position: absolute; top: -6px; width: 16px; height: 52px; pointer-events: none;
+        background: linear-gradient(180deg, #8a2f23, #6d2018); box-shadow: 0 2px 5px rgba(30,10,6,.4);
+        clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 86%, 0 100%); }
+      .jrn-hand { font-family: 'Caveat', 'EB Garamond', cursive; }
     </style>
   </head>
   <body>

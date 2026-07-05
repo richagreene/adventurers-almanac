@@ -42,6 +42,7 @@ export const THEME = {
   farming:   { accent: "#5c6e35", lite: "#9fbf6a", g1: "#1f2c16", g2: "#36431f", icon: "🌱" },
   quests:    { accent: "#5a4a8a", lite: "#9a8ad0", g1: "#1e1a36", g2: "#332c56", icon: "📜" },
   diary:     { accent: "#8a6a38", lite: "#d8b878", g1: "#2e2212", g2: "#4a3820", icon: "🏅" },
+  journal:   { accent: "#7a4a2a", lite: "#c89a6a", g1: "#2c180a", g2: "#4a2c16", icon: "🖋" },
 };
 export const themeFor = (sec) => THEME[sec] || THEME.dashboard;
 
