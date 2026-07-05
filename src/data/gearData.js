@@ -208,7 +208,7 @@ export const GEAR_DATA = {
   { slot:'Cape', items:[
    { n:'God cape', lvl:1, gs:'none', req:'Mage Arena I', gp:0, bestFor:'Cheap magic cape', get:'Reward: Mage Arena (Saradomin/Zamorak/Guthix)' },
    { n:'Imbued god cape', lvl:1, gs:'none', req:'Mage Arena II', gp:0, bestFor:'BIS magic cape; all magic PvM', get:'Reward: Mage Arena II' },
-   { n:'Ancestral... no \u2014 Magic cape', lvl:99, gs:'mage', req:'99 Magic', gp:0, bestFor:'99 Magic skillcape (infinite runes perk)', get:'Buy from Magic guild at 99 Magic' },
+   { n:'Magic cape', lvl:99, gs:'mage', req:'99 Magic', gp:0, bestFor:'99 Magic skillcape (infinite runes perk)', get:'Buy from Magic guild at 99 Magic' },
   ]},
   { slot:'Amulet', items:[
    { n:'Amulet of magic', lvl:1, gs:'none', req:'\u2014', gp:600, bestFor:'Cheapest magic amulet', get:'Craft (enchant sapphire)' },

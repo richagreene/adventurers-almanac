@@ -2496,6 +2496,9 @@ export default class Almanac extends React.Component {
   // Degrades silently — the battle card is self-contained without it.
   openBossGuide = (name) => {
     this.setState({ bossPage: name });
+    // The compendium can be scrolled deep when a name is clicked — the guide
+    // is a new page and must open at its top.
+    if (typeof window !== "undefined") window.scrollTo(0, 0);
     const g = BOSS_GUIDES[name];
     if (!g || (this._wikiGuide && this._wikiGuide[name])) return;
     this._wikiGuide = this._wikiGuide || {};
@@ -2527,7 +2530,7 @@ export default class Almanac extends React.Component {
     const name = this.state.bossPage;
     const b = D.bosses.find((x) => x.n === name);
     const g = BOSS_GUIDES[name];
-    if (!b || !g) return <div style={serif({ fontSize: 14, color: C.muted, padding: 20 })}>No guide for “{name}” yet. <a href="#" onClick={(e) => { e.preventDefault(); this.setState({ bossPage: "" }); }}>Back to the compendium.</a></div>;
+    if (!b || !g) return <div style={serif({ fontSize: 14, color: C.muted, padding: 20 })}>No guide for “{name}” yet. <a href="#" onClick={(e) => { e.preventDefault(); this.setState({ bossPage: "" }); window.scrollTo(0, 0); }}>Back to the compendium.</a></div>;
     const e = this.bossEff(b);
     const gates = this.bossGatesFor(b);
     const ready = gates.length === 0;
@@ -2562,7 +2565,7 @@ export default class Almanac extends React.Component {
         <div style={{ position: "relative", border: "2px solid #5a2c20", borderRadius: 9, overflow: "hidden", marginBottom: 18, background: "radial-gradient(130% 160% at 14% 0%, #3a1812 0%, #2a100c 48%, #1a0906 100%)", boxShadow: "0 14px 38px rgba(30,8,4,.4)" }}>
           <div style={{ position: "absolute", inset: 0, opacity: 0.5, backgroundImage: "radial-gradient(circle at 85% 20%, rgba(213,122,90,.18), transparent 45%)", pointerEvents: "none" }} />
           <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 18, padding: "18px 22px", flexWrap: "wrap" }}>
-            <a href="#" onClick={(ev) => { ev.preventDefault(); this.setState({ bossPage: "" }); }} style={{ textDecoration: "none", padding: "7px 13px", borderRadius: 6, border: "1px solid rgba(213,122,90,.4)", ...mono({ fontSize: 10, letterSpacing: ".08em", color: "#d5a08a" }) }}>← COMPENDIUM</a>
+            <a href="#" onClick={(ev) => { ev.preventDefault(); this.setState({ bossPage: "" }); window.scrollTo(0, 0); }} style={{ textDecoration: "none", padding: "7px 13px", borderRadius: 6, border: "1px solid rgba(213,122,90,.4)", ...mono({ fontSize: 10, letterSpacing: ".08em", color: "#d5a08a" }) }}>← COMPENDIUM</a>
             <div style={{ width: 74, height: 74, flex: "0 0 74px", borderRadius: 10, background: "rgba(0,0,0,.35)", border: "1px solid rgba(213,122,90,.35)", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
               <Icon url={bossImgs} name={imgName} size={66} style={{ color: "#e8b49a" }} />
             </div>

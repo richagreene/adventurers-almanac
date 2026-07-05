@@ -7,17 +7,21 @@
 const SUMMARY = "https://raw.githubusercontent.com/0xNeffarion/osrsreboxed-db/master/docs/items-summary.json";
 const ITEM_JSON = "https://raw.githubusercontent.com/0xNeffarion/osrsreboxed-db/master/docs/items-json/";
 
-// Names where the GE/our spelling differs from osrsreboxed's canonical item name.
+// Names where our display name differs from the canonical item name (feeds
+// BOTH the RuneLite id lookup and the wiki-file fallback via itemKey). Audited
+// against the gear-path item list — display-only names map to a real item.
 const ALIAS = {
   "Trident of the seas (full)": "Trident of the seas",
-  "Archers ring": "Archer ring",
-  "Pet snakeling": "Pet snakeling",
+  "God cape": "Guthix cape",
+  "Imbued god cape": "Imbued guthix cape",
+  "Dizana's quiver": "Blessed dizana's quiver",
 };
 
 let _itemIds = null, _loading = null;
 const _stats = {}, _statsPending = {};
 
-function itemKey(name) { if (!name) return ""; return (ALIAS[name] || name).replace(/’/g, "'"); }
+// Normalize curly apostrophes FIRST so alias keys can use plain quotes.
+function itemKey(name) { if (!name) return ""; const k = ("" + name).replace(/’/g, "'"); return ALIAS[k] || k; }
 
 // Load (once) the full name → item-id index. Returns the map.
 export async function loadItemIndex() {
