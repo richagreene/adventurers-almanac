@@ -300,7 +300,14 @@ export default class Almanac extends React.Component {
     const savedGoal = this._load("almanac.counselgoal.v1", null);
     if (savedGoal) this.setState({ goalId: savedGoal });
     refreshActivityGp().then(() => this.bump()).catch(() => {});
+    // Enter commits any editable field: every input in the app recalculates on
+    // blur, so blur it — no more clicking dead space to apply a value.
+    // (Textareas are excluded so multi-line paste keeps working; fields with
+    // their own Enter behaviour, like the RSN box, run theirs first.)
+    this._enterCommit = (e) => { if (e.key === "Enter" && e.target && e.target.tagName === "INPUT") e.target.blur(); };
+    document.addEventListener("keydown", this._enterCommit);
   }
+  componentWillUnmount() { if (this._enterCommit) document.removeEventListener("keydown", this._enterCommit); }
 
   // Load every persisted collection from localStorage into instance fields.
   // Reused on first mount, on undo/redo, and after a clear. `firstRun` (no saved
