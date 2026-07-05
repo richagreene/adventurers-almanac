@@ -195,3 +195,12 @@ export async function wikiExtract(title) {
   const first = Object.values(pages)[0];
   return first ? first.extract || "" : "";
 }
+
+// Top-level section map of a wiki page — powers "jump straight to X" deep
+// links on the boss guide pages. Returns [{ line, anchor }].
+export async function wikiSections(title) {
+  const params = new URLSearchParams({ action: "parse", page: title, prop: "sections", redirects: "1", format: "json", origin: "*" });
+  const d = await fetch(`${WIKI}?${params}`, { headers: { Accept: "application/json" } }).then(J);
+  const secs = (d.parse && d.parse.sections) || [];
+  return secs.filter((s) => +s.toclevel <= 2).map((s) => ({ line: (s.line || "").replace(/<[^>]+>/g, ""), anchor: s.anchor }));
+}

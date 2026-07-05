@@ -18,7 +18,7 @@ import { CONTENT_REQS } from "./data/contentReqs.js";
 import { QUEST_DEPS } from "./data/questDeps.js";
 import { BOSS_GUIDES } from "./data/bossGuides.js";
 import { refreshActivityGp, liveGpRate, geSellNet } from "./lib/activityPrices.js";
-import { fetchPlayer, fetchPrices, priceById, combatLevel, fetchItemNames, natureRunePrice } from "./lib/api.js";
+import { fetchPlayer, fetchPrices, priceById, combatLevel, fetchItemNames, natureRunePrice, wikiExtract, wikiSections } from "./lib/api.js";
 import { C, mono, serif, cinzel, Card, Kicker, SectionTitle, StatCards, Bar, Seg, Tag, Btn, DataTable, Hero, themeFor, LineChart, BarChartH, Icon, Donut, BandBar } from "./lib/ui.jsx";
 import { loadItemIndex, itemIconUrl, skillIconUrl, ensureItemStats, getItemStats } from "./lib/icons.js";
 
@@ -2491,6 +2491,26 @@ export default class Almanac extends React.Component {
       </div>
     );
   }
+  // Open a boss guide page and (once per boss per session) pull the live wiki
+  // supplement: the strategy page's intro + its section map for deep links.
+  // Degrades silently — the battle card is self-contained without it.
+  openBossGuide = (name) => {
+    this.setState({ bossPage: name });
+    const g = BOSS_GUIDES[name];
+    if (!g || (this._wikiGuide && this._wikiGuide[name])) return;
+    this._wikiGuide = this._wikiGuide || {};
+    this._wikiGuide[name] = { loading: true, extract: "", sections: [] };
+    const title = g.wikiPage.replace(/_/g, " ");
+    Promise.allSettled([wikiExtract(title), wikiSections(title)]).then(([ex, se]) => {
+      this._wikiGuide[name] = {
+        loading: false,
+        extract: ex.status === "fulfilled" ? ex.value : "",
+        sections: se.status === "fulfilled" ? se.value : [],
+        failed: ex.status !== "fulfilled" && se.status !== "fulfilled",
+      };
+      this.bump();
+    });
+  };
   // Every unmet gate between this account and the boss (combat, slayer, skill
   // text gates, hard quest prereqs from CONTENT_REQS).
   bossGatesFor(b) {
@@ -2607,6 +2627,41 @@ export default class Almanac extends React.Component {
                 ))}
               </div>
             </Card>
+            {(() => {
+              // Live wiki supplement — intro prose + deep links into the full
+              // strategy page. Fetched once per boss when the page opens.
+              const w = (this._wikiGuide || {})[name];
+              const wikiUrl = wikiBase + g.wikiPage;
+              return (
+                <Card>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+                    <Kicker color={C.goldDeep}>From the OSRS Wiki · live</Kicker>
+                    <a href={wikiUrl} target="_blank" rel="noreferrer" style={mono({ fontSize: 10, color: "#9a7530" })}>full strategy page →</a>
+                  </div>
+                  {!w || w.loading ? (
+                    <div style={serif({ fontSize: 13, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Consulting the wiki…</div>
+                  ) : w.failed ? (
+                    <div style={serif({ fontSize: 13, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Wiki unreachable right now — the battle card above is self-contained.</div>
+                  ) : (
+                    <div>
+                      {w.extract && <div style={{ marginTop: 8, ...serif({ fontSize: 13.5, fontStyle: "normal", color: C.muted2, lineHeight: 1.55 }) }}>{w.extract.split("\n").filter(Boolean).slice(0, 3).map((para, i) => <p key={i} style={{ margin: i ? "8px 0 0" : 0 }}>{para}</p>)}</div>}
+                      {w.sections.length > 0 && (
+                        <div style={{ marginTop: 10 }}>
+                          <div style={mono({ fontSize: 8.5, letterSpacing: ".14em", color: C.muted, textTransform: "uppercase", marginBottom: 6 })}>Jump straight to</div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                            {w.sections.slice(0, 14).map((s, i) => (
+                              <a key={i} href={wikiUrl + "#" + s.anchor} target="_blank" rel="noreferrer" style={{ textDecoration: "none", padding: "3px 10px", borderRadius: 5, background: C.cardLight, border: "1px solid rgba(44,32,19,.14)", ...mono({ fontSize: 10, color: "#6a5436" }) }}>{s.line}</a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {!w.extract && !w.sections.length && <div style={serif({ fontSize: 13, fontStyle: "normal", color: C.muted, marginTop: 8 })}>No summary published for this page — the deep link above has the full text.</div>}
+                      <div style={serif({ fontSize: 10.5, fontStyle: "normal", color: C.muted, marginTop: 10 })}>Text from the OSRS Wiki (CC BY-NC-SA 3.0) — fetched live, always current.</div>
+                    </div>
+                  )}
+                </Card>
+              );
+            })()}
           </div>
           {/* right — your setup + ledger */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -2680,7 +2735,7 @@ export default class Almanac extends React.Component {
       { key: "access", label: "ACCESS", align: "right", filter: "enum", options: [{ v: "1", label: "Open now" }, { v: "0", label: "Gated" }], fval: (r) => r.accN, sval: (r) => r.accN },
     ]);
     const cols = [
-      { key: "name", cell: (r) => BOSS_GUIDES[r.name] ? <a href="#" onClick={(e) => { e.preventDefault(); this.setState({ bossPage: r.name }); }} title="Open the battle guide" style={{ textDecoration: "none", borderBottom: "1px dotted #9a7530", ...cinzel({ fontWeight: 600, fontSize: 14, color: C.ink }) }}>{r.name} <span style={mono({ fontSize: 9, color: "#9a7530" })}>📖</span></a> : <span style={cinzel({ fontWeight: 600, fontSize: 14 })}>{r.name}</span> },
+      { key: "name", cell: (r) => BOSS_GUIDES[r.name] ? <a href="#" onClick={(e) => { e.preventDefault(); this.openBossGuide(r.name); }} title="Open the battle guide" style={{ textDecoration: "none", borderBottom: "1px dotted #9a7530", ...cinzel({ fontWeight: 600, fontSize: 14, color: C.ink }) }}>{r.name} <span style={mono({ fontSize: 9, color: "#9a7530" })}>📖</span></a> : <span style={cinzel({ fontWeight: 600, fontSize: 14 })}>{r.name}</span> },
       { key: "tier", cell: (r) => <Tag>{r.tier}</Tag> },
       { key: "estGp", cell: (r) => <span style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 120 }}><span style={mono({ fontSize: 12, color: C.gold })}>{r.estGp}</span><Bar pct={r.gpBar} h={4} /></span> },
       { key: "killsHr", align: "right", cell: (r) => <span style={mono({ fontSize: 12 })}>{r.killsHr}</span> },
@@ -2797,7 +2852,7 @@ export default class Almanac extends React.Component {
           <Card>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <span style={cinzel({ fontWeight: 700, fontSize: 22 })}>{b.n}</span>
-              {BOSS_GUIDES[b.n] && <Btn tone="gold" onClick={() => this.setState({ bossPage: b.n })}>📖 Battle guide</Btn>}
+              {BOSS_GUIDES[b.n] && <Btn tone="gold" onClick={() => this.openBossGuide(b.n)}>📖 Battle guide</Btn>}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
               <span style={mono({ fontSize: 11, color: C.muted })}>{b.tier}</span>
