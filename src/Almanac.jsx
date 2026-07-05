@@ -513,6 +513,21 @@ export default class Almanac extends React.Component {
     const compostCost = cfg.compost === "none" ? 0 : (this.compostPrices || {})[cfg.compost] || 0;
     return { L, p, lives: co.lives, perLive, surv, P, df, eff, ov, compostCost, patches: act };
   }
+  // The yield model's survival-weighted herbs/patch at an arbitrary Farming
+  // level (current compost/gear/roster config) — powers the model-vs-reality
+  // curve over your logged runs.
+  herbEffAt(L) {
+    const cfg = this.farmcfg;
+    const co = this.herbCompost[cfg.compost] || this.herbCompost.ultra;
+    const bonus = (cfg.secateurs ? 1.1 : 1) * (cfg.farmCape ? 1.05 : 1) * (cfg.attas ? 1.05 : 1);
+    const interp = (25 * (99 - L) + 80 * (L - 1)) / 98;
+    const p = Math.min(0.9, (1 + Math.floor(interp * bonus)) / 256);
+    const perLive = co.lives / (1 - p);
+    const surv = Math.pow(1 - co.d, 3);
+    const act = this.activePatches().filter((x) => x.active);
+    const P = Math.max(1, act.length), df = Math.min(P, act.filter((x) => x.df).length);
+    return perLive * ((df + (P - df) * surv) / P);
+  }
   // Net gp for one full herb run of a tier: every patch pays seed + compost,
   // harvested herbs (yield model) sell after the 2% GE tax.
   farmNet(f) {
@@ -3623,6 +3638,51 @@ export default class Almanac extends React.Component {
               </div>
             </Card>
           )}
+          {(() => {
+            // Model vs reality: your logged herbs/patch (with the run's stamped
+            // Farming level) scattered over the yield model's prediction curve.
+            const pts = this.logs.herb.filter((h) => h.herbs != null && h.patchN > 0 && h.lvl).map((h) => ({ lvl: h.lvl, v: h.herbs / h.patchN, tier: h.tier, date: h.date }));
+            if (!pts.length) return (
+              <Card style={{ marginTop: 14 }}>
+                <Kicker color={C.goldDeep}>Model vs reality</Kicker>
+                <div style={serif({ fontSize: 12.5, fontStyle: "normal", color: C.muted, marginTop: 6 })}>Log runs with per-patch harvest counts and this chart will plot your real herbs/patch against the yield model's prediction at each Farming level.</div>
+              </Card>
+            );
+            const Lmin = Math.max(3, Math.min(...pts.map((p2) => p2.lvl)) - 4), Lmax = 99;
+            const model = []; for (let L = Lmin; L <= Lmax; L++) model.push({ L, v: this.herbEffAt(L) });
+            const yMax = Math.ceil(Math.max(...model.map((m) => m.v), ...pts.map((p2) => p2.v)) + 0.5);
+            const W = 720, H = 210, padL = 40, padR = 14, padT = 12, padB = 28;
+            const X = (L) => padL + ((L - Lmin) / (Lmax - Lmin)) * (W - padL - padR);
+            const Yc = (v) => padT + (1 - v / yMax) * (H - padT - padB);
+            const path = model.map((m, i) => (i ? "L" : "M") + X(m.L).toFixed(1) + " " + Yc(m.v).toFixed(1)).join(" ");
+            const avgReal = pts.reduce((a2, p2) => a2 + p2.v, 0) / pts.length;
+            const avgModel = pts.reduce((a2, p2) => a2 + this.herbEffAt(p2.lvl), 0) / pts.length;
+            const deltaPct = avgModel > 0 ? ((avgReal - avgModel) / avgModel) * 100 : 0;
+            const gridY = []; for (let v = 2; v < yMax; v += 2) gridY.push(v);
+            const gridX = []; for (let L = Math.ceil(Lmin / 10) * 10; L <= Lmax; L += 10) gridX.push(L);
+            return (
+              <Card style={{ marginTop: 14, borderTop: `3px solid ${TH.accent}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+                  <Kicker color={TH.accent}>Model vs reality · herbs per patch by Farming level</Kicker>
+                  <span style={mono({ fontSize: 10.5, color: Math.abs(deltaPct) <= 8 ? "#3c5322" : "#9a7530" })}>your runs average {deltaPct >= 0 ? "+" : ""}{deltaPct.toFixed(1)}% vs the model</span>
+                </div>
+                <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", marginTop: 10 }}>
+                  {gridY.map((v) => (<g key={"gy" + v}><line x1={padL} x2={W - padR} y1={Yc(v)} y2={Yc(v)} stroke="rgba(44,32,19,.10)" strokeWidth="1" /><text x={padL - 6} y={Yc(v)} dy="3" textAnchor="end" fill="#8a6a38" fontFamily="'JetBrains Mono',monospace" fontSize="9">{v}</text></g>))}
+                  {gridX.map((L) => (<g key={"gx" + L}><line y1={padT} y2={H - padB} x1={X(L)} x2={X(L)} stroke="rgba(44,32,19,.06)" strokeWidth="1" /><text x={X(L)} y={H - padB + 13} textAnchor="middle" fill="#8a6a38" fontFamily="'JetBrains Mono',monospace" fontSize="9">{L}</text></g>))}
+                  <path d={path} fill="none" stroke={TH.accent} strokeWidth="2.5" opacity="0.9" />
+                  {pts.map((p2, i) => (
+                    <circle key={i} cx={X(Math.min(Lmax, Math.max(Lmin, p2.lvl)))} cy={Yc(Math.min(yMax, p2.v))} r="4.5" fill={C.gold} stroke="#7c5a22" strokeWidth="1" opacity="0.85"><title>{`${p2.tier} · lvl ${p2.lvl} · ${p2.v.toFixed(2)} herbs/patch (${this.dShort(p2.date)}) — model said ${this.herbEffAt(p2.lvl).toFixed(2)}`}</title></circle>
+                  ))}
+                  <text x={W - padR} y={padT + 8} textAnchor="end" fill="#8a6a38" fontFamily="'JetBrains Mono',monospace" fontSize="9">herbs / patch</text>
+                </svg>
+                <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 6, ...mono({ fontSize: 10, color: C.muted2 }) }}><span style={{ width: 16, height: 3, background: TH.accent, borderRadius: 2 }} />model at your current setup (compost · gear · roster)</span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 6, ...mono({ fontSize: 10, color: C.muted2 }) }}><span style={{ width: 9, height: 9, borderRadius: "50%", background: C.gold, border: "1px solid #7c5a22" }} />your logged runs ({pts.length})</span>
+                  <span style={{ marginLeft: "auto", ...serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted }) }}>{Math.abs(deltaPct) > 8 ? "Running " + Math.abs(deltaPct).toFixed(0) + "% " + (deltaPct < 0 ? "under" : "over") + " model — consider setting the herbs/patch override in Setup to your real average." : "Reality tracks the model — the net/run numbers are trustworthy."}</span>
+                </div>
+              </Card>
+            );
+          })()}
           <Card style={{ marginTop: 14 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
               <Kicker color={C.goldDeep}>Run history · newest first · delete a bad entry and re-log it (undo has your back)</Kicker>
