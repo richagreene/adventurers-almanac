@@ -16,6 +16,7 @@ import { ACTIVITIES_DATA } from "./data/activitiesData.js";
 import { SKILL_MILESTONES } from "./data/skillMilestones.js";
 import { CONTENT_REQS } from "./data/contentReqs.js";
 import { QUEST_DEPS } from "./data/questDeps.js";
+import { BOSS_GUIDES } from "./data/bossGuides.js";
 import { refreshActivityGp, liveGpRate, geSellNet } from "./lib/activityPrices.js";
 import { fetchPlayer, fetchPrices, priceById, combatLevel, fetchItemNames, natureRunePrice } from "./lib/api.js";
 import { C, mono, serif, cinzel, Card, Kicker, SectionTitle, StatCards, Bar, Seg, Tag, Btn, DataTable, Hero, themeFor, LineChart, BarChartH, Icon, Donut, BandBar } from "./lib/ui.jsx";
@@ -56,7 +57,7 @@ export default class Almanac extends React.Component {
     slayView: "planner", slayMaster: "Duradel", gearStyle: "melee", gearSlot: "Weapon", gearItem: null, gearStatMode: "set", gearDetail: null,
     questMethod: "optimal", qsortCol: "", qsortDir: 1, qFilterOpen: "", qfSeries: [], qfType: [], qfStatus: [], qName: "", qGate: "",
     tSort: {}, tFilt: {}, tOpen: "", flipPrefill: null, objType: "bank", objBoss: "", flipShowWatch: false, flipCfgVer: 0, _v: 0,
-    counselLens: "balanced", goalId: "none", pfSort: "lev", farmView: "planner",
+    counselLens: "balanced", goalId: "none", pfSort: "lev", farmView: "planner", bossPage: "",
   };
 
   // ---- static reference tables (ported from the workbook / design) ----
@@ -2475,6 +2476,9 @@ export default class Almanac extends React.Component {
   // ===================== BOSSING =====================
   renderBossing() {
     const view = this.state.bossView;
+    // A boss guide page takes over the whole section (full-page view with its
+    // own back affordance).
+    if (this.state.bossPage) return this.renderBossGuide();
     return (
       <div>
         <SectionTitle kicker="Command Centre · live drop pricing" title="Bossing Compendium" accent={themeFor("bossing").accent}
@@ -2483,6 +2487,169 @@ export default class Almanac extends React.Component {
         {view === "tracker" && this.renderBossTracker()}
         {view === "rates" && this.renderBossRates()}
         {view === "focus" && this.renderBossFocus()}
+      </div>
+    );
+  }
+  // Every unmet gate between this account and the boss (combat, slayer, skill
+  // text gates, hard quest prereqs from CONTENT_REQS).
+  bossGatesFor(b) {
+    const lv = this._lvMap();
+    const out = [];
+    if (this.account.combat < (b.minCb || 0)) out.push("Combat " + b.minCb + " (now " + this.account.combat + ")");
+    if ((b.slay || 0) > 0 && (lv.slayer || 1) < b.slay) out.push("Slayer " + b.slay + " (now " + (lv.slayer || 1) + ")");
+    this.gateSkills(b.req).forEach((g) => { if (g.skill === "combat" || (g.skill === "slayer" && (b.slay || 0) > 0)) return; if ((lv[g.skill] || 1) < g.lvl) out.push(g.skill[0].toUpperCase() + g.skill.slice(1) + " " + g.lvl + " (now " + (lv[g.skill] || 1) + ")"); });
+    this.bossReqQuestsC(b).forEach((nm) => { const q = (D.quests || []).find((x) => x.n === nm); if (q && !this.questDone(q)) out.push(nm); });
+    return out;
+  }
+  renderBossGuide() {
+    const TH = themeFor("bossing");
+    const name = this.state.bossPage;
+    const b = D.bosses.find((x) => x.n === name);
+    const g = BOSS_GUIDES[name];
+    if (!b || !g) return <div style={serif({ fontSize: 14, color: C.muted, padding: 20 })}>No guide for “{name}” yet. <a href="#" onClick={(e) => { e.preventDefault(); this.setState({ bossPage: "" }); }}>Back to the compendium.</a></div>;
+    const e = this.bossEff(b);
+    const gates = this.bossGatesFor(b);
+    const ready = gates.length === 0;
+    const killKc = this.logs.boss.filter((x) => x.boss === name).reduce((a, x) => a + (x.kills || 0), 0);
+    const dropKc = Math.max(0, ...this.logs.drop.filter((dd) => dd.boss === name).map((dd) => dd.kc || 0));
+    const kc = Math.max(killKc, dropKc);
+    const styles = this.bossStyles(b);
+    const styleColor = { Melee: C.red, Ranged: C.green, Magic: C.purple };
+    const prayColor = (p) => (/range/i.test(p) ? C.green : /magic/i.test(p) ? C.purple : /melee/i.test(p) ? C.red : /flick/i.test(p) ? "#9a7530" : C.muted);
+    const gearStyle = styles.all.includes(this.state.bossGearStyle) ? this.state.bossGearStyle : styles.primary;
+    const recs = this.bestGearForStyle(gearStyle).map((it) => { const price = this.gearPrices[it.n] != null ? this.gearPrices[it.n] : it.gp; return { slot: it.slot, n: it.n, price: price > 0 ? this.short(price) : "obtain" }; });
+    // drop-table rows (same math as the Focus tab)
+    const drops = this.bossDrops[name] || [];
+    const dropCount = {}; this.logs.drop.forEach((dd) => { if (dd.boss === name) dropCount[dd.drop] = (dropCount[dd.drop] || 0) + 1; });
+    const catColor = { unique: C.gold, common: C.muted2, tertiary: C.purple };
+    const catRank = { unique: 0, tertiary: 1, common: 2 };
+    const dropRows = drops.slice().sort((a2, b2) => (catRank[a2.cat] ?? 3) - (catRank[b2.cat] ?? 3) || a2.rate - b2.rate).slice(0, 12).map((dr) => { const got = dropCount[dr.n] || 0; const v = this.luckVerdict(kc, dr.rate, got); return { name: dr.n, cat: dr.cat || "common", rate: dr.rate <= 1 ? "common" : "1/" + this.fmt(dr.rate), got, verdict: v.t, vc: v.c, value: dr.v > 0 ? this.short(dr.v) : "—" }; });
+    const imgName = name.replace(/\s*\(.*\)$/, "");
+    const wikiBase = "https://oldschool.runescape.wiki/w/";
+    const stars = "★★★★★".slice(0, g.difficulty) + "☆☆☆☆☆".slice(0, 5 - g.difficulty);
+    return (
+      <div>
+        {/* header banner */}
+        <div style={{ position: "relative", border: "2px solid #5a2c20", borderRadius: 9, overflow: "hidden", marginBottom: 18, background: "radial-gradient(130% 160% at 14% 0%, #3a1812 0%, #2a100c 48%, #1a0906 100%)", boxShadow: "0 14px 38px rgba(30,8,4,.4)" }}>
+          <div style={{ position: "absolute", inset: 0, opacity: 0.5, backgroundImage: "radial-gradient(circle at 85% 20%, rgba(213,122,90,.18), transparent 45%)", pointerEvents: "none" }} />
+          <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 18, padding: "18px 22px", flexWrap: "wrap" }}>
+            <a href="#" onClick={(ev) => { ev.preventDefault(); this.setState({ bossPage: "" }); }} style={{ textDecoration: "none", padding: "7px 13px", borderRadius: 6, border: "1px solid rgba(213,122,90,.4)", ...mono({ fontSize: 10, letterSpacing: ".08em", color: "#d5a08a" }) }}>← COMPENDIUM</a>
+            <div style={{ width: 74, height: 74, flex: "0 0 74px", borderRadius: 10, background: "rgba(0,0,0,.35)", border: "1px solid rgba(213,122,90,.35)", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+              <Icon url={wikiBase.replace("/w/", "/w/Special:FilePath/") + encodeURIComponent(imgName + ".png")} name={imgName} size={66} style={{ color: "#e8b49a" }} />
+            </div>
+            <div style={{ flex: 1, minWidth: 260 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+                <span style={mono({ fontSize: 9, letterSpacing: ".16em", padding: "2px 8px", border: "1px solid rgba(213,122,90,.4)", borderRadius: 4, color: "#d5a08a" })}>{b.tier}</span>
+                <span style={mono({ fontSize: 9, letterSpacing: ".1em", padding: "2px 8px", borderRadius: 4, background: styleColor[styles.primary] + "33", color: "#f0cdbb" })}>BEST: {styles.primary.toUpperCase()}</span>
+                <span title={g.diffLabel} style={mono({ fontSize: 11, color: "#e3c878" })}>{stars}</span>
+                <span style={mono({ fontSize: 9.5, color: ready ? "#8fbf5a" : "#e6a5a5" })}>{ready ? "● READY — every gate clear" : "● GATED — " + gates.join(" · ")}</span>
+              </div>
+              <div style={cinzel({ fontWeight: 800, fontSize: 27, color: "#f4e0c8", lineHeight: 1.15, marginTop: 5 })}>{b.n}</div>
+              <div style={{ fontSize: 13, color: "#d8b8a4", marginTop: 3, lineHeight: 1.5 }}>{g.tagline}</div>
+            </div>
+            <div style={{ textAlign: "right", minWidth: 130 }}>
+              {[["EST GP/HR", e.estGp > 0 ? this.short(e.estGp) : "—"], ["AVG KILL", g.avgKill + " min"], ["YOUR KC", this.fmt(kc)]].map(([l, v]) => (
+                <div key={l} style={{ marginBottom: 4 }}><span style={mono({ fontSize: 8.5, letterSpacing: ".14em", color: "#b07c62" })}>{l} </span><span style={cinzel({ fontWeight: 700, fontSize: 15, color: "#f0d8ae" })}>{v}</span></div>
+              ))}
+            </div>
+          </div>
+          <div style={{ position: "relative", padding: "12px 22px 15px", borderTop: "1px solid rgba(213,122,90,.22)", fontSize: 13.5, lineHeight: 1.6, color: "#e2c6b2" }}>{g.summary}</div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 16, alignItems: "start" }}>
+          {/* left — the fight */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
+              <Kicker color={TH.accent}>The fight · phase by phase</Kicker>
+              <div className="sheetwrap" style={{ marginTop: 10 }}>
+                <table className="sheet">
+                  <thead><tr>{["Phase", "Pray", "What it does", "Your move"].map((h, i) => <th key={i}>{h}</th>)}</tr></thead>
+                  <tbody>{g.phases.map((p, i) => (
+                    <tr key={i}>
+                      <td style={{ whiteSpace: "nowrap", ...cinzel({ fontWeight: 600, fontSize: 12.5 }) }}>{p.name}</td>
+                      <td><Tag color={prayColor(p.pray)} bg={prayColor(p.pray) + "22"}>{p.pray}</Tag></td>
+                      <td style={serif({ fontSize: 12.5, fontStyle: "normal", color: C.muted2 })}>{p.mech}</td>
+                      <td style={serif({ fontSize: 12.5, fontStyle: "normal", color: C.ink })}>{p.counter}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            </Card>
+            {g.rotation && (
+              <Card>
+                <Kicker color={C.goldDeep}>Rhythm & kill order · the cheat-sheet</Kicker>
+                <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                  {g.rotation.map((r, i) => (
+                    <div key={i} style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+                      <span style={{ flex: "0 0 18px", textAlign: "center", ...cinzel({ fontWeight: 800, fontSize: 12, color: TH.accent }) }}>{i + 1}</span>
+                      <span style={serif({ fontSize: 13.5, fontStyle: "normal", color: C.ink, lineHeight: 1.45 })}>{r}</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+            <Card style={{ background: "rgba(150,58,44,.05)", border: "1px solid rgba(150,58,44,.22)" }}>
+              <Kicker color={C.red}>What actually kills people here</Kicker>
+              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                {g.mistakes.map((m, i) => (
+                  <div key={i} style={{ display: "flex", gap: 9, alignItems: "baseline" }}>
+                    <span style={{ color: C.red, ...mono({ fontSize: 11 }) }}>✕</span>
+                    <span style={serif({ fontSize: 13, fontStyle: "normal", color: C.muted2, lineHeight: 1.45 })}>{m}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+          {/* right — your setup + ledger */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <Card>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                <Kicker color={C.goldDeep}>Your best {gearStyle.toLowerCase()} setup</Kicker>
+                <Seg options={styles.all.map((s) => ({ key: s, label: s.toUpperCase() }))} active={gearStyle} onPick={(v) => this.setState({ bossGearStyle: v })} size={8.5} />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
+                {recs.map((r, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, padding: "4px 8px", borderRadius: 5, background: C.cardLight }}>
+                    <Icon url={itemIconUrl(r.n)} name={r.n} size={22} />
+                    <span style={{ flex: 1, ...serif({ fontSize: 12.5, fontStyle: "normal", color: C.ink }) }}>{r.n}</span>
+                    <span style={mono({ fontSize: 9.5, color: C.muted })}>{r.slot}</span>
+                    <span style={mono({ fontSize: 10.5, color: C.green })}>{r.price}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Highest tier your current stats allow, priced live. Wiki-recommended style: <strong style={{ color: styleColor[styles.primary] }}>{styles.primary}</strong>.</div>
+            </Card>
+            <Card>
+              <Kicker color={C.goldDeep}>Inventory · what to bring</Kicker>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 9 }}>
+                {g.inventory.map((it, i) => <span key={i} style={{ padding: "4px 10px", borderRadius: 5, background: C.cardLight, border: "1px solid rgba(44,32,19,.14)", ...serif({ fontSize: 12, fontStyle: "normal", color: C.ink }) }}>{it}</span>)}
+              </div>
+            </Card>
+            <Card>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <Kicker color={C.goldDeep}>Your ledger · drop luck at KC {this.fmt(kc)}</Kicker>
+                <Btn tone="quiet" onClick={() => { this.setState({ bossFocus: name, bossPage: "", bossView: "focus" }); }}>Full tracker →</Btn>
+              </div>
+              <div className="sheetwrap" style={{ marginTop: 9 }}>
+                <table className="sheet">
+                  <thead><tr>{["Drop", "Rate", "Got", "Value", "Luck"].map((h, i) => <th key={i} className={i > 0 && i < 4 ? "num" : ""}>{h}</th>)}</tr></thead>
+                  <tbody>{dropRows.map((r, k) => (
+                    <tr key={k}>
+                      <td style={serif({ fontSize: 12, fontStyle: "normal" })}>{r.name}</td>
+                      <td className="num" style={mono({ fontSize: 10.5 })}>{r.rate}</td>
+                      <td className="num" style={mono({ fontSize: 11.5, color: r.vc })}>{r.got}</td>
+                      <td className="num" style={mono({ fontSize: 10.5 })}>{r.value}</td>
+                      <td><Tag color={r.vc} bg="transparent">{r.verdict}</Tag></td>
+                    </tr>
+                  ))}{dropRows.length === 0 && <tr><td colSpan={5} style={serif({ fontStyle: "normal", color: C.muted, padding: 12 })}>No tracked drop table.</td></tr>}</tbody>
+                </table>
+              </div>
+            </Card>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(44,32,19,.05)", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
+              <span style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted })}>Battle card curated {g.asOf} · cross-checked with the OSRS Wiki</span>
+              <a href={wikiBase + g.wikiPage} target="_blank" rel="noreferrer" style={{ ...mono({ fontSize: 10.5, color: "#9a7530" }) }}>Full strategy on the Wiki →</a>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -2504,7 +2671,7 @@ export default class Almanac extends React.Component {
       { key: "access", label: "ACCESS", align: "right", filter: "enum", options: [{ v: "1", label: "Open now" }, { v: "0", label: "Gated" }], fval: (r) => r.accN, sval: (r) => r.accN },
     ]);
     const cols = [
-      { key: "name", cell: (r) => <span style={cinzel({ fontWeight: 600, fontSize: 14 })}>{r.name}</span> },
+      { key: "name", cell: (r) => BOSS_GUIDES[r.name] ? <a href="#" onClick={(e) => { e.preventDefault(); this.setState({ bossPage: r.name }); }} title="Open the battle guide" style={{ textDecoration: "none", borderBottom: "1px dotted #9a7530", ...cinzel({ fontWeight: 600, fontSize: 14, color: C.ink }) }}>{r.name} <span style={mono({ fontSize: 9, color: "#9a7530" })}>📖</span></a> : <span style={cinzel({ fontWeight: 600, fontSize: 14 })}>{r.name}</span> },
       { key: "tier", cell: (r) => <Tag>{r.tier}</Tag> },
       { key: "estGp", cell: (r) => <span style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 120 }}><span style={mono({ fontSize: 12, color: C.gold })}>{r.estGp}</span><Bar pct={r.gpBar} h={4} /></span> },
       { key: "killsHr", align: "right", cell: (r) => <span style={mono({ fontSize: 12 })}>{r.killsHr}</span> },
@@ -2619,7 +2786,10 @@ export default class Almanac extends React.Component {
         </Card>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           <Card>
-            <div style={cinzel({ fontWeight: 700, fontSize: 22 })}>{b.n}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={cinzel({ fontWeight: 700, fontSize: 22 })}>{b.n}</span>
+              {BOSS_GUIDES[b.n] && <Btn tone="gold" onClick={() => this.setState({ bossPage: b.n })}>📖 Battle guide</Btn>}
+            </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
               <span style={mono({ fontSize: 11, color: C.muted })}>{b.tier}</span>
               <Tag color={styleColor[styles.primary]} bg="rgba(44,32,19,.06)">Best: {styles.primary}</Tag>
