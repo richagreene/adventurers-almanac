@@ -323,6 +323,11 @@ export default class Almanac extends React.Component {
     this.goals = this._load("almanac.goals.v1", null) || this.defaultGoals.map((x) => ({ ...x }));
     this.questOv = this._load("almanac.questdone.v1", null);
     if (!this.questOv) { this.questOv = {}; (D.quests || []).forEach((q) => { if (q.status === "Done") this.questOv[q.n] = true; }); this._save("almanac.questdone.v1", this.questOv); }
+    // Diary + Combat Achievement completion, user-markable (seeded from the
+    // static data statuses the first time, like quests).
+    this.diaryOv = this._load("almanac.diarydone.v1", null);
+    if (!this.diaryOv) { this.diaryOv = {}; (D.diaries || []).forEach((d) => { if (d.status === "Done") this.diaryOv[d.region + "|" + d.tier] = true; }); this._save("almanac.diarydone.v1", this.diaryOv); }
+    this.caOv = this._load("almanac.cadone.v1", null) || {};
     this.flipcfg = this._load("almanac.flipcfg.v1", null) || { ...this.flipDefaults };
     this.alchcfg = this._load("almanac.alchcfg.v1", null) || { castsPerHour: 1200, fireSource: "staff", natRune: 127, fireRune: 5 };
     this.farmcfg = { lapsPerDay: 1, compost: "ultra", secateurs: true, farmCape: false, attas: false, herbsOverride: 0, patchOrder: null, patchOv: {}, runsPerDay: {}, herbCrop: "Snapdragon", runPriority: "gp", ...(this._load("almanac.farmcfg.v1", null) || {}) };
@@ -343,7 +348,7 @@ export default class Almanac extends React.Component {
   // Every persisted key. _save snapshots the *pre-mutation* state of these keys
   // (localStorage lags the in-memory mutation by one write), grouped per
   // synchronous action, so any add/edit/delete/config change is one undo step.
-  _undoKeys = ["almanac.logs.v1", "almanac.goals.v1", "almanac.objectives.v1", "almanac.flipcfg.v1", "almanac.alchcfg.v1", "almanac.farmcfg.v1", "almanac.gcfg.v1", "almanac.blocks.v1", "almanac.bossov.v1", "almanac.questdone.v1", "almanac.stats.v1", "almanac.avoiddismiss.v1", "almanac.loadout.v1", "almanac.gearowned.v1"];
+  _undoKeys = ["almanac.logs.v1", "almanac.goals.v1", "almanac.objectives.v1", "almanac.flipcfg.v1", "almanac.alchcfg.v1", "almanac.farmcfg.v1", "almanac.gcfg.v1", "almanac.blocks.v1", "almanac.bossov.v1", "almanac.questdone.v1", "almanac.stats.v1", "almanac.avoiddismiss.v1", "almanac.loadout.v1", "almanac.gearowned.v1", "almanac.diarydone.v1", "almanac.cadone.v1"];
   _snap() { const s = {}; this._undoKeys.forEach((k) => { s[k] = localStorage.getItem(k); }); return s; }
   _restore(snap) {
     this._undoSuspended = true;
@@ -395,12 +400,16 @@ export default class Almanac extends React.Component {
   }
   qStatus(q) { return this.questDone(q) ? "Done" : this.questReqsMet(q) ? "Stat-ready" : "Blocked"; }
   diaryStatus(d) {
-    if (d.status === "Done") return "Done";
+    // User-marked completion wins (seeded once from static data); otherwise
+    // derive Stat-ready vs Blocked from the gate text and live stats.
+    if (this.diaryOv && this.diaryOv[d.region + "|" + d.tier]) return "Done";
     const lv = {}; this.skillsRaw.forEach(([nm, l]) => { lv[nm.toLowerCase()] = l; }); lv.runecrafting = lv.runecraft;
     let ok = true; const re = /([A-Za-z]+)\s+(\d+)/g; let m;
     while ((m = re.exec(d.gate || ""))) { const sk = m[1].toLowerCase(), need = +m[2]; if (lv[sk] != null && lv[sk] < need) ok = false; }
     return ok ? "Stat-ready" : "Blocked";
   }
+  cycleDiary = (region, tier) => { const k = region + "|" + tier; this.diaryOv[k] = !this.diaryOv[k]; this._save("almanac.diarydone.v1", this.diaryOv); this._pfCache = null; this.bump(); };
+  cycleCa = (tier) => { this.caOv[tier] = !this.caOv[tier]; this._save("almanac.cadone.v1", this.caOv); this.bump(); };
   stColor(s) { return s === "Done" ? C.green : s === "Stat-ready" ? "#9a7530" : C.red; }
   stBg(s) { return s === "Done" ? "rgba(92,110,53,.16)" : s === "Stat-ready" ? "rgba(201,162,74,.18)" : "rgba(150,58,44,.12)"; }
 
@@ -1266,7 +1275,7 @@ export default class Almanac extends React.Component {
   }
 
   // ---------- The Keystone Web: dependency-aware bottleneck / cascade engine ----------
-  _pfSig() { return this.skillsRaw.map((s) => s[1]).join(",") + "|" + (this.account.combat || 0) + "|" + (this.state.pfSort || "lev") + "|" + Object.keys(this.questOv || {}).filter((k) => this.questOv[k]).sort().join("~"); }
+  _pfSig() { return this.skillsRaw.map((s) => s[1]).join(",") + "|" + (this.account.combat || 0) + "|" + (this.state.pfSort || "lev") + "|" + Object.keys(this.questOv || {}).filter((k) => this.questOv[k]).sort().join("~") + "|" + Object.keys(this.diaryOv || {}).filter((k) => this.diaryOv[k]).sort().join("~"); }
   computePathfinder() { const sig = this._pfSig(); if (this._pfCache && this._pfCache.sig === sig) return this._pfCache.data; const data = this._buildPathfinder(); this._pfCache = { sig, data }; return data; }
   _buildPathfinder() {
     const lv0 = this._lvMap();
@@ -1391,10 +1400,20 @@ export default class Almanac extends React.Component {
     const sortMode = this.state.pfSort || "lev";
     const ranked = (sortMode === "impact" ? byImpact : byLev).slice(0, 9).map((k, i) => mkK(k, i, sortMode));
 
-    // frontier: locked items with exactly ONE unmet requirement
-    const frontier = lockedItems.map((it) => ({ it, um: unmetReqs(it, lv0, combat0, doneBase) })).filter((x) => x.um.length === 1)
-      .map((x) => { const r = x.um[0].split(":"); let blk, bc; if (r[0] === "S") { blk = cap(r[1]) + " " + r[2]; bc = "#2f7d72"; } else if (r[0] === "C") { blk = "Combat " + r[1]; bc = "#a23a2c"; } else { blk = r[1]; bc = "#4a59a0"; } return { name: x.it.name, type: x.it.type, glyph: DOM[x.it.type].icon, typeColor: DOM[x.it.type].color, blocker: blk, blockerColor: bc, value: x.it.value, goto: x.it.goto }; })
-      .sort((a, b) => b.value - a.value);
+    // frontier: locked items one SHORT step from opening — a single unmet
+    // requirement that's also genuinely close (skill/combat gap ≤ 10 levels,
+    // or a prereq quest you're already stat-ready to start). "One lock away"
+    // used to include an 86-level Slayer climb, which is one lock in name only.
+    const oneLock = lockedItems.map((it) => ({ it, um: unmetReqs(it, lv0, combat0, doneBase) })).filter((x) => x.um.length === 1)
+      .map((x) => {
+        const r = x.um[0].split(":"); let blk, bc, near, gap = 0;
+        if (r[0] === "S") { gap = +r[2] - (lv0[r[1]] || 1); near = gap <= 10; blk = cap(r[1]) + " " + r[2] + " (+" + gap + ")"; bc = "#2f7d72"; }
+        else if (r[0] === "C") { gap = +r[1] - combat0; near = gap <= 10; blk = "Combat " + r[1] + " (+" + gap + ")"; bc = "#a23a2c"; }
+        else { const q = questByName[r[1]]; near = !!q && this.questReqsMet(q); gap = near ? 0 : 5; blk = r[1] + (near ? " — ready to start" : ""); bc = "#4a59a0"; }
+        return { name: x.it.name, type: x.it.type, glyph: DOM[x.it.type].icon, typeColor: DOM[x.it.type].color, blocker: blk, blockerColor: bc, value: x.it.value, goto: x.it.goto, near, gap };
+      });
+    const frontier = oneLock.filter((x) => x.near).sort((a, b) => a.gap - b.gap || b.value - a.value);
+    const frontierFar = oneLock.length - frontier.length;
 
     // reachability tiers
     const tiers = { one: 0, two: 0, deep: 0 };
@@ -1412,14 +1431,22 @@ export default class Almanac extends React.Component {
       if (isCb) { const l = bestCb ? bestCb.l : combat0 + 1; action = "Reach " + l + " Combat"; effort = "+" + (l - combat0) + " combat lvl"; }
       else { const ksk = keystones.find((k) => k.kind === "skill" && k.skill === chokeKey); const cur = lv0[chokeKey] || 1; const tgt = ksk ? ksk.level : cur; action = "Train " + cap(chokeKey) + " to " + tgt; effort = ksk ? ksk.effortLabel : "from " + cur; }
       const spokesRaw = [["boss", pc.boss], ["task", pc.task], ["quest", pc.quest], ["diary", pc.diary], ["gear", pc.gear]].filter((x) => x[1] > 0);
-      const spokes = spokesRaw.map((x, idx) => { const ang = ((-90 + idx * (360 / Math.max(1, spokesRaw.length))) * Math.PI) / 180; const len = 46 + Math.min(28, x[1] * 2.2); return { x2: (130 + Math.cos(ang) * len).toFixed(1), y2: (96 + Math.sin(ang) * len).toFixed(1), lx: (130 + Math.cos(ang) * (len + 18)).toFixed(1), ly: (96 + Math.sin(ang) * (len + 18)).toFixed(1), n: "" + x[1], label: DOM[x[0]].plural, color: DOM[x[0]].color, r: (9 + Math.min(11, x[1] * 0.7)).toFixed(0) }; });
+      // 320×240 canvas, hub at (160,120). Labels sit PAST the circle edge
+      // (len + r + 13) so counts stay inside their circles and names outside.
+      const spokes = spokesRaw.map((x, idx) => {
+        const ang = ((-90 + idx * (360 / Math.max(1, spokesRaw.length))) * Math.PI) / 180;
+        const r = 9 + Math.min(10, x[1] * 0.6);
+        const len = 54 + Math.min(24, x[1] * 1.6);
+        const lab = len + r + 13;
+        return { x2: (160 + Math.cos(ang) * len).toFixed(1), y2: (120 + Math.sin(ang) * len).toFixed(1), lx: (160 + Math.cos(ang) * lab).toFixed(1), ly: (120 + Math.sin(ang) * lab).toFixed(1), n: "" + x[1], label: DOM[x[0]].plural, color: DOM[x[0]].color, r: r.toFixed(0) };
+      });
       const parts = []; ["boss", "task", "quest", "diary", "gear"].forEach((t) => { if (pc[t] > 0) parts.push(pc[t] + " " + (pc[t] > 1 ? DOM[t].plural : DOM[t].label)); });
       const totalPieces = pc.boss + pc.task + pc.quest + pc.diary + pc.gear;
       choke = { icon: kd.icon, color: kd.color, action, coverPct: Math.round((part[chokeKey] / totalLockedVal) * 100) + "%", blurb: (isCb ? "Combat" : cap(chokeKey)) + " appears in the blocker list of " + totalPieces + " locked pieces — " + parts.join(", ") + ". No single requirement gates a wider swath of the account.", spokes, effort };
     }
 
     return {
-      pfChoke: choke, pfKeystones: ranked, pfFrontier: frontier.slice(0, 10), pfFrontierMore: frontier.length > 10 ? "+" + (frontier.length - 10) + " more on the cusp" : "",
+      pfChoke: choke, pfKeystones: ranked, pfFrontier: frontier.slice(0, 10), pfFrontierMore: [frontier.length > 10 ? "+" + (frontier.length - 10) + " more within reach" : "", frontierFar > 0 ? frontierFar + " more sit one lock away but behind a long climb — the keystones above chart those" : ""].filter(Boolean).join(" · "),
       pfTierOne: "" + tiers.one, pfTierTwo: "" + tiers.two, pfTierDeep: "" + tiers.deep, pfTotalLocked: "" + lockedItems.length,
       pfHasData: keystones.length > 0,
     };
@@ -1747,17 +1774,17 @@ export default class Almanac extends React.Component {
             <div style={{ position: "absolute", inset: 0, opacity: 0.5, backgroundImage: "radial-gradient(circle at 84% 16%, rgba(154,123,192,.2), transparent 44%), radial-gradient(circle at 14% 92%, rgba(106,74,138,.28), transparent 48%)", pointerEvents: "none" }} />
             <div style={{ position: "relative", display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", alignItems: "center" }}>
               <div style={{ padding: 22, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg viewBox="0 0 260 192" style={{ width: "100%", maxWidth: 330, height: "auto" }}>
-                  {ch.spokes.map((s, i) => <line key={"l" + i} x1="130" y1="96" x2={s.x2} y2={s.y2} stroke={s.color} strokeWidth="2" opacity="0.5" />)}
+                <svg viewBox="0 0 320 240" style={{ width: "100%", maxWidth: 360, height: "auto" }}>
+                  {ch.spokes.map((s, i) => <line key={"l" + i} x1="160" y1="120" x2={s.x2} y2={s.y2} stroke={s.color} strokeWidth="2" opacity="0.5" />)}
                   {ch.spokes.map((s, i) => (
                     <g key={"g" + i}>
                       <circle cx={s.x2} cy={s.y2} r={s.r} fill={s.color} opacity="0.92" />
-                      <text x={s.x2} y={s.y2} textAnchor="middle" dy="4" fill="#fbf3df" fontFamily="'JetBrains Mono',monospace" fontSize="12" fontWeight="700">{s.n}</text>
-                      <text x={s.lx} y={s.ly} textAnchor="middle" dy="3" fill="#b8a6d8" fontFamily="'JetBrains Mono',monospace" fontSize="8.5">{s.label}</text>
+                      <text x={s.x2} y={s.y2} textAnchor="middle" dy="4" fill="#fbf3df" fontFamily="'JetBrains Mono',monospace" fontSize="11" fontWeight="700">{s.n}</text>
+                      <text x={s.lx} y={s.ly} textAnchor="middle" dy="3" fill="#b8a6d8" fontFamily="'JetBrains Mono',monospace" fontSize="9">{s.label}</text>
                     </g>
                   ))}
-                  <circle cx="130" cy="96" r="26" fill={ch.color} stroke="#e3c878" strokeWidth="2" />
-                  <text x="130" y="96" textAnchor="middle" dy="8" fontSize="24">{ch.icon}</text>
+                  <circle cx="160" cy="120" r="26" fill={ch.color} stroke="#e3c878" strokeWidth="2" />
+                  <text x="160" y="120" textAnchor="middle" dy="8" fontSize="24">{ch.icon}</text>
                 </svg>
               </div>
               <div style={{ padding: "24px 26px 24px 4px" }}>
@@ -1813,8 +1840,9 @@ export default class Almanac extends React.Component {
         </div>
         {/* frontier */}
         <div style={{ background: "#f2e9d2", border: "1px solid rgba(44,32,19,.2)", borderRadius: 6, boxShadow: "0 4px 14px rgba(90,64,30,.12)", overflow: "hidden" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "15px 20px", borderBottom: "1px solid rgba(44,32,19,.14)", background: "rgba(106,74,138,.08)" }}><span style={{ fontSize: 16 }}>⚸</span><h3 style={{ margin: 0, ...cinzel({ fontWeight: 700, fontSize: 16, color: "#2c2013" }) }}>The Frontier — one lock from opening</h3></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "15px 20px", borderBottom: "1px solid rgba(44,32,19,.14)", background: "rgba(106,74,138,.08)" }}><span style={{ fontSize: 16 }}>⚸</span><h3 style={{ margin: 0, ...cinzel({ fontWeight: 700, fontSize: 16, color: "#2c2013" }) }}>The Frontier — one SHORT step from opening</h3><span style={{ marginLeft: "auto", ...mono({ fontSize: 9.5, color: "#7a5aa0" }) }}>≤10 levels or a quest you can start now</span></div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 11, padding: "18px 20px" }}>
+            {pf.pfFrontier.length === 0 && <div style={{ gridColumn: "1 / -1", ...serif({ fontSize: 13, fontStyle: "normal", color: C.muted, padding: "6px 2px" }) }}>Nothing sits within a short climb right now — the keystones above are the fastest routes to new unlocks.</div>}
             {pf.pfFrontier.map((f, i) => (
               <a key={i} href="#" onClick={(e) => { e.preventDefault(); this.go(f.goto); }} style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 13px", borderRadius: 7, background: "#fbf6e8", border: "1px solid rgba(44,32,19,.14)", textDecoration: "none" }}>
                 <span style={{ width: 32, height: 32, flex: "0 0 32px", borderRadius: 7, background: f.typeColor, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>{f.glyph}</span>
@@ -3742,7 +3770,7 @@ export default class Almanac extends React.Component {
     const cols = [
       { key: "region", cell: (r) => <span style={cinzel({ fontWeight: 600, fontSize: 14 })}>{r.region}</span> },
       { key: "tier", cell: (r) => <Tag>{r.tier}</Tag> },
-      { key: "status", cell: (r) => <Tag color={this.stColor(r.status)} bg={this.stBg(r.status)}>{r.status}</Tag> },
+      { key: "status", cell: (r) => <span onClick={() => this.cycleDiary(r.region, r.tier)} title={r.status === "Done" ? "Click to un-mark" : "Click to mark this diary done"} style={{ cursor: "pointer" }}><Tag color={this.stColor(r.status)} bg={this.stBg(r.status)}>{r.status}</Tag></span> },
       { key: "gate", wrap: true, cell: (r) => <span style={serif({ fontSize: 12.5, color: C.muted })}>{r.gate}</span> },
       { key: "reward", wrap: true, cell: (r) => <span style={serif({ fontSize: 12.5, color: C.muted2 })}>{r.reward}</span> },
     ];
@@ -3777,24 +3805,36 @@ export default class Almanac extends React.Component {
                   <span style={mono({ fontSize: 10, fontWeight: 600, color: DTH.accent })}>{r.doneN}/{r.totN}</span>
                 </div>
                 <div style={{ display: "flex", gap: 5 }}>
-                  {r.ordered.map((t, i) => (<div key={i} title={t ? `${tierOrder[i]} · ${t.status}` : `${tierOrder[i]} · n/a`} style={{ flex: 1, height: 11, borderRadius: 3, background: t ? sColor(t.status) : "rgba(44,32,19,.10)" }} />))}
+                  {r.ordered.map((t, i) => (<div key={i} onClick={t ? () => this.cycleDiary(r.region, tierOrder[i]) : undefined} title={t ? `${tierOrder[i]} · ${t.status} — click to ${t.status === "Done" ? "un-mark" : "mark done"}` : `${tierOrder[i]} · n/a`} style={{ flex: 1, height: 11, borderRadius: 3, cursor: t ? "pointer" : "default", background: t ? sColor(t.status) : "rgba(44,32,19,.10)" }} />))}
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, ...mono({ fontSize: 8, letterSpacing: ".04em", color: C.muted }) }}>{tierOrder.map((tn) => <span key={tn}>{tn[0]}</span>)}</div>
               </div>
             ))}
           </div>
         </Card>
-        <Card style={{ marginBottom: 14 }}><DataTable tableKey="diary" model={model} cols={cols} open={this.state.tOpen} on={this.tableHandlers()} empty="No diaries match." /></Card>
+        <Card style={{ marginBottom: 14 }}>
+          <DataTable tableKey="diary" model={model} cols={cols} open={this.state.tOpen} on={this.tableHandlers()} empty="No diaries match." />
+          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Click a diary's <strong>status</strong> (or a tier bar in the region cards above) to mark it done — completion feeds the Oracle, the Pathfinder and patch unlocks, and is covered by undo.</div>
+        </Card>
         <Card>
-          <Kicker color={C.goldDeep}>Combat Achievement tiers</Kicker>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+            <Kicker color={C.goldDeep}>Combat Achievement tiers · click to mark claimed</Kicker>
+            <span style={mono({ fontSize: 10.5, color: C.muted2 })}>{(D.ca || []).filter((c) => this.caOv[c.tier]).length}/{(D.ca || []).length} claimed</span>
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 10, marginTop: 10 }}>
-            {(D.ca || []).map((c, i) => (
-              <div key={i} style={{ background: C.cardLight, padding: "10px 12px", borderRadius: 6, borderLeft: "3px solid " + caColors[i % caColors.length] }}>
-                <div style={cinzel({ fontWeight: 700, fontSize: 14 })}>{c.tier}</div>
-                <div style={serif({ fontSize: 12, color: C.muted, margin: "3px 0" })}>{c.gating}</div>
-                <div style={serif({ fontSize: 12, color: C.muted2 })}>{c.reward}</div>
-              </div>
-            ))}
+            {(D.ca || []).map((c, i) => {
+              const done = !!this.caOv[c.tier];
+              return (
+                <div key={i} onClick={() => this.cycleCa(c.tier)} title={done ? "Click to un-mark" : "Click to mark this tier's rewards claimed"} style={{ cursor: "pointer", background: done ? "rgba(92,110,53,.10)" : C.cardLight, padding: "10px 12px", borderRadius: 6, borderLeft: "3px solid " + (done ? C.green : caColors[i % caColors.length]), outline: done ? "1px solid rgba(92,110,53,.3)" : "none" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                    <span style={cinzel({ fontWeight: 700, fontSize: 14 })}>{c.tier}</span>
+                    {done && <span style={mono({ fontSize: 9, letterSpacing: ".08em", color: "#3c5322" })}>✓ CLAIMED</span>}
+                  </div>
+                  <div style={serif({ fontSize: 12, color: C.muted, margin: "3px 0" })}>{c.gating}</div>
+                  <div style={serif({ fontSize: 12, color: C.muted2 })}>{c.reward}</div>
+                </div>
+              );
+            })}
           </div>
         </Card>
       </div>
