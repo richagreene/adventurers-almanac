@@ -1106,6 +1106,23 @@ export default class Almanac extends React.Component {
     if (newD.length) lines.push({ icon: "🗺", color: C.gold, text: newD.length + " diar" + (newD.length > 1 ? "ies" : "y") + " now claimable · " + newD.slice(0, 3).join(", ") + (newD.length > 3 ? "…" : "") });
     const qCleared = (base.qRemaining || 0) - cur.qRemaining;
     if (qCleared > 0) lines.push({ icon: "🏅", color: C.red, text: qCleared + " quest" + (qCleared > 1 ? "s" : "") + " done · " + cur.qRemaining + " from the Quest Cape" });
+    // Compounding nudge — closes the measure→act loop: when a briefing is
+    // already showing, surface the best unadopted boss whose logged rate would
+    // change its estimate, so you can adopt it in a click. Only rides along with
+    // real deltas, so "Mark as read" still dismisses the card.
+    if (lines.length) {
+      const adoptable = [];
+      (D.bosses || []).forEach((bb) => {
+        const r = this.bossReality(bb.n); if (r.gpHr == null) return;
+        const ov = this.bossOv[bb.n];
+        const adopted = ov && r.kph != null && ov.kills === Math.max(1, Math.round(r.kph)) && ov.gpHr === Math.max(0, Math.round(r.gpHr));
+        if (adopted) return;
+        const e = this.bossEff(bb);
+        if (e.estGp > 0 && Math.abs(r.gpHr - e.estGp) / e.estGp >= 0.15) adoptable.push({ n: bb.n, measured: r.gpHr, book: e.estGp, diff: Math.abs(r.gpHr - e.estGp) });
+      });
+      adoptable.sort((a, b) => b.diff - a.diff);
+      if (adoptable.length) { const a2 = adoptable[0]; lines.push({ icon: "◈", color: C.goldDeep, goto: "bossing", text: "Adopt your " + a2.n + " rate — your " + this.short(a2.measured) + "/hr vs book " + this.short(a2.book) + "/hr" + (adoptable.length > 1 ? " (+" + (adoptable.length - 1) + " more with fresh logs)" : "") }); }
+    }
     return { has: lines.length > 0, lines, asOf: base.day, atMs: base.at };
   }
   // Your logged reality for a boss, from the same two logs the Focus tab uses:
@@ -1638,7 +1655,10 @@ export default class Almanac extends React.Component {
       if (goalId === "gloves") { if (c.domain === "quest") return 1.7; if (c.domain === "train" && (sk === "herblore" || sk === "fishing" || sk === "cooking")) return 2.0; return 0.85; }
       return 1;
     };
-    cands.forEach((c) => { c.goalMult = biasOf(c); c.score *= c.goalMult; c.onPath = goalActive && c.goalMult > 1.08; });
+    // Compounding: trust your own numbers over the book's. A candidate whose
+    // gp is MEASURED from your logs (or discounted by your flip capture) gets a
+    // small confidence edge, so logging and adopting reality visibly promotes it.
+    cands.forEach((c) => { c.goalMult = biasOf(c); c.conf = c.source && /your/i.test(c.source) ? 1.12 : 1; c.score *= c.goalMult * c.conf; c.onPath = goalActive && c.goalMult > 1.08; c.measured = c.conf > 1; });
     cands.sort((a, b) => b.score - a.score);
     if (typeof window !== "undefined") window.__counsel = cands; // debug: inspect the full ranked candidate list
     const goalChips = goalOrder.map((id) => ({ id, icon: GS[id].icon, label: GS[id].label, active: id === goalId, bg: id === goalId ? "#e3c878" : "rgba(255,255,255,.05)", fg: id === goalId ? "#2c2013" : "#c3b0da", bd: id === goalId ? "#e3c878" : "rgba(227,200,120,.16)" }));
@@ -2047,7 +2067,12 @@ export default class Almanac extends React.Component {
               <span onClick={this.sealBriefing} title="Reset the baseline to now" style={{ cursor: "pointer", padding: "5px 11px", borderRadius: 6, border: "1px solid rgba(44,32,19,.2)", ...mono({ fontSize: 10.5, letterSpacing: ".04em", color: C.muted2 }) }}>Mark as read ✓</span>
             </div>
             <div style={{ marginTop: 11, display: "flex", flexDirection: "column", gap: 7 }}>
-              {brief.lines.map((l, i) => (
+              {brief.lines.map((l, i) => l.goto ? (
+                <a key={i} href="#" onClick={(e) => { e.preventDefault(); this.go(l.goto); }} style={{ display: "flex", gap: 10, alignItems: "baseline", textDecoration: "none" }}>
+                  <span style={{ fontSize: 13, flex: "0 0 auto" }}>{l.icon}</span>
+                  <span style={{ ...serif({ fontSize: 13.5, fontStyle: "normal" }), color: l.color, fontWeight: 600, borderBottom: "1px dotted " + l.color }}>{l.text} →</span>
+                </a>
+              ) : (
                 <div key={i} style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
                   <span style={{ fontSize: 13, flex: "0 0 auto" }}>{l.icon}</span>
                   <span style={{ ...serif({ fontSize: 13.5, fontStyle: "normal" }), color: l.color, fontWeight: 600 }}>{l.text}</span>
