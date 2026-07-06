@@ -2812,7 +2812,9 @@ export default class Almanac extends React.Component {
       const qtyAfford = Math.min(a.limit || 0, Math.floor(d.cash / Math.max(1, a.buy)));
       const sustainHrs = cphr > 0 ? qtyAfford / cphr : 0;
       const sustain = sustainHrs >= 2;
-      return { item: a.item, alch: a.alch, buy: a.buy, profit, qtyAfford, sustainHrs, phr: profit * cphr, limit: a.limit, gpxp: (profit / 65).toFixed(2), sustain };
+      // Total profit if you buy the max you can afford this restock and alch it all.
+      const totalAfford = profit * qtyAfford;
+      return { item: a.item, alch: a.alch, buy: a.buy, profit, qtyAfford, totalAfford, sustainHrs, phr: profit * cphr, limit: a.limit, gpxp: (profit / 65).toFixed(2), sustain };
     }).sort((a, b) => b.phr - a.phr);
     const best = rows.filter((r) => r.sustain && r.profit > 0)[0] || rows.filter((r) => r.profit > 0)[0] || rows[0];
     const maxPhr = Math.max(1, ...rows.map((r) => r.phr));
@@ -2825,7 +2827,7 @@ export default class Almanac extends React.Component {
         <SectionTitle kicker="Arcane Profit · Staff of Fire assumed" title="High Alchemy" accent={TH.accent}
           right={<div style={{ display: "flex", gap: 8 }}><Btn onClick={this.refreshPrices}>⟳ Live prices</Btn><Btn tone="gold" onClick={() => this.toggleForm("alch")}>+ Log session</Btn></div>} />
         {best && <Hero theme={TH} kicker="Verdict · best sustainable alch (2h+)" title={best.item}
-          blurb={`+${best.profit} gp/cast · ${best.sustain ? `${this.fmt(best.qtyAfford)} buyable → ${best.sustainHrs.toFixed(1)}h sustainable` : best.qtyAfford > 0 ? `only ${this.fmt(best.qtyAfford)} affordable → ${best.sustainHrs.toFixed(1)}h before restock` : "log your cash to size affordability"}`}
+          blurb={`+${best.profit} gp/cast · ${best.qtyAfford > 0 ? `${this.fmt(best.qtyAfford)} affordable → ${this.short(best.totalAfford)} total profit · ${best.sustainHrs.toFixed(1)}h ${best.sustain ? "sustainable" : "before restock"}` : "log your cash to size affordability"}`}
           statLabel="Profit / hr" statValue={this.short(best.phr)} statSub={this.short(best.phr * 2) + " over 2h"} />}
         <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -2856,10 +2858,10 @@ export default class Almanac extends React.Component {
           </Card>
         )}
         <Card>
-          <Kicker color={C.goldDeep}>Item profitability · live · qty afford uses your logged cash {this.short(d.cash)}</Kicker>
+          <Kicker color={C.goldDeep}>Item profitability · live · qty afford &amp; est. total use your logged cash {this.short(d.cash)}</Kicker>
           <div className="sheetwrap" style={{ marginTop: 10 }}>
             <table className="sheet">
-              <thead><tr>{["Item", "Alch", "GE buy", "Profit/cast", "Profit/hr", "Limit", "Qty afford", "Sustain", "Verdict"].map((h, i) => <th key={i} className={i > 0 && i < 8 ? "num" : ""}>{h}</th>)}</tr></thead>
+              <thead><tr>{["Item", "Alch", "GE buy", "Profit/cast", "Profit/hr", "Limit", "Qty afford", "Est. total", "Sustain", "Verdict"].map((h, i) => <th key={i} className={i > 0 && i < 9 ? "num" : ""}>{h}</th>)}</tr></thead>
               <tbody>{rows.map((r, k) => (
                 <tr key={k}>
                   <td style={cinzel({ fontWeight: 600, fontSize: 14 })}>{r.item}</td>
@@ -2869,12 +2871,14 @@ export default class Almanac extends React.Component {
                   <td className="num"><div style={mono({ fontSize: 12 })}>{this.short(r.phr)}</div><Bar pct={Math.max(0, Math.min(100, (r.phr / maxPhr) * 100))} c1={C.purple} c2={TH.lite} h={4} /></td>
                   <td className="num" style={mono({ fontSize: 12 })}>{this.fmt(r.limit)}</td>
                   <td className="num" style={mono({ fontSize: 12, color: r.qtyAfford > 0 ? C.ink : C.muted })}>{r.qtyAfford > 0 ? this.fmt(r.qtyAfford) : "—"}</td>
+                  <td className="num" title="Total profit from buying the max you can afford this restock and alching it all (qty afford × profit/cast)" style={mono({ fontSize: 12, fontWeight: 600, color: r.qtyAfford <= 0 ? C.muted : r.totalAfford >= 0 ? C.green : C.red })}>{r.qtyAfford > 0 ? this.signed(r.totalAfford) : "—"}</td>
                   <td className="num" style={mono({ fontSize: 12, color: r.sustain ? C.green : C.muted2 })}>{r.qtyAfford > 0 ? r.sustainHrs.toFixed(1) + "h" : "—"}</td>
                   <td><Tag color={r.sustain ? C.green : C.red} bg={r.sustain ? "rgba(92,110,53,.16)" : "rgba(150,58,44,.12)"}>{r.sustain ? "2h+ ✓" : "limited"}</Tag></td>
                 </tr>
               ))}</tbody>
             </table>
           </div>
+          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}><strong>Est. total</strong> is the profit you'd bank from buying the most you can afford right now ({this.short(d.cash)} cash) up to the buy limit, and alching all of it — qty afford × profit/cast. Log a net-worth snapshot to update your cash.</div>
         </Card>
         {log.length > 0 && (
           <Card style={{ marginTop: 14 }}>
