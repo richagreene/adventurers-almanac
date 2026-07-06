@@ -3133,6 +3133,46 @@ export default class Almanac extends React.Component {
                 </table>
               </div>
             </Card>
+            {(() => {
+              // This boss's own kill log — the same entries as the Kill Log tab,
+              // scoped to this boss, editable in place. Field sessions above file
+              // straight into it. Original indices preserved for edit/delete.
+              const rows = this.logs.boss.map((x, i) => ({ ...x, _i: i })).filter((x) => x.boss === name);
+              const rr = this.bossReality(name);
+              const ov = this.bossOv[name];
+              const adopted = ov && rr.kph != null && ov.kills === Math.max(1, Math.round(rr.kph)) && (rr.gpHr == null || ov.gpHr === Math.max(0, Math.round(rr.gpHr)));
+              return (
+                <Card>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                    <Kicker color={C.goldDeep}>Kill log · {name} · {this.fmt(killKc)} logged</Kicker>
+                    <Btn tone="quiet" onClick={() => { this.setState({ bossPage: "", bossView: "tracker" }); window.scrollTo(0, 0); }}>Kill Log tab →</Btn>
+                  </div>
+                  {rr.kph != null && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap", ...mono({ fontSize: 11, color: C.muted2 }) }}>
+                      <span>your rate: <strong style={{ color: C.teal }}>{rr.kph}/hr</strong>{rr.gpHr != null && <> · <strong style={{ color: C.gold }}>{this.short(rr.gpHr)}/hr</strong> <span style={{ color: C.muted }}>({rr.gpSrc})</span></>}</span>
+                      <span style={{ color: C.muted }}>vs book {e.estGp > 0 ? this.short(e.estGp) + "/hr" : "—"}</span>
+                      {adopted ? <Tag color={C.green} bg="rgba(92,110,53,.16)">ADOPTED</Tag>
+                        : <span onClick={() => this.adoptBossReality(name, rr)} title="Set this boss's estimate to your measured rate" style={{ cursor: "pointer", color: C.goldDeep, ...mono({ fontSize: 10, fontWeight: 600 }) }}>◈ adopt as estimate</span>}
+                    </div>
+                  )}
+                  <div className="sheetwrap" style={{ marginTop: 9 }}>
+                    <table className="sheet">
+                      <thead><tr>{["Date", "Kills", "Time", "Pace", "Loot", ""].map((h, i) => <th key={i} className={i >= 1 && i <= 4 ? "num" : ""}>{h}</th>)}</tr></thead>
+                      <tbody>{rows.map((b) => this.isEditingLog("boss", b._i) ? this.logEditorRow("boss", b._i, 6) : (
+                        <tr key={b._i}>
+                          <td style={mono({ fontSize: 11 })}>{this.dShort(b.date)}</td>
+                          <td className="num" style={mono({ fontSize: 12 })}>{this.fmt(b.kills)}</td>
+                          <td className="num" style={mono({ fontSize: 12, color: C.muted2 })}>{b.mins > 0 ? b.mins + "m" : "—"}</td>
+                          <td className="num" style={mono({ fontSize: 12, color: b.mins > 0 ? C.teal : C.muted })}>{b.mins > 0 ? Math.round(((b.kills || 0) * 600) / b.mins) / 10 + "/hr" : "—"}</td>
+                          <td className="num" style={mono({ fontSize: 12, color: b.loot > 0 ? C.gold : C.muted })}>{b.loot > 0 ? this.short(b.loot) : "—"}</td>
+                          <td style={{ whiteSpace: "nowrap" }}>{this.editLogBtn("boss", b._i)}<span onClick={() => this.delLog("boss", b._i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td>
+                        </tr>
+                      ))}{rows.length === 0 && <tr><td colSpan={6} style={serif({ fontStyle: "normal", color: C.muted, padding: 12 })}>No kills logged for {name} yet — start a field session above, and they'll show here.</td></tr>}</tbody>
+                    </table>
+                  </div>
+                </Card>
+              );
+            })()}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(44,32,19,.05)", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
               <span style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted })}>Battle card curated {g.asOf} · cross-checked with the OSRS Wiki</span>
               <a href={wikiBase + g.wikiPage} target="_blank" rel="noreferrer" style={{ ...mono({ fontSize: 10.5, color: "#9a7530" }) }}>Full strategy on the Wiki →</a>
