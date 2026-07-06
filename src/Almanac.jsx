@@ -450,6 +450,35 @@ export default class Almanac extends React.Component {
     }
     return { item: f.item, qty: f.qty || 0, avgBuy: 0, avgSell: 0, buyDate: f.date, sellDate: f.date, notes: f.notes || "", tax: 0, net: f.net || 0, roi: f.roi || 0, hold: 0, gpday: 0 };
   }
+  // Margin capture rate: how much of the scanner's theoretical margin your
+  // REAL flips actually banked. Each logged flip is matched by name to the
+  // current market scan and graded realizedROI ÷ today's sanity-checked margin
+  // on that same item (clamped 0–2 so one fluke can't dominate), weighted by
+  // capital committed. Honest caveat baked into the labels: scans aren't
+  // archived, so the yardstick is TODAY'S margin on the same items, not the
+  // margin you saw the day you flipped.
+  flipCapture() {
+    const total = this.logs.flips.length;
+    if (!this.priceRows || !this.priceRows.length || !total) return { rate: null, matched: 0, total };
+    const byName = {}; this.priceRows.forEach((r) => { byName[(r.name || "").toLowerCase()] = r; });
+    let wSum = 0, cSum = 0, matched = 0;
+    this.logs.flips.forEach((f) => {
+      const c = this.computeFlip(f);
+      if (!(c.avgBuy > 0) || !(c.qty > 0)) return;
+      const m = byName[(c.item || "").toLowerCase()];
+      if (!m) return;
+      // Same effective prices the scanner trades on (hourly-average sanity check).
+      const has1h = m.hvol1h != null;
+      const buy = has1h && m.avgLow1h > 0 ? Math.max(m.buy, m.avgLow1h) : m.buy;
+      const sell = has1h && m.avgHigh1h > 0 ? Math.min(m.sell, m.avgHigh1h) : m.sell;
+      if (!(buy > 0) || !(sell > 0)) return;
+      const theo = ((sell - this.flipTax(sell, 1) - buy) / buy) * 100;
+      if (theo < 0.05) return; // no meaningful margin today — nothing to grade against
+      const w = c.avgBuy * c.qty;
+      wSum += w; cSum += Math.max(0, Math.min(2, c.roi / theo)) * w; matched++;
+    });
+    return { rate: wSum > 0 ? cSum / wSum : null, matched, total };
+  }
   alchCost() { const c = this.alchcfg; return c.fireSource === "staff" ? c.natRune : c.natRune + 5 * c.fireRune; }
 
   // ---------- farming yield model ----------
@@ -754,7 +783,9 @@ export default class Almanac extends React.Component {
     if (filled) { entry.herbs = herbs; entry.patchN = y.P; entry.perPatch = perPatch; }
     this.logs.herb.unshift(entry); this.saveLogs(); this.setState({ openForm: null });
   };
-  addBoss = () => { const boss = this.val("boss_name") || D.bosses[0].n, kills = this.num("boss_kills") || 1; this.logs.boss.unshift({ date: this.today(), boss, kills, note: this.val("boss_note") }); this.saveLogs(); this.setState({ openForm: null }); };
+  // Minutes are optional — a timed entry is what turns the kill log into a
+  // measured kills/hr (Session Rates grades your reality against the book).
+  addBoss = () => { const boss = this.val("boss_name") || D.bosses[0].n, kills = this.num("boss_kills") || 1, mins = this.num("boss_mins"); const entry = { date: this.today(), boss, kills, note: this.val("boss_note") }; if (mins > 0) entry.mins = Math.round(mins); this.logs.boss.unshift(entry); this.saveLogs(); this.setState({ openForm: null }); };
   addSlay = () => { const task = this.val("slay_task") || D.slayer[0].task; this.logs.slayerLog.unshift({ date: this.today(), task, xp: this.num("slay_xp"), gp: this.num("slay_gp") }); this.saveLogs(); this.setState({ openForm: null }); };
   addDrop = () => { const boss = this.val("drop_boss") || this.state.bossFocus, drop = this.val("drop_name"); if (!boss || !drop) return; this.logs.drop.unshift({ date: this.today(), boss, drop, kc: this.num("drop_kc") }); this.saveLogs(); this.setState({ openForm: null }); };
   delLog = (t, i) => { if (this.logs[t]) { this.logs[t].splice(i, 1); this.saveLogs(); this.bump(); } };
@@ -866,6 +897,27 @@ export default class Almanac extends React.Component {
   toggleBlock = (t) => { this.blocks[t] = !this.blocks[t]; this._save("almanac.blocks.v1", this.blocks); this.bump(); };
   setBossOv = (boss, key, raw) => { const v = Math.max(0, Math.round(this.parseNum(raw) || 0)); if (!this.bossOv[boss]) this.bossOv[boss] = {}; this.bossOv[boss][key] = v; this._save("almanac.bossov.v1", this.bossOv); this.bump(); };
   resetBossOv = (boss) => { delete this.bossOv[boss]; this._save("almanac.bossov.v1", this.bossOv); this.bump(); };
+  // Your logged reality for a boss, from the same two logs the Focus tab uses:
+  //   kills/hr  — timed kill-log sessions only (entries carrying minutes)
+  //   gp/kill   — priced drop log ÷ ALL logged KC. Only uniques get logged, so
+  //               this is a floor (no commons/supply drops) — labeled as such.
+  //   gp/hr     — the two combined: your pace × your loot per kill.
+  bossReality(name) {
+    let mins = 0, timedKills = 0, kcLog = 0;
+    this.logs.boss.forEach((b) => { if (b.boss !== name) return; kcLog += b.kills || 0; if (b.mins > 0) { mins += b.mins; timedKills += b.kills || 0; } });
+    const dropKc = Math.max(0, ...this.logs.drop.filter((d) => d.boss === name).map((d) => d.kc || 0));
+    const kcAll = Math.max(kcLog, dropKc);
+    const drops = this.bossDrops[name] || [];
+    let lootGp = 0, dropsN = 0;
+    this.logs.drop.forEach((d) => { if (d.boss !== name) return; const dr = drops.find((x) => x.n === d.drop); if (dr && dr.v > 0) { lootGp += dr.v; dropsN++; } });
+    const kph = mins > 0 ? (timedKills * 60) / mins : null;
+    const gpKill = kcAll > 0 && dropsN > 0 ? lootGp / kcAll : null;
+    const gpHr = kph != null && gpKill != null ? Math.round(kph * gpKill) : null;
+    return { kph: kph != null ? Math.round(kph * 10) / 10 : null, gpHr, mins, timedKills, dropsN, kcAll };
+  }
+  // One click writes BOTH measured rates into the override store (single save =
+  // single undo step), so every engine downstream runs on your numbers.
+  adoptBossReality = (boss, r) => { if (r.kph == null && r.gpHr == null) return; if (!this.bossOv[boss]) this.bossOv[boss] = {}; if (r.kph != null) this.bossOv[boss].kills = Math.max(1, Math.round(r.kph)); if (r.gpHr != null) this.bossOv[boss].gpHr = Math.max(0, Math.round(r.gpHr)); this._save("almanac.bossov.v1", this.bossOv); this.bump(); };
 
   // ---------- small render helpers ----------
   field(id, ph, opts = {}) {
@@ -2132,6 +2184,9 @@ export default class Almanac extends React.Component {
     // Scan the whole live market when we have it; otherwise the manual list.
     const usingMarket = this.priceRows && this.priceRows.length > 0;
     const source = usingMarket ? this.priceRows : this.logs.scan;
+    // Your realized capture rate discounts every projection ("you ≈ …").
+    const capR = this.flipCapture();
+    const capRate = capR.rate != null && capR.matched >= 2 ? capR.rate : null;
     const fail = { margin: 0, vol: 0, age: 0, profit: 0, buy: 0 };
     const allRows = source.map((it, i) => {
       // Realistic trade prices: a single outlier trade can spike the instant
@@ -2158,7 +2213,7 @@ export default class Almanac extends React.Component {
       const gates = [[cMargin, nMargin], [cVol, nVol], [cAge, nAge], [cProfit, nProfit], [cBuy, nBuy]];
       const all = gates.every((g) => g[0]);
       const watch = !all && gates.every((g) => g[0] || g[1]);
-      return { i, manualIdx: usingMarket ? -1 : i, name: it.name, buy: this.fmt(buy), sell: this.fmt(sell), margin: margin.toFixed(1) + "%", marginColor: cMargin ? C.green : C.red, vol: this.short(it.vol || 0), flow: flowHr == null ? "—" : this.short(flowHr) + "/h", flowN: flowHr == null ? -1 : flowHr, age: (it.age || 0) + "m", profit4h: this.short(profit4h), profit4hN: profit4h, all, watch, verdict: all ? "FLIP NOW" : watch ? "WATCH" : "SKIP", vColor: all ? C.green : watch ? "#9a7530" : C.red, vBg: all ? "rgba(92,110,53,.18)" : watch ? "rgba(201,162,74,.16)" : "rgba(150,58,44,.1)", rowBg: all ? "rgba(92,110,53,.10)" : watch ? "rgba(201,162,74,.07)" : "transparent" };
+      return { i, manualIdx: usingMarket ? -1 : i, name: it.name, buy: this.fmt(buy), sell: this.fmt(sell), margin: margin.toFixed(1) + "%", marginColor: cMargin ? C.green : C.red, vol: this.short(it.vol || 0), flow: flowHr == null ? "—" : this.short(flowHr) + "/h", flowN: flowHr == null ? -1 : flowHr, age: (it.age || 0) + "m", profit4h: this.short(profit4h), profit4hN: profit4h, you4h: capRate != null && profit4h > 0 ? this.short(Math.round(profit4h * capRate)) : null, all, watch, verdict: all ? "FLIP NOW" : watch ? "WATCH" : "SKIP", vColor: all ? C.green : watch ? "#9a7530" : C.red, vBg: all ? "rgba(92,110,53,.18)" : watch ? "rgba(201,162,74,.16)" : "rgba(150,58,44,.1)", rowBg: all ? "rgba(92,110,53,.10)" : watch ? "rgba(201,162,74,.07)" : "transparent" };
     });
     const avoidByName = this.flipAvoidList().byName;
     allRows.forEach((r) => { r.avoid = avoidByName.get((r.name || "").toLowerCase()) || null; });
@@ -2210,7 +2265,7 @@ export default class Almanac extends React.Component {
         )}
         <Card>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
-            <Kicker color={C.goldDeep}>{flipNowN} flip now{watchN ? ` · ${watchN} on watch (within ${Math.round(tol * 100)}% of the gates)` : ""} · {usingMarket ? scanned.toLocaleString() + " market items scanned" : scanned + " in your list"}</Kicker>
+            <Kicker color={C.goldDeep}>{flipNowN} flip now{watchN ? ` · ${watchN} on watch (within ${Math.round(tol * 100)}% of the gates)` : ""} · {usingMarket ? scanned.toLocaleString() + " market items scanned" : scanned + " in your list"}{capRate != null && <span style={{ marginLeft: 8, ...mono({ fontSize: 9, fontWeight: 600, color: "#9a7530", background: "rgba(201,162,74,.16)", padding: "2px 7px", borderRadius: 4, letterSpacing: ".05em" }) }}>YOUR CAPTURE {Math.round(capRate * 100)}%</span>}</Kicker>
             <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", ...mono({ fontSize: 11, color: C.muted2 }) }}>
               <input type="checkbox" checked={showWatch} onChange={(e) => this.setState({ flipShowWatch: e.target.checked })} style={{ accentColor: C.gold, width: 15, height: 15 }} />
               Show watch items
@@ -2228,7 +2283,7 @@ export default class Almanac extends React.Component {
                   <td className="num" style={mono({ fontSize: 12 })}>{r.vol}</td>
                   <td className="num" style={mono({ fontSize: 12, color: r.flowN === 0 ? C.red : C.muted2 })}>{r.flow}</td>
                   <td className="num" style={mono({ fontSize: 12 })}>{r.age}</td>
-                  <td className="num" style={mono({ fontSize: 12 })}>{r.profit4h}</td>
+                  <td className="num" style={mono({ fontSize: 12 })}>{r.profit4h}{r.you4h != null && <div style={mono({ fontSize: 9, color: "#9a7530" })}>you ≈ {r.you4h}</div>}</td>
                   <td><Tag color={r.vColor} bg={r.vBg}>{r.verdict}</Tag></td>
                   <td>{r.manualIdx >= 0 ? <span onClick={() => this.delLog("scan", r.manualIdx)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span> : null}</td>
                 </tr>
@@ -2236,7 +2291,7 @@ export default class Almanac extends React.Component {
               {rows.length === 0 && <tr><td colSpan={10} style={serif({ fontStyle: "normal", color: C.muted, padding: 18 })}>{!usingMarket && this.logs.scan.length === 0 ? "Hit ⟳ Live prices to scan the market, or add items manually." : watchN > 0 ? `Nothing clears every gate. ${watchN} item${watchN > 1 ? "s are" : " is"} close — tick “Show watch items”.` : `Nothing clears the gates among ${scanned.toLocaleString()} items${failTop ? ` (${failTop})` : ""}. Loosen the control panel or hit Reset.`}</td></tr>}</tbody>
             </table>
           </div>
-          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>By default only <strong>FLIP NOW</strong> (clears every gate at your bankroll) shows. Watch items sit within the tolerance % of qualifying.{avoidShown ? ` ${avoidShown} shown ${avoidShown > 1 ? "are" : "is"} on your avoid list (⚑) — flagged from past performance.` : ""} Margin is after the 2% sell tax, on prices sanity-checked against the last hour's averages (one outlier trade can't fake a spread). <strong>Flow (1h)</strong> is the thinner side of what actually traded in the last hour — profit/4h fills min(buy limit, your capital per slot, 4h of that flow), so yesterday's volume can't inflate a dead item. Hit ⟳ Scan market to refresh from the OSRS Wiki.</div>
+          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>By default only <strong>FLIP NOW</strong> (clears every gate at your bankroll) shows. Watch items sit within the tolerance % of qualifying.{avoidShown ? ` ${avoidShown} shown ${avoidShown > 1 ? "are" : "is"} on your avoid list (⚑) — flagged from past performance.` : ""} Margin is after the 2% sell tax, on prices sanity-checked against the last hour's averages (one outlier trade can't fake a spread). <strong>Flow (1h)</strong> is the thinner side of what actually traded in the last hour — profit/4h fills min(buy limit, your capital per slot, 4h of that flow), so yesterday's volume can't inflate a dead item.{capRate != null ? <> <strong>you ≈</strong> discounts each projection by your {Math.round(capRate * 100)}% capture rate — measured from {capR.matched} of your logged flips graded against today's scanner margins on the same items (see Performance).</> : ""} Hit ⟳ Scan market to refresh from the OSRS Wiki.</div>
         </Card>
       </div>
     );
@@ -2299,8 +2354,23 @@ export default class Almanac extends React.Component {
     const itemBars = rows.slice(0, 8).map((r) => ({ label: r.item, v: r.net }));
     const av = this.flipAvoidList();
     const pill = { watch: { c: C.teal, bg: "rgba(60,107,107,.14)", label: "WATCH" }, avoid: { c: C.red, bg: "rgba(150,58,44,.14)", label: "AVOID" }, dead: { c: "#9a7530", bg: "rgba(201,162,74,.16)", label: "DEAD CAP" } };
+    const cap = this.flipCapture();
+    const capPct = cap.rate != null ? Math.round(cap.rate * 100) : null;
+    const capColor = capPct == null ? C.muted : capPct >= 85 ? C.green : capPct >= 55 ? "#9a7530" : C.red;
     return (
       <div>
+        <Card style={{ marginBottom: 16, borderTop: `3px solid ${TH.accent}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 22, flexWrap: "wrap" }}>
+            <div style={{ minWidth: 150 }}>
+              <Kicker color={TH.accent}>Margin capture rate</Kicker>
+              <div style={mono({ fontSize: 32, fontWeight: 700, color: capColor })}>{capPct != null ? capPct + "%" : "—"}</div>
+              <div style={mono({ fontSize: 10, color: C.muted2 })}>{cap.matched > 0 ? `${cap.matched} of ${cap.total} flips matched to the scan` : this.priceRows && this.priceRows.length ? "no logged flips match today's scan" : "hit ⟳ Scan market on the Scanner first"}</div>
+            </div>
+            <div style={{ flex: 1, minWidth: 280, ...serif({ fontSize: 12.5, fontStyle: "normal", color: C.muted, lineHeight: 1.5 }) }}>
+              How much of the scanner's theoretical margin your real flips actually banked: each logged flip's realized ROI is graded against today's sanity-checked margin on the same item, weighted by the capital you committed. The Scanner discounts every projection by this rate (the <strong style={{ color: "#9a7530" }}>you ≈</strong> line) — so the more honestly you log, the more honestly it predicts. Yardstick caveat: scans aren't archived, so it grades against <em>today's</em> margins, not the ones you saw when you flipped.
+            </div>
+          </div>
+        </Card>
         {fc.length > 0 && (
           <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16, marginBottom: 16 }}>
             <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
@@ -2820,20 +2890,38 @@ export default class Almanac extends React.Component {
             <Kicker color={C.goldDeep}>Session rates · your real kills/hr & GP/hr per boss</Kicker>
             <span style={mono({ fontSize: 11, color: C.muted2 })}>{tuned} boss{tuned === 1 ? "" : "es"} tuned</span>
           </div>
-          <div style={serif({ fontSize: 12.5, fontStyle: "normal", color: C.muted, marginTop: 6 })}>These feed the Dashboard money-meta, Goals route-finding and the Focus tab. Edit a row to override the defaults; live KC comes straight from your Kill Log.</div>
+          <div style={serif({ fontSize: 12.5, fontStyle: "normal", color: C.muted, marginTop: 6 })}>These feed the Dashboard money-meta, Goals route-finding and the Focus tab. Edit a row to override the defaults; live KC comes straight from your Kill Log. <strong>Logged reality</strong> is measured from your own logs — kills/hr from timed Kill Log sessions, gp/hr from your priced drop log at that pace (uniques only, so it's a floor) — hit <strong>adopt</strong> to run every engine on your numbers instead of the book's.</div>
         </Card>
         <Card>
           <div className="sheetwrap">
             <table className="sheet">
-              <thead><tr>{["Boss", "Access", "Your KC", "Kills/hr", "GP/hr", "GP/kill", ""].map((h, i) => <th key={i} className={i > 1 && i < 6 ? "num" : ""}>{h}</th>)}</tr></thead>
-              <tbody>{rows.map((b) => { const e = this.bossEff(b); const ov = this.bossOv[b.n]; const kc = kcAll[b.n] || 0; const gpk = e.kills > 0 ? Math.round(e.estGp / e.kills) : 0; return (
+              <thead><tr>{["Boss", "Access", "Your KC", "Kills/hr", "GP/hr", "GP/kill", "Logged reality", ""].map((h, i) => <th key={i} className={i > 1 && i < 6 ? "num" : ""}>{h}</th>)}</tr></thead>
+              <tbody>{rows.map((b) => { const e = this.bossEff(b); const ov = this.bossOv[b.n]; const kc = kcAll[b.n] || 0; const gpk = e.kills > 0 ? Math.round(e.estGp / e.kills) : 0;
+                const r = this.bossReality(b.n);
+                const dKph = r.kph != null && e.kills > 0 ? Math.round(((r.kph - e.kills) / e.kills) * 100) : null;
+                // "adopted" = the current overrides already match the measurement.
+                const adopted = ov && r.kph != null && ov.kills === Math.max(1, Math.round(r.kph)) && (r.gpHr == null || ov.gpHr === Math.max(0, Math.round(r.gpHr)));
+                return (
                 <tr key={b.n}>
                   <td style={cinzel({ fontWeight: 600, fontSize: 13 })}>{b.n}<div style={mono({ fontSize: 9, color: C.muted })}>{b.tier}</div></td>
                   <td><Tag color={e.acc ? C.green : C.red} bg={e.acc ? "rgba(92,110,53,.16)" : "rgba(150,58,44,.12)"}>{e.acc ? "Open" : "Gated"}</Tag></td>
                   <td className="num" style={mono({ fontSize: 12 })}>{kc ? this.fmt(kc) : "—"}</td>
-                  <td className="num"><input className="led" key={"k" + b.n + (ov ? 1 : 0)} defaultValue={e.kills} onBlur={(ev) => this.setBossOv(b.n, "kills", ev.target.value)} style={{ width: 70, padding: "4px 6px", textAlign: "right" }} /></td>
-                  <td className="num"><input className="led" key={"g" + b.n + (ov ? 1 : 0)} defaultValue={e.estGp} onBlur={(ev) => this.setBossOv(b.n, "gpHr", ev.target.value)} style={{ width: 100, padding: "4px 6px", textAlign: "right" }} /></td>
+                  <td className="num"><input className="led" key={"k" + b.n + (ov ? JSON.stringify(ov) : 0)} defaultValue={e.kills} onBlur={(ev) => this.setBossOv(b.n, "kills", ev.target.value)} style={{ width: 70, padding: "4px 6px", textAlign: "right" }} /></td>
+                  <td className="num"><input className="led" key={"g" + b.n + (ov ? JSON.stringify(ov) : 0)} defaultValue={e.estGp} onBlur={(ev) => this.setBossOv(b.n, "gpHr", ev.target.value)} style={{ width: 100, padding: "4px 6px", textAlign: "right" }} /></td>
                   <td className="num" style={mono({ fontSize: 12, color: C.muted2 })}>{gpk ? this.short(gpk) : "—"}</td>
+                  <td>
+                    {r.kph == null ? <span style={mono({ fontSize: 10, color: C.muted })}>{r.kcAll > 0 ? "add minutes to a kill log" : "—"}</span> : (
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        <div>
+                          <div style={mono({ fontSize: 11.5 })}>{r.kph}/hr{dKph != null && dKph !== 0 && <span style={{ marginLeft: 6, color: dKph > 0 ? C.green : C.red, fontWeight: 600 }}>{(dKph > 0 ? "+" : "") + dKph}%</span>}<span style={{ marginLeft: 6, color: C.muted, fontSize: 9 }}>({r.timedKills} kills / {r.mins}m)</span></div>
+                          <div style={mono({ fontSize: 10, color: C.muted2 })}>{r.gpHr != null ? this.short(r.gpHr) + "/hr · uniques only" : "log drops to measure gp/hr"}</div>
+                        </div>
+                        {adopted
+                          ? <Tag color={C.green} bg="rgba(92,110,53,.16)">ADOPTED</Tag>
+                          : <span onClick={() => this.adoptBossReality(b.n, r)} style={{ cursor: "pointer", color: C.goldDeep, ...mono({ fontSize: 10, fontWeight: 600 }) }}>◈ adopt</span>}
+                      </div>
+                    )}
+                  </td>
                   <td>{ov ? <span onClick={() => this.resetBossOv(b.n)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 10 }) }}>reset</span> : null}</td>
                 </tr>
               ); })}</tbody>
@@ -2856,17 +2944,18 @@ export default class Almanac extends React.Component {
           {this.state.openForm === "boss" && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
               <select className="led" id="boss_name" style={{ width: 200 }}>{opts.map((o) => <option key={o} value={o}>{o}</option>)}</select>
-              {this.field("boss_kills", "Kills", { w: 100 })}{this.field("boss_note", "Note", { w: 200 })}
+              {this.field("boss_kills", "Kills", { w: 100 })}{this.field("boss_mins", "Minutes (opt)", { w: 110 })}{this.field("boss_note", "Note", { w: 170 })}
               <Btn tone="gold" onClick={this.addBoss}>Save</Btn>
+              <span style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted })}>Add minutes and Session Rates learns your real kills/hr.</span>
             </div>
           )}
         </Card>
         <Card>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr>{["Date", "Boss", "Kills", "Note", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i === 2 ? "right" : "left", padding: "7px 9px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
+            <thead><tr>{["Date", "Boss", "Kills", "Time", "Pace", "Note", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i >= 2 && i <= 4 ? "right" : "left", padding: "7px 9px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
             <tbody>{log.map((b, i) => (
-              <tr key={i}><td style={{ ...mono({ fontSize: 11 }), padding: "7px 9px" }}>{this.dShort(b.date)}</td><td style={{ ...cinzel({ fontWeight: 600, fontSize: 13 }), padding: "7px 9px" }}>{b.boss}</td><td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{this.fmt(b.kills)}</td><td style={{ ...serif({ fontSize: 13, color: C.muted }), padding: "7px 9px" }}>{b.note || "—"}</td><td style={{ padding: "7px 9px" }}><span onClick={() => this.delLog("boss", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td></tr>
-            ))}{log.length === 0 && <tr><td colSpan={5} style={serif({ fontStyle: "normal", color: C.muted, padding: 16 })}>No kills logged. Track KC here and the Focus tab computes your drop-rate luck.</td></tr>}</tbody>
+              <tr key={i}><td style={{ ...mono({ fontSize: 11 }), padding: "7px 9px" }}>{this.dShort(b.date)}</td><td style={{ ...cinzel({ fontWeight: 600, fontSize: 13 }), padding: "7px 9px" }}>{b.boss}</td><td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{this.fmt(b.kills)}</td><td style={{ ...mono({ fontSize: 12, color: C.muted2 }), padding: "7px 9px", textAlign: "right" }}>{b.mins > 0 ? b.mins + "m" : "—"}</td><td style={{ ...mono({ fontSize: 12, color: b.mins > 0 ? C.teal : C.muted }), padding: "7px 9px", textAlign: "right" }}>{b.mins > 0 ? Math.round(((b.kills || 0) * 600) / b.mins) / 10 + "/hr" : "—"}</td><td style={{ ...serif({ fontSize: 13, color: C.muted }), padding: "7px 9px" }}>{b.note || "—"}</td><td style={{ padding: "7px 9px" }}><span onClick={() => this.delLog("boss", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td></tr>
+            ))}{log.length === 0 && <tr><td colSpan={7} style={serif({ fontStyle: "normal", color: C.muted, padding: 16 })}>No kills logged. Track KC here and the Focus tab computes your drop-rate luck. Add minutes to a session and Session Rates measures your real kills/hr.</td></tr>}</tbody>
           </table>
         </Card>
       </div>
