@@ -288,6 +288,7 @@ export default class Almanac extends React.Component {
   componentDidMount() {
     this._undoSuspended = true;
     this.loadState();
+    this.recordXpSnapshot(); // stamp today's baseline so history accrues on real accounts
     this._undoSuspended = false;
     this._undoStack = []; this._redoStack = [];
     this.gearPrices = {};
@@ -647,8 +648,40 @@ export default class Almanac extends React.Component {
     if (!res.ok) { this.setState({ fetching: false, fetchMsg: res.error }); return; }
     this.stats = { rsn: res.rsn, skills: res.skills, mode: res.mode || this.mode, source: res.source, qpApi: res.qp, at: Date.now(), demo: false };
     this.skillsRaw = res.skills; this._save("almanac.stats.v1", this.stats);
+    this.recordXpSnapshot();
     this.setState({ fetching: false, fetchMsg: `Loaded ${res.rsn} · combat ${res.combat} · ${res.source}` });
   };
+  // ---------- XP velocity ----------
+  // Each real hiscores fetch stamps a total-XP-per-skill snapshot (one per day,
+  // latest wins). Two snapshots apart in time = a measured xp/day, which
+  // recalibrates goal ETAs from your actual cadence instead of a theoretical
+  // "if you sat there at method xp/hr" figure. Passive telemetry — not undoable.
+  recordXpSnapshot() {
+    if (!this.skillsRaw || (this.stats && this.stats.demo)) return;
+    const day = this.today();
+    const skills = {}; let total = 0;
+    this.skillsRaw.forEach(([n, , x]) => { skills[n] = x || 0; total += x || 0; });
+    let hist = this._load("almanac.xphist.v1", []) || [];
+    hist = hist.filter((h) => h.day !== day);
+    hist.push({ at: Date.now(), day, skills, total });
+    hist.sort((a, b) => a.at - b.at);
+    if (hist.length > 200) hist = hist.slice(-200);
+    this._save("almanac.xphist.v1", hist);
+  }
+  // Realized xp/day over the recent window (≤30d back from the latest snapshot),
+  // per skill and total. { ok, snaps, days, perSkill, totalPerDay, fromDay, toDay }.
+  xpVelocity() {
+    const hist = this._load("almanac.xphist.v1", []) || [];
+    if (hist.length < 2) return { ok: false, snaps: hist.length };
+    const last = hist[hist.length - 1];
+    const cutoff = last.at - 30 * 86400000;
+    const win = hist.filter((h) => h.at >= cutoff);
+    const base = win.length >= 2 ? win[0] : hist[hist.length - 2];
+    const days = Math.max(0.5, (last.at - base.at) / 86400000);
+    const perSkill = {};
+    Object.keys(last.skills || {}).forEach((n) => { const d = (last.skills[n] || 0) - ((base.skills || {})[n] || 0); if (d > 0) perSkill[n] = d / days; });
+    return { ok: true, snaps: hist.length, days, perSkill, totalPerDay: Math.max(0, ((last.total || 0) - (base.total || 0)) / days), fromDay: base.day, toDay: last.day };
+  }
   setMode = (m) => { this.stats.mode = m; this._save("almanac.stats.v1", this.stats); this.bump(); };
   refreshPrices = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
@@ -791,7 +824,32 @@ export default class Almanac extends React.Component {
   // Minutes are optional — a timed entry is what turns the kill log into a
   // measured kills/hr (Session Rates grades your reality against the book).
   addBoss = () => { const boss = this.val("boss_name") || D.bosses[0].n, kills = this.num("boss_kills") || 1, mins = this.num("boss_mins"), loot = this.num("boss_loot"); const entry = { date: this.today(), boss, kills, note: this.val("boss_note") }; if (mins > 0) entry.mins = Math.round(mins); if (loot > 0) entry.loot = Math.round(loot); this.logs.boss.unshift(entry); this.saveLogs(); this.setState({ openForm: null }); };
-  addSlay = () => { const task = this.val("slay_task") || D.slayer[0].task; this.logs.slayerLog.unshift({ date: this.today(), task, xp: this.num("slay_xp"), gp: this.num("slay_gp") }); this.saveLogs(); this.setState({ openForm: null }); };
+  addSlay = () => { const task = this.val("slay_task") || D.slayer[0].task, mins = this.num("slay_mins"); const entry = { date: this.today(), task, xp: this.num("slay_xp"), gp: this.num("slay_gp") }; if (mins > 0) entry.mins = Math.round(mins); this.logs.slayerLog.unshift(entry); this.saveLogs(); this.setState({ openForm: null }); };
+  // Realized slayer performance per task, graded against the EV table (D.slayer).
+  // gp-per-xp is duration-free (loot efficiency); gp/hr & xp/hr need logged
+  // minutes. Overall folds every logged task into one loot-per-xp verdict.
+  slayReality() {
+    const byTask = {};
+    this.logs.slayerLog.forEach((s) => {
+      const t = byTask[s.task] || (byTask[s.task] = { task: s.task, n: 0, xp: 0, gp: 0, mins: 0, tXp: 0, tGp: 0 });
+      t.n++; t.xp += s.xp || 0; t.gp += s.gp || 0;
+      if (s.mins > 0) { t.mins += s.mins; t.tXp += s.xp || 0; t.tGp += s.gp || 0; }
+    });
+    const rows = Object.values(byTask).map((t) => {
+      const def = D.slayer.find((d) => d.task === t.task);
+      const realGpXp = t.xp > 0 ? t.gp / t.xp : null;
+      const tblGpXp = def && def.xpHr > 0 ? def.gpHr / def.xpHr : null;
+      const realGpHr = t.mins > 0 ? Math.round((t.tGp * 60) / t.mins) : null;
+      const realXpHr = t.mins > 0 ? Math.round((t.tXp * 60) / t.mins) : null;
+      return { ...t, def, realGpXp, tblGpXp, realGpHr, realXpHr,
+        gpXpDelta: realGpXp != null && tblGpXp ? (realGpXp - tblGpXp) / tblGpXp : null,
+        gpHrDelta: realGpHr != null && def && def.gpHr > 0 ? (realGpHr - def.gpHr) / def.gpHr : null };
+    }).sort((a, b) => b.gp - a.gp);
+    let xp = 0, gp = 0, evGp = 0;
+    rows.forEach((r) => { xp += r.xp; gp += r.gp; if (r.tblGpXp) evGp += r.tblGpXp * r.xp; });
+    const overall = { n: this.logs.slayerLog.length, xp, gp, realGpXp: xp > 0 ? gp / xp : null, evGpXp: xp > 0 ? evGp / xp : null, delta: evGp > 0 ? (gp - evGp) / evGp : null };
+    return { rows, overall };
+  }
   addDrop = () => { const boss = this.val("drop_boss") || this.state.bossFocus, drop = this.val("drop_name"); if (!boss || !drop) return; this.logs.drop.unshift({ date: this.today(), boss, drop, kc: this.num("drop_kc") }); this.saveLogs(); this.setState({ openForm: null }); };
   delLog = (t, i) => { if (this.logs[t]) { this.logs[t].splice(i, 1); this.saveLogs(); this.setState({ editLog: null }); } };
 
@@ -839,6 +897,7 @@ export default class Almanac extends React.Component {
         { k: "task", label: "Task", type: "sel", opts: sel(D.slayer.map((t) => t.task), entry.task), w: 170 },
         { k: "xp", label: "XP", type: "num", w: 100 },
         { k: "gp", label: "Loot gp", type: "num", w: 110 },
+        { k: "mins", label: "Minutes", type: "num", w: 90, opt: true },
       ];
       case "herb": return [
         { k: "date", label: "Date", type: "date" },
@@ -2145,11 +2204,17 @@ export default class Almanac extends React.Component {
   // ===================== GOALS =====================
   renderGoals() {
     const sm = this.skillMap;
+    const vel = this.xpVelocity();
     const rows = this.goals.map((g) => {
       const cur = sm[g.skill] || { l: 1, x: 0 }; const tgtXp = this.xpFor(g.tgt); const xpLeft = Math.max(0, tgtXp - cur.x);
       const hours = g.xpHr > 0 ? xpLeft / g.xpHr : 0; const total = Math.round(hours * g.gpHr);
       const bar = xpLeft <= 0 ? 100 : Math.max(3, Math.min(100, (cur.x / tgtXp) * 100));
-      return { ...g, cur: cur.l, hours: g.xpHr > 0 ? hours.toFixed(1) + " h" : xpLeft <= 0 ? "done" : "—", total, xpLeft, bar };
+      // Real ETA: your MEASURED xp/day for this skill vs the theoretical days
+      // the method assumes (its xp/hr × your hours/day). Green = ahead of plan.
+      const pace = vel.ok ? vel.perSkill[g.skill] || 0 : 0;
+      const realDays = xpLeft <= 0 ? 0 : pace > 0 ? Math.ceil(xpLeft / pace) : null;
+      const planDays = g.xpHr > 0 ? hours / Math.max(0.1, this.gcfg.hoursPerDay || 2) : null;
+      return { ...g, cur: cur.l, hours: g.xpHr > 0 ? hours.toFixed(1) + " h" : xpLeft <= 0 ? "done" : "—", total, xpLeft, bar, pace, realDays, planDays };
     });
     let gH = 0, gG = 0, gActive = 0;
     rows.forEach((r) => { gH += this.parseNum(r.hours) || 0; gG += r.total; if (r.xpLeft > 0) gActive++; });
@@ -2222,7 +2287,25 @@ export default class Almanac extends React.Component {
             })}
           </div>
         )}
-        <Kicker color={C.goldDeep} style={{ marginBottom: 8 }}>Skill goals · personal EHP</Kicker>
+        {vel.ok ? (() => {
+          const paced = rows.filter((r) => r.xpLeft > 0 && r.pace > 0);
+          const ahead = paced.filter((r) => r.planDays != null && r.realDays != null && r.realDays <= r.planDays).length;
+          return (
+            <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 22, flexWrap: "wrap" }}>
+                <div style={{ minWidth: 150 }}>
+                  <Kicker color={TH.accent}>Your measured pace</Kicker>
+                  <div style={mono({ fontSize: 30, fontWeight: 700, color: C.ink })}>{this.short(Math.round(vel.totalPerDay))}<span style={{ fontSize: 14, color: C.muted2 }}> xp/day</span></div>
+                  <div style={mono({ fontSize: 10, color: C.muted2 })}>{vel.snaps} snapshots · {vel.fromDay === vel.toDay ? "today" : "since " + vel.fromDay}</div>
+                </div>
+                <div style={{ flex: 1, minWidth: 280, ...serif({ fontSize: 12.5, fontStyle: "normal", color: C.muted, lineHeight: 1.5 }) }}>
+                  Real xp/day measured from your hiscores history — every time you <a href="#" onClick={(e) => { e.preventDefault(); this.go("dashboard"); }} style={{ color: TH.accent }}>Fetch stats</a> stamps a snapshot. The <strong>Real ETA</strong> column recalibrates each goal from your actual cadence instead of the method's theoretical "if you sat there" hours{paced.length ? <> — you're <strong style={{ color: ahead >= paced.length - ahead ? "#3c5322" : "#9a7530" }}>ahead of plan on {ahead} of {paced.length}</strong> active goals</> : ""}.
+                </div>
+              </div>
+            </Card>
+          );
+        })() : null}
+        <Kicker color={C.goldDeep} style={{ marginBottom: 8 }}>Skill goals · personal EHP{!vel.ok ? " · Fetch stats on 2+ days to unlock Real ETA" : ""}</Kicker>
         {this.state.openForm === "goal" && (
           <Card style={{ marginBottom: 14 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -2238,8 +2321,8 @@ export default class Almanac extends React.Component {
         <Card style={{ marginBottom: 14 }}>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead><tr>{["Skill", "Cur", "Tgt", "Method", "XP/hr", "Hours", "GP/hr", "Total", "Progress", ""].map((h, i) => (
-                <th key={i} style={{ ...mono({ fontSize: 9, letterSpacing: ".1em", color: C.muted }), textAlign: i > 3 && i < 8 ? "right" : "left", padding: "7px 9px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>))}</tr></thead>
+              <thead><tr>{["Skill", "Cur", "Tgt", "Method", "XP/hr", "Hours", "Real ETA", "GP/hr", "Total", "Progress", ""].map((h, i) => (
+                <th key={i} style={{ ...mono({ fontSize: 9, letterSpacing: ".1em", color: C.muted }), textAlign: i > 3 && i < 9 ? "right" : "left", padding: "7px 9px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>))}</tr></thead>
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.skill}>
@@ -2249,6 +2332,11 @@ export default class Almanac extends React.Component {
                     <td style={{ padding: "7px 9px" }}><input className="led" defaultValue={r.method} onBlur={(e) => this.setGoalField(r.skill, "method", e.target.value)} style={{ width: 200 }} /></td>
                     <td style={{ padding: "7px 9px", textAlign: "right" }}><input className="led" defaultValue={this.fmt(r.xpHr)} onBlur={(e) => this.setGoalField(r.skill, "xpHr", e.target.value)} style={{ width: 76, textAlign: "right" }} /></td>
                     <td style={{ ...mono({ fontSize: 12, color: C.muted2 }), padding: "7px 9px", textAlign: "right" }}>{r.hours}</td>
+                    <td style={{ padding: "7px 9px", textAlign: "right" }} title={r.pace > 0 ? this.short(Math.round(r.pace)) + " xp/day measured" : "no measured pace for this skill yet"}>
+                      {r.xpLeft <= 0 ? <span style={mono({ fontSize: 12, color: C.green })}>done</span>
+                        : r.realDays != null ? <span style={mono({ fontSize: 12, fontWeight: 600, color: r.planDays != null && r.realDays <= r.planDays ? C.green : "#9a7530" })}>{this.fmtDays(r.realDays)}</span>
+                        : <span style={mono({ fontSize: 11, color: C.muted })}>—</span>}
+                    </td>
                     <td style={{ padding: "7px 9px", textAlign: "right" }}><input className="led" defaultValue={this.fmt(r.gpHr)} onBlur={(e) => this.setGoalField(r.skill, "gpHr", e.target.value)} style={{ width: 90, textAlign: "right" }} /></td>
                     <td style={{ ...mono({ fontSize: 12, color: r.total >= 0 ? C.green : C.red }), padding: "7px 9px", textAlign: "right" }}>{r.total === 0 ? "—" : this.signed(r.total)}</td>
                     <td style={{ padding: "7px 9px", width: 120 }}><Bar pct={r.bar} c1={r.xpLeft <= 0 ? C.green : C.gold} c2={r.xpLeft <= 0 ? C.green : C.goldBright} h={6} /></td>
@@ -3479,6 +3567,9 @@ export default class Almanac extends React.Component {
   }
   renderSlayLog() {
     const log = this.logs.slayerLog; const opts = D.slayer.map((t) => t.task);
+    const real = this.slayReality();
+    const ov = real.overall;
+    const pctTag = (d) => d == null ? null : <span style={{ marginLeft: 6, fontWeight: 600, color: d >= 0 ? "#3c5322" : C.red }}>{(d >= 0 ? "+" : "") + Math.round(d * 100) + "%"}</span>;
     return (
       <div>
         <Card style={{ marginBottom: 14 }}>
@@ -3488,16 +3579,52 @@ export default class Almanac extends React.Component {
           {this.state.openForm === "slay" && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
               <select className="led" id="slay_task" style={{ width: 180 }}>{opts.map((o) => <option key={o} value={o}>{o}</option>)}</select>
-              {this.field("slay_xp", "XP gained", { w: 110 })}{this.field("slay_gp", "Loot gp", { w: 110 })}<Btn tone="gold" onClick={this.addSlay}>Save</Btn>
+              {this.field("slay_xp", "XP gained", { w: 110 })}{this.field("slay_gp", "Loot gp", { w: 110 })}{this.field("slay_mins", "Minutes (opt)", { w: 110 })}<Btn tone="gold" onClick={this.addSlay}>Save</Btn>
+              <span style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted })}>Loot &amp; XP grade you against the EV table; add minutes for a gp/hr &amp; xp/hr read.</span>
             </div>
           )}
         </Card>
+        {ov.realGpXp != null && (
+          <Card style={{ marginBottom: 14, borderTop: `3px solid ${themeFor("slayer").accent}` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 22, flexWrap: "wrap" }}>
+              <div style={{ minWidth: 160 }}>
+                <Kicker color={themeFor("slayer").accent}>Realized loot vs the table</Kicker>
+                <div style={mono({ fontSize: 28, fontWeight: 700, color: ov.delta == null ? C.ink : ov.delta >= 0 ? "#3c5322" : C.red })}>{Math.round(ov.realGpXp).toLocaleString()}<span style={{ fontSize: 13, color: C.muted2 }}> gp/xp</span></div>
+                <div style={mono({ fontSize: 10, color: C.muted2 })}>table EV {ov.evGpXp != null ? Math.round(ov.evGpXp).toLocaleString() + " gp/xp" : "—"}{pctTag(ov.delta)}</div>
+              </div>
+              <div style={{ flex: 1, minWidth: 280, ...serif({ fontSize: 12.5, fontStyle: "normal", color: C.muted, lineHeight: 1.5 }) }}>
+                Your actual loot per XP across {ov.n} logged task{ov.n === 1 ? "" : "s"}, graded against the EV table's expected loot-per-XP (duration-free, so it's honest even without timing). {ov.delta != null && Math.abs(ov.delta) >= 0.05 ? <>You're running <strong style={{ color: ov.delta >= 0 ? "#3c5322" : C.red }}>{Math.round(Math.abs(ov.delta) * 100)}% {ov.delta >= 0 ? "above" : "below"}</strong> the book — {ov.delta >= 0 ? "your task selection / luck is beating the averages." : "check your block list and task choices in the Block Calc."}</> : "right on the book's averages."} Add minutes to a task for a gp/hr &amp; xp/hr read too.
+              </div>
+            </div>
+          </Card>
+        )}
+        {real.rows.length > 0 && (
+          <Card style={{ marginBottom: 14 }}>
+            <Kicker color={C.goldDeep}>Per-task · your rates vs the EV table</Kicker>
+            <div className="sheetwrap" style={{ marginTop: 9 }}>
+              <table className="sheet">
+                <thead><tr>{["Task", "Tasks", "Loot gp/xp", "vs table", "Your gp/hr", "vs table", "XP/hr"].map((h, i) => <th key={i} className={i > 0 ? "num" : ""}>{h}</th>)}</tr></thead>
+                <tbody>{real.rows.map((r, k) => (
+                  <tr key={k}>
+                    <td style={cinzel({ fontWeight: 600, fontSize: 13 })}>{r.task}{r.def ? null : <span style={mono({ fontSize: 9, color: C.muted })}> · off-table</span>}</td>
+                    <td className="num" style={mono({ fontSize: 12 })}>{r.n}</td>
+                    <td className="num" style={mono({ fontSize: 12 })}>{r.realGpXp != null ? Math.round(r.realGpXp).toLocaleString() : "—"}<div style={mono({ fontSize: 9, color: C.muted })}>{r.tblGpXp != null ? "book " + Math.round(r.tblGpXp).toLocaleString() : "—"}</div></td>
+                    <td className="num" style={mono({ fontSize: 12, fontWeight: 600, color: r.gpXpDelta == null ? C.muted : r.gpXpDelta >= 0 ? "#3c5322" : C.red })}>{r.gpXpDelta == null ? "—" : (r.gpXpDelta >= 0 ? "+" : "") + Math.round(r.gpXpDelta * 100) + "%"}</td>
+                    <td className="num" style={mono({ fontSize: 12 })}>{r.realGpHr != null ? this.short(r.realGpHr) : <span style={{ color: C.muted }}>add mins</span>}<div style={mono({ fontSize: 9, color: C.muted })}>{r.def ? "book " + this.short(r.def.gpHr) : ""}</div></td>
+                    <td className="num" style={mono({ fontSize: 12, fontWeight: 600, color: r.gpHrDelta == null ? C.muted : r.gpHrDelta >= 0 ? "#3c5322" : C.red })}>{r.gpHrDelta == null ? "—" : (r.gpHrDelta >= 0 ? "+" : "") + Math.round(r.gpHrDelta * 100) + "%"}</td>
+                    <td className="num" style={mono({ fontSize: 12, color: C.muted2 })}>{r.realXpHr != null ? this.short(r.realXpHr) : "—"}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </Card>
+        )}
         <Card>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr>{["Date", "Task", "XP", "Loot", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i > 1 && i < 4 ? "right" : "left", padding: "7px 9px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
-            <tbody>{log.map((s, i) => this.isEditingLog("slayerLog", i) ? this.logEditorRow("slayerLog", i, 5) : (
-              <tr key={i}><td style={{ ...mono({ fontSize: 11 }), padding: "7px 9px" }}>{this.dShort(s.date)}</td><td style={{ ...cinzel({ fontWeight: 600, fontSize: 13 }), padding: "7px 9px" }}>{s.task}</td><td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{this.short(s.xp || 0)}</td><td style={{ ...mono({ fontSize: 12, color: C.green }), padding: "7px 9px", textAlign: "right" }}>{this.signed(s.gp || 0)}</td><td style={{ padding: "7px 9px", whiteSpace: "nowrap" }}>{this.editLogBtn("slayerLog", i)}<span onClick={() => this.delLog("slayerLog", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td></tr>
-            ))}{log.length === 0 && <tr><td colSpan={5} style={serif({ fontStyle: "normal", color: C.muted, padding: 16 })}>No tasks logged yet.</td></tr>}</tbody>
+            <thead><tr>{["Date", "Task", "XP", "Loot", "Time", "gp/xp", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i > 1 && i < 6 ? "right" : "left", padding: "7px 9px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
+            <tbody>{log.map((s, i) => this.isEditingLog("slayerLog", i) ? this.logEditorRow("slayerLog", i, 7) : (
+              <tr key={i}><td style={{ ...mono({ fontSize: 11 }), padding: "7px 9px" }}>{this.dShort(s.date)}</td><td style={{ ...cinzel({ fontWeight: 600, fontSize: 13 }), padding: "7px 9px" }}>{s.task}</td><td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{this.short(s.xp || 0)}</td><td style={{ ...mono({ fontSize: 12, color: C.green }), padding: "7px 9px", textAlign: "right" }}>{this.signed(s.gp || 0)}</td><td style={{ ...mono({ fontSize: 12, color: s.mins > 0 ? C.muted2 : C.muted }), padding: "7px 9px", textAlign: "right" }}>{s.mins > 0 ? s.mins + "m" : "—"}</td><td style={{ ...mono({ fontSize: 12, color: C.muted2 }), padding: "7px 9px", textAlign: "right" }}>{s.xp > 0 ? Math.round((s.gp || 0) / s.xp).toLocaleString() : "—"}</td><td style={{ padding: "7px 9px", whiteSpace: "nowrap" }}>{this.editLogBtn("slayerLog", i)}<span onClick={() => this.delLog("slayerLog", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td></tr>
+            ))}{log.length === 0 && <tr><td colSpan={7} style={serif({ fontStyle: "normal", color: C.muted, padding: 16 })}>No tasks logged yet. Log a task's XP &amp; loot and it's graded against the EV table.</td></tr>}</tbody>
           </table>
         </Card>
       </div>
