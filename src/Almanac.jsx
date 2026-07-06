@@ -310,8 +310,10 @@ export default class Almanac extends React.Component {
     // their own Enter behaviour, like the RSN box, run theirs first.)
     this._enterCommit = (e) => { if (e.key === "Enter" && e.target && e.target.tagName === "INPUT") e.target.blur(); };
     document.addEventListener("keydown", this._enterCommit);
+    // Tick the live field-session clock (elapsed + kills/hr) while one runs.
+    this._sessTick = setInterval(() => { if (this.bossSession) this.bump(); }, 10000);
   }
-  componentWillUnmount() { if (this._enterCommit) document.removeEventListener("keydown", this._enterCommit); }
+  componentWillUnmount() { if (this._enterCommit) document.removeEventListener("keydown", this._enterCommit); if (this._sessTick) clearInterval(this._sessTick); }
 
   // Load every persisted collection from localStorage into instance fields.
   // Reused on first mount, on undo/redo, and after a clear. `firstRun` (no saved
@@ -346,6 +348,9 @@ export default class Almanac extends React.Component {
     this.loadout = this._load("almanac.loadout.v1", null) || { melee: {}, ranged: {}, magic: {} };
     this.gearOwned = this._load("almanac.gearowned.v1", null) || {};
     this.journal = this._load("almanac.journal.v1", null) || [];
+    // Live boss field session (survives refresh/navigation; not an undo key —
+    // ENDING a session writes the logs, and that write is the undo point).
+    this.bossSession = this._load("almanac.bosssession.v1", null) || null;
   }
 
   // ---------- undo / redo ----------
@@ -785,7 +790,7 @@ export default class Almanac extends React.Component {
   };
   // Minutes are optional — a timed entry is what turns the kill log into a
   // measured kills/hr (Session Rates grades your reality against the book).
-  addBoss = () => { const boss = this.val("boss_name") || D.bosses[0].n, kills = this.num("boss_kills") || 1, mins = this.num("boss_mins"); const entry = { date: this.today(), boss, kills, note: this.val("boss_note") }; if (mins > 0) entry.mins = Math.round(mins); this.logs.boss.unshift(entry); this.saveLogs(); this.setState({ openForm: null }); };
+  addBoss = () => { const boss = this.val("boss_name") || D.bosses[0].n, kills = this.num("boss_kills") || 1, mins = this.num("boss_mins"), loot = this.num("boss_loot"); const entry = { date: this.today(), boss, kills, note: this.val("boss_note") }; if (mins > 0) entry.mins = Math.round(mins); if (loot > 0) entry.loot = Math.round(loot); this.logs.boss.unshift(entry); this.saveLogs(); this.setState({ openForm: null }); };
   addSlay = () => { const task = this.val("slay_task") || D.slayer[0].task; this.logs.slayerLog.unshift({ date: this.today(), task, xp: this.num("slay_xp"), gp: this.num("slay_gp") }); this.saveLogs(); this.setState({ openForm: null }); };
   addDrop = () => { const boss = this.val("drop_boss") || this.state.bossFocus, drop = this.val("drop_name"); if (!boss || !drop) return; this.logs.drop.unshift({ date: this.today(), boss, drop, kc: this.num("drop_kc") }); this.saveLogs(); this.setState({ openForm: null }); };
   delLog = (t, i) => { if (this.logs[t]) { this.logs[t].splice(i, 1); this.saveLogs(); this.bump(); } };
@@ -903,21 +908,102 @@ export default class Almanac extends React.Component {
   //               this is a floor (no commons/supply drops) — labeled as such.
   //   gp/hr     — the two combined: your pace × your loot per kill.
   bossReality(name) {
-    let mins = 0, timedKills = 0, kcLog = 0;
-    this.logs.boss.forEach((b) => { if (b.boss !== name) return; kcLog += b.kills || 0; if (b.mins > 0) { mins += b.mins; timedKills += b.kills || 0; } });
+    let mins = 0, timedKills = 0, kcLog = 0, lootTimed = 0, lootMins = 0;
+    this.logs.boss.forEach((b) => {
+      if (b.boss !== name) return;
+      kcLog += b.kills || 0;
+      if (b.mins > 0) { mins += b.mins; timedKills += b.kills || 0; if (b.loot > 0) { lootTimed += b.loot; lootMins += b.mins; } }
+    });
     const dropKc = Math.max(0, ...this.logs.drop.filter((d) => d.boss === name).map((d) => d.kc || 0));
     const kcAll = Math.max(kcLog, dropKc);
     const drops = this.bossDrops[name] || [];
     let lootGp = 0, dropsN = 0;
     this.logs.drop.forEach((d) => { if (d.boss !== name) return; const dr = drops.find((x) => x.n === d.drop); if (dr && dr.v > 0) { lootGp += dr.v; dropsN++; } });
     const kph = mins > 0 ? (timedKills * 60) / mins : null;
+    // gp/hr, best source first: full session loot over timed minutes (field
+    // sessions record it) beats the uniques-only floor from the drop log.
+    const gpHrLoot = lootMins > 0 ? Math.round((lootTimed * 60) / lootMins) : null;
     const gpKill = kcAll > 0 && dropsN > 0 ? lootGp / kcAll : null;
-    const gpHr = kph != null && gpKill != null ? Math.round(kph * gpKill) : null;
-    return { kph: kph != null ? Math.round(kph * 10) / 10 : null, gpHr, mins, timedKills, dropsN, kcAll };
+    const gpHrUniq = kph != null && gpKill != null ? Math.round(kph * gpKill) : null;
+    const gpHr = gpHrLoot != null ? gpHrLoot : gpHrUniq;
+    return { kph: kph != null ? Math.round(kph * 10) / 10 : null, gpHr, gpSrc: gpHrLoot != null ? "logged loot" : "uniques only", mins, timedKills, dropsN, kcAll };
   }
   // One click writes BOTH measured rates into the override store (single save =
   // single undo step), so every engine downstream runs on your numbers.
   adoptBossReality = (boss, r) => { if (r.kph == null && r.gpHr == null) return; if (!this.bossOv[boss]) this.bossOv[boss] = {}; if (r.kph != null) this.bossOv[boss].kills = Math.max(1, Math.round(r.kph)); if (r.gpHr != null) this.bossOv[boss].gpHr = Math.max(0, Math.round(r.gpHr)); this._save("almanac.bossov.v1", this.bossOv); this.bump(); };
+
+  // ---------- live boss field session ----------
+  // Start at the boss (usually from its battle guide — boss pre-filled), tap
+  // kills as they land, log drops from the boss's own table, and the clock
+  // measures your kills/hr for you. Ending writes ONE kill-log entry
+  // (kills + minutes + loot) and the drop-log entries in a single undo step.
+  _saveSess() { this._save("almanac.bosssession.v1", this.bossSession); }
+  startBossSession = (boss) => {
+    if (this.bossSession || !boss) return;
+    this.bossSession = { boss, startAt: Date.now(), kills: 0, otherLoot: 0, drops: [] };
+    this._saveSess();
+    this.refreshDropPrices(); // price the drop table live so logged loot is honest
+    this.setState({ sessQ: "" });
+  };
+  sessKills = (n) => { const s = this.bossSession; if (!s) return; s.kills = Math.max(0, (s.kills || 0) + n); s.lastAt = Date.now(); this._saveSess(); this.bump(); };
+  sessLoot = (raw) => { const s = this.bossSession; if (!s) return; s.otherLoot = Math.max(0, Math.round(this.parseNum(raw) || 0)); this._saveSess(); this.bump(); };
+  sessAddDrop = (name, val) => {
+    const s = this.bossSession; if (!s || !name) return;
+    const tbl = (this.bossDrops[s.boss] || []).find((d) => d.n.toLowerCase() === name.toLowerCase());
+    let v = val != null ? val : tbl ? tbl.v : 0;
+    if (!v && this.priceRows) { const m = this.priceRows.find((r) => (r.name || "").toLowerCase() === name.toLowerCase()); if (m) v = m.sell || m.buy || 0; }
+    s.drops.push({ n: tbl ? tbl.n : name, v: v || 0, at: Date.now(), tbl: !!tbl });
+    s.lastAt = Date.now();
+    this._saveSess(); this.setState({ sessQ: "", sessOpen: false });
+  };
+  sessSetDropV = (i, raw) => { const s = this.bossSession; if (!s || !s.drops[i]) return; s.drops[i].v = Math.max(0, Math.round(this.parseNum(raw) || 0)); this._saveSess(); this.bump(); };
+  sessDelDrop = (i) => { const s = this.bossSession; if (!s) return; s.drops.splice(i, 1); this._saveSess(); this.bump(); };
+  endBossSession = (save) => {
+    const s = this.bossSession; if (!s) return;
+    if (save && ((s.kills || 0) > 0 || s.drops.length > 0)) {
+      const mins = Math.max(1, Math.round((Date.now() - s.startAt) / 60000));
+      const dropGp = s.drops.reduce((a, d) => a + (d.v || 0), 0);
+      const loot = dropGp + (s.otherLoot || 0);
+      // Drops land at your KC as of the END of this session.
+      const priorKc = this.logs.boss.filter((x) => x.boss === s.boss).reduce((a, x) => a + (x.kills || 0), 0);
+      const priorDropKc = Math.max(0, ...this.logs.drop.filter((d) => d.boss === s.boss).map((d) => d.kc || 0));
+      const kcNow = Math.max(priorKc, priorDropKc) + (s.kills || 0);
+      if ((s.kills || 0) > 0) {
+        const entry = { date: this.today(), boss: s.boss, kills: s.kills, mins, note: "field session" + (s.drops.length ? ` · ${s.drops.length} drop${s.drops.length > 1 ? "s" : ""}` : "") };
+        if (loot > 0) entry.loot = loot;
+        this.logs.boss.unshift(entry);
+      }
+      s.drops.forEach((d) => { if (d.tbl) this.logs.drop.unshift({ date: this.today(), boss: s.boss, drop: d.n, kc: kcNow }); });
+      this.saveLogs();
+    }
+    this.bossSession = null; this._save("almanac.bosssession.v1", null); this.setState({ sessQ: "" });
+  };
+  // Fuzzy scorer for the drop picker: substring beats subsequence, earlier and
+  // tighter matches rank higher. Returns -1 for no match.
+  fuzzyScore(q, s) {
+    q = (q || "").toLowerCase(); s = (s || "").toLowerCase();
+    if (!q) return 0;
+    const ix = s.indexOf(q); if (ix >= 0) return 1000 - ix;
+    let i = 0, gaps = 0, last = -2;
+    for (let j = 0; j < s.length && i < q.length; j++) if (s[j] === q[i]) { if (last >= 0 && last !== j - 1) gaps++; last = j; i++; }
+    return i === q.length ? 500 - gaps * 25 - s.length : -1;
+  }
+  // Ranked drop-picker options: the boss's own table first (empty query shows
+  // it whole, uniques on top), then the full GE list for off-table loot.
+  sessDropOptions(boss, q) {
+    const tbl = this.bossDrops[boss] || [];
+    const catRank = { unique: 0, tertiary: 1, common: 2 };
+    const own = tbl.map((d) => ({ n: d.n, v: d.v, cat: d.cat || "common", tbl: true, sc: this.fuzzyScore(q, d.n) }))
+      .filter((d) => d.sc >= 0)
+      .sort((a, b) => b.sc - a.sc || (catRank[a.cat] ?? 3) - (catRank[b.cat] ?? 3));
+    if (!q || q.length < 2) return own.slice(0, 10);
+    const have = new Set(own.map((d) => d.n.toLowerCase()));
+    const ge = (this.itemNames || []).map((n) => ({ n, sc: this.fuzzyScore(q, n) }))
+      .filter((d) => d.sc >= 0 && !have.has(d.n.toLowerCase()))
+      .sort((a, b) => b.sc - a.sc).slice(0, 5)
+      .map((d) => ({ n: d.n, v: 0, cat: "market", tbl: false, sc: d.sc }));
+    return own.slice(0, 8).concat(ge);
+  }
 
   // ---------- small render helpers ----------
   field(id, ph, opts = {}) {
@@ -2788,6 +2874,7 @@ export default class Almanac extends React.Component {
           </div>
           {/* right — your setup + ledger */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {this.renderBossSession(name)}
             <Card>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
                 <Kicker color={C.goldDeep}>Your {gearStyle.toLowerCase()} setup · own {ownedN}/{setup.length} slots</Kicker>
@@ -2914,7 +3001,7 @@ export default class Almanac extends React.Component {
                       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                         <div>
                           <div style={mono({ fontSize: 11.5 })}>{r.kph}/hr{dKph != null && dKph !== 0 && <span style={{ marginLeft: 6, color: dKph > 0 ? C.green : C.red, fontWeight: 600 }}>{(dKph > 0 ? "+" : "") + dKph}%</span>}<span style={{ marginLeft: 6, color: C.muted, fontSize: 9 }}>({r.timedKills} kills / {r.mins}m)</span></div>
-                          <div style={mono({ fontSize: 10, color: C.muted2 })}>{r.gpHr != null ? this.short(r.gpHr) + "/hr · uniques only" : "log drops to measure gp/hr"}</div>
+                          <div style={mono({ fontSize: 10, color: C.muted2 })}>{r.gpHr != null ? this.short(r.gpHr) + "/hr · " + r.gpSrc : "log drops or loot to measure gp/hr"}</div>
                         </div>
                         {adopted
                           ? <Tag color={C.green} bg="rgba(92,110,53,.16)">ADOPTED</Tag>
@@ -2931,20 +3018,120 @@ export default class Almanac extends React.Component {
       </div>
     );
   }
+  // The live field-session panel. ctxBoss = the boss whose page we're on (the
+  // battle guide passes its boss so Start is one click, no select). With no
+  // context (Kill Log tab) an idle panel offers a boss picker instead.
+  renderBossSession(ctxBoss) {
+    const TH = themeFor("bossing");
+    const s = this.bossSession;
+    const ember = { card: { background: "rgba(150,58,44,.055)", border: "1px solid rgba(150,58,44,.30)", borderTop: `3px solid ${TH.accent}` } };
+    if (!s) {
+      return (
+        <Card style={ember.card}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <Kicker color={TH.accent}>Field log · live session</Kicker>
+            <span style={{ flex: 1, minWidth: 220, ...serif({ fontSize: 12.5, fontStyle: "normal", color: C.muted }) }}>Start the clock, tap kills as they land, log drops off the table — it measures your kills/hr and loot gp/hr and files everything when you end.</span>
+            {!ctxBoss && <select className="led" id="sess_boss" defaultValue={this.state.bossFocus || D.bosses[0].n} style={{ width: 210 }}>{D.bosses.map((o) => <option key={o.n} value={o.n}>{o.n}</option>)}</select>}
+            <Btn tone="gold" onClick={() => this.startBossSession(ctxBoss || this.val("sess_boss") || D.bosses[0].n)}>▶ Start session{ctxBoss ? " · " + ctxBoss : ""}</Btn>
+          </div>
+        </Card>
+      );
+    }
+    const elapsedMs = Math.max(0, Date.now() - s.startAt);
+    const emins = Math.floor(elapsedMs / 60000);
+    const elapsed = emins >= 60 ? Math.floor(emins / 60) + "h " + (emins % 60) + "m" : emins + "m";
+    const hrsF = elapsedMs / 3600000;
+    const kph = s.kills > 0 && hrsF > 0.016 ? Math.round((s.kills / hrsF) * 10) / 10 : null;
+    const dropGp = s.drops.reduce((a, d) => a + (d.v || 0), 0);
+    const loot = dropGp + (s.otherLoot || 0);
+    const gpHr = loot > 0 && hrsF > 0.016 ? Math.round(loot / hrsF) : null;
+    const q = this.state.sessQ || "";
+    const opts = this.sessDropOptions(s.boss, q);
+    const catColor = { unique: C.gold, tertiary: C.purple, common: C.muted2, market: C.teal };
+    return (
+      <Card style={ember.card}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ width: 9, height: 9, borderRadius: "50%", background: C.red, boxShadow: "0 0 8px rgba(150,58,44,.8)", animation: "sealpulse 1.6s infinite" }} />
+          <Kicker color={TH.accent}>Field session · {s.boss}</Kicker>
+          <span style={mono({ fontSize: 11, color: C.muted2 })}>{elapsed} on the clock</span>
+          {kph != null && <Tag color={C.teal} bg="rgba(60,107,107,.14)">{kph} kills/hr</Tag>}
+          {gpHr != null && <Tag color={C.gold} bg="rgba(201,162,74,.14)">{this.short(gpHr)} gp/hr</Tag>}
+          <span style={{ flex: 1 }} />
+          <span onClick={() => this.endBossSession(false)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 10 }) }}>discard</span>
+          <Btn tone="gold" onClick={() => this.endBossSession(true)}>■ End &amp; save</Btn>
+        </div>
+        {ctxBoss && ctxBoss !== s.boss && <div style={{ marginTop: 6, ...mono({ fontSize: 10, color: "#9a7530" }) }}>⚠ this session is at {s.boss} — end it before starting one at {ctxBoss}.</div>}
+        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 18, marginTop: 12, alignItems: "start" }}>
+          <div style={{ textAlign: "center", padding: "10px 18px", background: C.cardLight, borderRadius: 8, border: "1px solid rgba(44,32,19,.12)" }}>
+            <div style={mono({ fontSize: 8.5, letterSpacing: ".16em", color: C.muted, textTransform: "uppercase" })}>Kills</div>
+            <div style={cinzel({ fontWeight: 800, fontSize: 34, color: C.ink, lineHeight: 1.1 })}>{s.kills}</div>
+            <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "center" }}>
+              <Btn tone="gold" onClick={() => this.sessKills(1)}>+1</Btn>
+              <Btn onClick={() => this.sessKills(5)}>+5</Btn>
+              <Btn tone="quiet" onClick={() => this.sessKills(-1)}>−1</Btn>
+            </div>
+          </div>
+          <div>
+            <div style={{ position: "relative" }}>
+              <input className="led" value={q} placeholder={"Log a drop… (search " + s.boss + "'s table or any GE item)"}
+                onChange={(ev) => this.setState({ sessQ: ev.target.value, sessOpen: true })}
+                onFocus={() => this.setState({ sessOpen: true })}
+                onBlur={() => this.setState({ sessOpen: false })}
+                onKeyDown={(ev) => { if (ev.key === "Enter" && opts.length) this.sessAddDrop(opts[0].n); }}
+                style={{ width: "100%" }} />
+              {this.state.sessOpen && opts.length > 0 && (
+                <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 30, background: "#fbf6e8", border: "1px solid rgba(44,32,19,.3)", borderRadius: 6, boxShadow: "0 10px 24px rgba(30,16,6,.25)", maxHeight: 260, overflowY: "auto" }}>
+                  {opts.map((o, i) => (
+                    <div key={o.n + i} onMouseDown={(ev) => { ev.preventDefault(); this.sessAddDrop(o.n, o.tbl ? o.v : null); }}
+                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", cursor: "pointer", borderBottom: "1px solid rgba(44,32,19,.07)", background: i === 0 ? "rgba(201,162,74,.10)" : "transparent" }}>
+                      <span style={{ flex: 1, ...serif({ fontSize: 12.5, fontStyle: "normal", color: C.ink }) }}>{o.n}</span>
+                      <span style={mono({ fontSize: 8.5, letterSpacing: ".08em", color: catColor[o.cat] || C.muted, textTransform: "uppercase" })}>{o.tbl ? o.cat : "ge item"}</span>
+                      {o.v > 0 && <span style={mono({ fontSize: 10.5, color: C.muted2 })}>{this.short(o.v)}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {s.drops.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
+                {s.drops.map((d, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, padding: "4px 9px", background: C.cardLight, borderRadius: 5, border: "1px solid rgba(44,32,19,.10)" }}>
+                    <Icon url={itemIconUrl(d.n)} name={d.n} size={20} />
+                    <span style={{ flex: 1, ...serif({ fontSize: 12.5, fontStyle: "normal", color: C.ink }) }}>{d.n}{!d.tbl && <span style={mono({ fontSize: 8.5, color: C.teal })}> · off-table</span>}</span>
+                    <span style={mono({ fontSize: 9, color: C.muted })}>{new Date(d.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                    <input className="led" key={"dv" + i + "_" + d.v} defaultValue={this.fmt(d.v)} onBlur={(ev) => this.sessSetDropV(i, ev.target.value)} style={{ width: 92, padding: "3px 6px", textAlign: "right", fontSize: 11 }} />
+                    <span onClick={() => this.sessDelDrop(i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+              <span style={mono({ fontSize: 10, color: C.muted })}>OTHER LOOT (gp)</span>
+              <input className="led" key={"ol" + (s.otherLoot || 0)} defaultValue={s.otherLoot ? this.fmt(s.otherLoot) : ""} placeholder="scales, runes, alchs…" onBlur={(ev) => this.sessLoot(ev.target.value)} style={{ width: 130, padding: "4px 7px", textAlign: "right" }} />
+              <span style={{ flex: 1 }} />
+              <span style={mono({ fontSize: 11, color: C.muted2 })}>session loot <strong style={{ color: C.gold }}>{loot > 0 ? this.short(loot) : "0"}</strong>{s.drops.length ? ` · ${s.drops.length} drop${s.drops.length > 1 ? "s" : ""}` : ""}</span>
+            </div>
+          </div>
+        </div>
+        <div style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted, marginTop: 10 })}>Ending files one kill-log entry ({"kills + minutes + loot"}) and your drops at the right KC — Session Rates then measures your real kills/hr and gp/hr from it, ready to adopt.</div>
+      </Card>
+    );
+  }
   renderBossTracker() {
     const log = this.logs.boss;
     const opts = D.bosses.map((b) => b.n);
     return (
       <div>
+        <div style={{ marginBottom: 14 }}>{this.renderBossSession(null)}</div>
         <Card style={{ marginBottom: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <Kicker color={C.goldDeep}>Kill-count log</Kicker>
+            <Kicker color={C.goldDeep}>Kill-count log · after the fact</Kicker>
             <Btn tone="gold" onClick={() => this.toggleForm("boss")}>+ Log kills</Btn>
           </div>
           {this.state.openForm === "boss" && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
               <select className="led" id="boss_name" style={{ width: 200 }}>{opts.map((o) => <option key={o} value={o}>{o}</option>)}</select>
-              {this.field("boss_kills", "Kills", { w: 100 })}{this.field("boss_mins", "Minutes (opt)", { w: 110 })}{this.field("boss_note", "Note", { w: 170 })}
+              {this.field("boss_kills", "Kills", { w: 100 })}{this.field("boss_mins", "Minutes (opt)", { w: 110 })}{this.field("boss_loot", "Loot gp (opt)", { w: 110 })}{this.field("boss_note", "Note", { w: 150 })}
               <Btn tone="gold" onClick={this.addBoss}>Save</Btn>
               <span style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted })}>Add minutes and Session Rates learns your real kills/hr.</span>
             </div>
@@ -2952,10 +3139,10 @@ export default class Almanac extends React.Component {
         </Card>
         <Card>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr>{["Date", "Boss", "Kills", "Time", "Pace", "Note", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i >= 2 && i <= 4 ? "right" : "left", padding: "7px 9px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
+            <thead><tr>{["Date", "Boss", "Kills", "Time", "Pace", "Loot", "Note", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i >= 2 && i <= 5 ? "right" : "left", padding: "7px 9px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
             <tbody>{log.map((b, i) => (
-              <tr key={i}><td style={{ ...mono({ fontSize: 11 }), padding: "7px 9px" }}>{this.dShort(b.date)}</td><td style={{ ...cinzel({ fontWeight: 600, fontSize: 13 }), padding: "7px 9px" }}>{b.boss}</td><td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{this.fmt(b.kills)}</td><td style={{ ...mono({ fontSize: 12, color: C.muted2 }), padding: "7px 9px", textAlign: "right" }}>{b.mins > 0 ? b.mins + "m" : "—"}</td><td style={{ ...mono({ fontSize: 12, color: b.mins > 0 ? C.teal : C.muted }), padding: "7px 9px", textAlign: "right" }}>{b.mins > 0 ? Math.round(((b.kills || 0) * 600) / b.mins) / 10 + "/hr" : "—"}</td><td style={{ ...serif({ fontSize: 13, color: C.muted }), padding: "7px 9px" }}>{b.note || "—"}</td><td style={{ padding: "7px 9px" }}><span onClick={() => this.delLog("boss", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td></tr>
-            ))}{log.length === 0 && <tr><td colSpan={7} style={serif({ fontStyle: "normal", color: C.muted, padding: 16 })}>No kills logged. Track KC here and the Focus tab computes your drop-rate luck. Add minutes to a session and Session Rates measures your real kills/hr.</td></tr>}</tbody>
+              <tr key={i}><td style={{ ...mono({ fontSize: 11 }), padding: "7px 9px" }}>{this.dShort(b.date)}</td><td style={{ ...cinzel({ fontWeight: 600, fontSize: 13 }), padding: "7px 9px" }}>{b.boss}</td><td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{this.fmt(b.kills)}</td><td style={{ ...mono({ fontSize: 12, color: C.muted2 }), padding: "7px 9px", textAlign: "right" }}>{b.mins > 0 ? b.mins + "m" : "—"}</td><td style={{ ...mono({ fontSize: 12, color: b.mins > 0 ? C.teal : C.muted }), padding: "7px 9px", textAlign: "right" }}>{b.mins > 0 ? Math.round(((b.kills || 0) * 600) / b.mins) / 10 + "/hr" : "—"}</td><td style={{ ...mono({ fontSize: 12, color: b.loot > 0 ? C.gold : C.muted }), padding: "7px 9px", textAlign: "right" }}>{b.loot > 0 ? this.short(b.loot) : "—"}</td><td style={{ ...serif({ fontSize: 13, color: C.muted }), padding: "7px 9px" }}>{b.note || "—"}</td><td style={{ padding: "7px 9px" }}><span onClick={() => this.delLog("boss", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td></tr>
+            ))}{log.length === 0 && <tr><td colSpan={8} style={serif({ fontStyle: "normal", color: C.muted, padding: 16 })}>No kills logged. Start a field session above, or track KC here after the fact — the Focus tab computes your drop-rate luck, and timed sessions teach Session Rates your real kills/hr.</td></tr>}</tbody>
           </table>
         </Card>
       </div>
