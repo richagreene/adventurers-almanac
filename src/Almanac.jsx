@@ -950,13 +950,24 @@ export default class Almanac extends React.Component {
   sessAddDrop = (name, val) => {
     const s = this.bossSession; if (!s || !name) return;
     const tbl = (this.bossDrops[s.boss] || []).find((d) => d.n.toLowerCase() === name.toLowerCase());
+    // Instant placeholder (table value / last market scan), then the REAL
+    // number: every drop re-prices itself from the live GE feed the moment
+    // it's logged, so session loot is quoted at kill-time prices — not the
+    // table's last refresh. A hand-edited value is never overwritten.
     let v = val != null ? val : tbl ? tbl.v : 0;
     if (!v && this.priceRows) { const m = this.priceRows.find((r) => (r.name || "").toLowerCase() === name.toLowerCase()); if (m) v = m.sell || m.buy || 0; }
-    s.drops.push({ n: tbl ? tbl.n : name, v: v || 0, at: Date.now(), tbl: !!tbl });
+    const drop = { n: tbl ? tbl.n : name, v: v || 0, at: Date.now(), tbl: !!tbl, src: tbl ? "table" : "" };
+    s.drops.push(drop);
     s.lastAt = Date.now();
     this._saveSess(); this.setState({ sessQ: "", sessOpen: false });
+    fetchPrices().then(({ byName }) => {
+      const cur = this.bossSession;
+      if (!cur || cur !== s || !cur.drops.includes(drop) || drop.src === "manual") return;
+      const m = byName[drop.n.toLowerCase().replace(/\s*\(pet\)/, "")];
+      if (m && (m.high || m.low)) { drop.v = m.high || m.low; drop.src = "live"; this._saveSess(); this.bump(); }
+    }).catch(() => {});
   };
-  sessSetDropV = (i, raw) => { const s = this.bossSession; if (!s || !s.drops[i]) return; s.drops[i].v = Math.max(0, Math.round(this.parseNum(raw) || 0)); this._saveSess(); this.bump(); };
+  sessSetDropV = (i, raw) => { const s = this.bossSession; if (!s || !s.drops[i]) return; const v = Math.max(0, Math.round(this.parseNum(raw) || 0)); if (v === s.drops[i].v) return; s.drops[i].v = v; s.drops[i].src = "manual"; this._saveSess(); this.bump(); };
   sessDelDrop = (i) => { const s = this.bossSession; if (!s) return; s.drops.splice(i, 1); this._saveSess(); this.bump(); };
   endBossSession = (save) => {
     const s = this.bossSession; if (!s) return;
@@ -3099,6 +3110,9 @@ export default class Almanac extends React.Component {
                     <Icon url={itemIconUrl(d.n)} name={d.n} size={20} />
                     <span style={{ flex: 1, ...serif({ fontSize: 12.5, fontStyle: "normal", color: C.ink }) }}>{d.n}{!d.tbl && <span style={mono({ fontSize: 8.5, color: C.teal })}> · off-table</span>}</span>
                     <span style={mono({ fontSize: 9, color: C.muted })}>{new Date(d.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                    {d.src === "live" ? <span title="Quoted from the live GE feed when you logged it" style={mono({ fontSize: 8, fontWeight: 600, letterSpacing: ".08em", color: "#3c5322" })}>● LIVE</span>
+                      : d.src === "manual" ? <span title="You set this value by hand — it won't be re-priced" style={mono({ fontSize: 8, fontWeight: 600, letterSpacing: ".08em", color: "#9a7530" })}>EDITED</span>
+                      : d.src === "table" ? <span title="Drop-table estimate — no live quote available" style={mono({ fontSize: 8, fontWeight: 600, letterSpacing: ".08em", color: C.muted })}>TABLE</span> : null}
                     <input className="led" key={"dv" + i + "_" + d.v} defaultValue={this.fmt(d.v)} onBlur={(ev) => this.sessSetDropV(i, ev.target.value)} style={{ width: 92, padding: "3px 6px", textAlign: "right", fontSize: 11 }} />
                     <span onClick={() => this.sessDelDrop(i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span>
                   </div>
