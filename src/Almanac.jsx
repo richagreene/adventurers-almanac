@@ -708,7 +708,7 @@ export default class Almanac extends React.Component {
   };
 
   // ---------- handlers: navigation & forms ----------
-  go = (s) => { this.setState({ section: s, openForm: null }); if ((s === "flipping" || s === "farming") && !this.priceRows && !this._marketLoading) { this._marketLoading = true; this.refreshPrices(); } };
+  go = (s) => { this.setState({ section: s, openForm: null, editLog: null }); if ((s === "flipping" || s === "farming") && !this.priceRows && !this._marketLoading) { this._marketLoading = true; this.refreshPrices(); } };
   setLens = (id) => this.setState({ counselLens: id });
   setGoal = (id) => { this.setState({ goalId: id }); this._save("almanac.counselgoal.v1", id); };
   setPfSort = (id) => this.setState({ pfSort: id });
@@ -793,7 +793,106 @@ export default class Almanac extends React.Component {
   addBoss = () => { const boss = this.val("boss_name") || D.bosses[0].n, kills = this.num("boss_kills") || 1, mins = this.num("boss_mins"), loot = this.num("boss_loot"); const entry = { date: this.today(), boss, kills, note: this.val("boss_note") }; if (mins > 0) entry.mins = Math.round(mins); if (loot > 0) entry.loot = Math.round(loot); this.logs.boss.unshift(entry); this.saveLogs(); this.setState({ openForm: null }); };
   addSlay = () => { const task = this.val("slay_task") || D.slayer[0].task; this.logs.slayerLog.unshift({ date: this.today(), task, xp: this.num("slay_xp"), gp: this.num("slay_gp") }); this.saveLogs(); this.setState({ openForm: null }); };
   addDrop = () => { const boss = this.val("drop_boss") || this.state.bossFocus, drop = this.val("drop_name"); if (!boss || !drop) return; this.logs.drop.unshift({ date: this.today(), boss, drop, kc: this.num("drop_kc") }); this.saveLogs(); this.setState({ openForm: null }); };
-  delLog = (t, i) => { if (this.logs[t]) { this.logs[t].splice(i, 1); this.saveLogs(); this.bump(); } };
+  delLog = (t, i) => { if (this.logs[t]) { this.logs[t].splice(i, 1); this.saveLogs(); this.setState({ editLog: null }); } };
+
+  // ---------- universal log editing ----------
+  // Every visible log table gets a ✎ beside its ✕. One row edits at a time
+  // through a spec-driven inline editor — unique field ids and a single
+  // saveLogs() write (one undo step). This is the safe rebuild of what the
+  // old always-editable herb table did wrong (index-keyed inputs smearing
+  // values across rows).
+  logEditSpec(type, entry) {
+    const sel = (opts, cur) => (cur == null || opts.includes(cur) ? opts : [cur].concat(opts));
+    switch (type) {
+      case "nw": return [
+        { k: "date", label: "Date", type: "date" },
+        { k: "cash", label: "Cash gp", type: "num", w: 130 },
+        { k: "items", label: "Items value", type: "num", w: 130 },
+        { k: "note", label: "Note", type: "str", w: 200 },
+      ];
+      case "flips": return [
+        { k: "item", label: "Item", type: "str", w: 170, list: "tradeItems" },
+        { k: "qty", label: "Qty", type: "num", w: 80, opt: true },
+        { k: "avgBuy", label: "Avg buy", type: "num", w: 110, opt: true },
+        { k: "avgSell", label: "Avg sell", type: "num", w: 110, opt: true },
+        { k: "buyDate", label: "Buy date", type: "date" },
+        { k: "sellDate", label: "Sell date", type: "date" },
+        { k: "notes", label: "Notes", type: "str", w: 160 },
+      ];
+      case "alch": return [
+        { k: "date", label: "Date", type: "date" },
+        { k: "item", label: "Item", type: "str", w: 160 },
+        { k: "casts", label: "Casts", type: "num", w: 90 },
+        { k: "net", label: "Net gp", type: "num", w: 110 },
+        { k: "xp", label: "XP", type: "num", w: 100 },
+      ];
+      case "boss": return [
+        { k: "date", label: "Date", type: "date" },
+        { k: "boss", label: "Boss", type: "sel", opts: sel(D.bosses.map((b) => b.n), entry.boss), w: 200 },
+        { k: "kills", label: "Kills", type: "num", w: 80 },
+        { k: "mins", label: "Minutes", type: "num", w: 90, opt: true },
+        { k: "loot", label: "Loot gp", type: "num", w: 110, opt: true },
+        { k: "note", label: "Note", type: "str", w: 150 },
+      ];
+      case "slayerLog": return [
+        { k: "date", label: "Date", type: "date" },
+        { k: "task", label: "Task", type: "sel", opts: sel(D.slayer.map((t) => t.task), entry.task), w: 170 },
+        { k: "xp", label: "XP", type: "num", w: 100 },
+        { k: "gp", label: "Loot gp", type: "num", w: 110 },
+      ];
+      case "herb": return [
+        { k: "date", label: "Date", type: "date" },
+        { k: "tier", label: "Herb", type: "sel", opts: sel(this.farmDefs.map((f) => f.tier), entry.tier), w: 140 },
+        { k: "runs", label: "Runs", type: "num", w: 80 },
+        { k: "herbs", label: "Herbs", type: "num", w: 90, opt: true },
+        { k: "lvl", label: "Farm lvl", type: "num", w: 90, opt: true },
+        { k: "net", label: "Net gp (total)", type: "num", w: 120 },
+      ];
+      default: return [];
+    }
+  }
+  isEditingLog(t, i) { const e = this.state.editLog; return !!e && e.t === t && e.i === i; }
+  editLogBtn(t, i) {
+    return <span onClick={() => this.setState({ editLog: this.isEditingLog(t, i) ? null : { t, i } })} title="Edit entry" style={{ cursor: "pointer", color: "#9a7530", marginRight: 9, ...mono({ fontSize: 11 }) }}>✎</span>;
+  }
+  saveLogEdit = () => {
+    const e = this.state.editLog; if (!e) return;
+    const entry = (this.logs[e.t] || [])[e.i]; if (!entry) { this.setState({ editLog: null }); return; }
+    this.logEditSpec(e.t, entry).forEach((f) => {
+      const raw = this.val("el_" + f.k);
+      if (f.type === "num") {
+        const v = Math.max(0, Math.round(this.parseNum(raw) || 0));
+        // Optional numerics (minutes, loot, herbs…) clear back OFF the entry
+        // when emptied, so "unknown" stays distinct from zero.
+        if (f.opt && (!raw || v <= 0)) delete entry[f.k]; else entry[f.k] = v;
+      } else if (f.type === "date") { if (raw) entry[f.k] = raw; }
+      else entry[f.k] = raw;
+    });
+    this.saveLogs();
+    this.setState({ editLog: null });
+  };
+  logEditorRow(t, i, colSpan) {
+    const entry = (this.logs[t] || [])[i]; if (!entry) return null;
+    const spec = this.logEditSpec(t, entry);
+    return (
+      <tr key={"edit-" + t + "-" + i}>
+        <td colSpan={colSpan} style={{ padding: "10px 12px", background: "rgba(201,162,74,.10)", borderTop: "2px solid rgba(201,162,74,.45)", borderBottom: "2px solid rgba(201,162,74,.45)" }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            {spec.map((f) => (
+              <div key={t + "-" + i + "-" + f.k}>
+                <div style={mono({ fontSize: 8.5, letterSpacing: ".12em", color: C.muted, textTransform: "uppercase", marginBottom: 3 })}>{f.label}{f.opt ? " · opt" : ""}</div>
+                {f.type === "sel"
+                  ? <select className="led" id={"el_" + f.k} defaultValue={entry[f.k]} style={{ width: f.w || 150 }}>{f.opts.map((o) => <option key={o} value={o}>{o}</option>)}</select>
+                  : <input className="led" id={"el_" + f.k} type={f.type === "date" ? "date" : "text"} defaultValue={f.type === "num" ? (entry[f.k] != null ? this.fmt(entry[f.k]) : "") : entry[f.k] || ""} list={f.list} style={{ width: f.w || 150 }} />}
+              </div>
+            ))}
+            <Btn tone="gold" onClick={this.saveLogEdit}>Save</Btn>
+            <Btn tone="quiet" onClick={() => this.setState({ editLog: null })}>Cancel</Btn>
+          </div>
+        </td>
+      </tr>
+    );
+  }
 
   addGoal = () => { const skill = this.val("sg_skill"); if (!skill || this.goals.find((g) => g.skill === skill)) { this.setState({ openForm: null }); return; } this.goals.push({ skill, tgt: Math.max(2, Math.min(99, this.num("sg_tgt") || 99)), method: this.val("sg_method") || "Custom plan", xpHr: this.num("sg_xphr"), gpHr: this.num("sg_gphr") }); this._save("almanac.goals.v1", this.goals); this.setState({ openForm: null }); };
   removeGoal = (sk) => { this.goals = this.goals.filter((g) => g.skill !== sk); this._save("almanac.goals.v1", this.goals); this.bump(); };
@@ -2226,7 +2325,7 @@ export default class Almanac extends React.Component {
           <div className="sheetwrap">
             <table className="sheet">
               <thead><tr>{["Date", "Total", "Cash", "Items", "Δ", "Note", ""].map((h, i) => <th key={i} className={i > 0 && i < 5 ? "num" : ""}>{h}</th>)}</tr></thead>
-              <tbody>{rows.map((r, k) => (
+              <tbody>{rows.map((r, k) => this.isEditingLog("nw", r.i) ? this.logEditorRow("nw", r.i, 7) : (
                 <tr key={k}>
                   <td style={mono({ fontSize: 12 })}>{r.date}</td>
                   <td className="num" style={cinzel({ fontWeight: 600 })}>{r.total}</td>
@@ -2234,7 +2333,7 @@ export default class Almanac extends React.Component {
                   <td className="num" style={mono({ fontSize: 12 })}>{r.items}</td>
                   <td className="num" style={mono({ fontSize: 12, color: r.dc })}>{r.delta}</td>
                   <td style={serif({ fontSize: 13, fontStyle: r.note ? "italic" : "normal", color: C.muted })}>{r.note || "—"}</td>
-                  <td><span onClick={() => this.delLog("nw", r.i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td>
+                  <td>{this.editLogBtn("nw", r.i)}<span onClick={() => this.delLog("nw", r.i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td>
                 </tr>
               ))}</tbody>
             </table>
@@ -2433,7 +2532,7 @@ export default class Almanac extends React.Component {
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead><tr>{["Item", "Dates", "Qty", "Buy", "Sell", "Tax", "Net", "ROI", "GP/day", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i > 1 && i < 9 ? "right" : "left", padding: "7px 9px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
-              <tbody>{rows.map((r) => (
+              <tbody>{rows.map((r) => this.isEditingLog("flips", r.i) ? this.logEditorRow("flips", r.i, 10) : (
                 <tr key={r.i}>
                   <td style={{ ...cinzel({ fontWeight: 600, fontSize: 14 }), padding: "7px 9px" }}>{r.item}{r.notes ? <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted })}>{r.notes}</div> : null}</td>
                   <td style={{ ...mono({ fontSize: 10, color: C.muted }), padding: "7px 9px" }}>{this.dShort(r.buyDate)}→{this.dShort(r.sellDate)}</td>
@@ -2444,7 +2543,7 @@ export default class Almanac extends React.Component {
                   <td style={{ ...mono({ fontSize: 12, color: r.net >= 0 ? C.green : C.red }), padding: "7px 9px", textAlign: "right" }}>{this.signed(r.net)}</td>
                   <td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{(r.roi >= 0 ? "+" : "") + r.roi}%</td>
                   <td style={{ ...mono({ fontSize: 12, color: C.muted }), padding: "7px 9px", textAlign: "right" }}>{r.hold > 0 ? this.signed(r.gpday) : "—"}</td>
-                  <td style={{ padding: "7px 9px" }}><span onClick={() => this.delLog("flips", r.i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td>
+                  <td style={{ padding: "7px 9px", whiteSpace: "nowrap" }}>{this.editLogBtn("flips", r.i)}<span onClick={() => this.delLog("flips", r.i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td>
                 </tr>
               ))}</tbody>
             </table>
@@ -2694,8 +2793,8 @@ export default class Almanac extends React.Component {
             <Kicker color={C.goldDeep}>Session log</Kicker>
             <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
               <thead><tr>{["Date", "Item", "Casts", "Net", "XP", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i > 1 && i < 5 ? "right" : "left", padding: "6px 8px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
-              <tbody>{log.map((a, i) => (
-                <tr key={i}><td style={{ ...mono({ fontSize: 11 }), padding: "6px 8px" }}>{this.dShort(a.date)}</td><td style={{ ...serif({ fontSize: 13 }), padding: "6px 8px" }}>{a.item}</td><td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{this.fmt(a.casts)}</td><td style={{ ...mono({ fontSize: 12, color: a.net >= 0 ? C.green : C.red }), padding: "6px 8px", textAlign: "right" }}>{this.signed(a.net)}</td><td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{this.short(a.xp)}</td><td style={{ padding: "6px 8px" }}><span onClick={() => this.delLog("alch", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td></tr>
+              <tbody>{log.map((a, i) => this.isEditingLog("alch", i) ? this.logEditorRow("alch", i, 6) : (
+                <tr key={i}><td style={{ ...mono({ fontSize: 11 }), padding: "6px 8px" }}>{this.dShort(a.date)}</td><td style={{ ...serif({ fontSize: 13 }), padding: "6px 8px" }}>{a.item}</td><td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{this.fmt(a.casts)}</td><td style={{ ...mono({ fontSize: 12, color: a.net >= 0 ? C.green : C.red }), padding: "6px 8px", textAlign: "right" }}>{this.signed(a.net)}</td><td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{this.short(a.xp)}</td><td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>{this.editLogBtn("alch", i)}<span onClick={() => this.delLog("alch", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td></tr>
               ))}</tbody>
             </table>
           </Card>
@@ -3171,8 +3270,8 @@ export default class Almanac extends React.Component {
         <Card>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>{["Date", "Boss", "Kills", "Time", "Pace", "Loot", "Note", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i >= 2 && i <= 5 ? "right" : "left", padding: "7px 9px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
-            <tbody>{log.map((b, i) => (
-              <tr key={i}><td style={{ ...mono({ fontSize: 11 }), padding: "7px 9px" }}>{this.dShort(b.date)}</td><td style={{ ...cinzel({ fontWeight: 600, fontSize: 13 }), padding: "7px 9px" }}>{b.boss}</td><td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{this.fmt(b.kills)}</td><td style={{ ...mono({ fontSize: 12, color: C.muted2 }), padding: "7px 9px", textAlign: "right" }}>{b.mins > 0 ? b.mins + "m" : "—"}</td><td style={{ ...mono({ fontSize: 12, color: b.mins > 0 ? C.teal : C.muted }), padding: "7px 9px", textAlign: "right" }}>{b.mins > 0 ? Math.round(((b.kills || 0) * 600) / b.mins) / 10 + "/hr" : "—"}</td><td style={{ ...mono({ fontSize: 12, color: b.loot > 0 ? C.gold : C.muted }), padding: "7px 9px", textAlign: "right" }}>{b.loot > 0 ? this.short(b.loot) : "—"}</td><td style={{ ...serif({ fontSize: 13, color: C.muted }), padding: "7px 9px" }}>{b.note || "—"}</td><td style={{ padding: "7px 9px" }}><span onClick={() => this.delLog("boss", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td></tr>
+            <tbody>{log.map((b, i) => this.isEditingLog("boss", i) ? this.logEditorRow("boss", i, 8) : (
+              <tr key={i}><td style={{ ...mono({ fontSize: 11 }), padding: "7px 9px" }}>{this.dShort(b.date)}</td><td style={{ ...cinzel({ fontWeight: 600, fontSize: 13 }), padding: "7px 9px" }}>{b.boss}</td><td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{this.fmt(b.kills)}</td><td style={{ ...mono({ fontSize: 12, color: C.muted2 }), padding: "7px 9px", textAlign: "right" }}>{b.mins > 0 ? b.mins + "m" : "—"}</td><td style={{ ...mono({ fontSize: 12, color: b.mins > 0 ? C.teal : C.muted }), padding: "7px 9px", textAlign: "right" }}>{b.mins > 0 ? Math.round(((b.kills || 0) * 600) / b.mins) / 10 + "/hr" : "—"}</td><td style={{ ...mono({ fontSize: 12, color: b.loot > 0 ? C.gold : C.muted }), padding: "7px 9px", textAlign: "right" }}>{b.loot > 0 ? this.short(b.loot) : "—"}</td><td style={{ ...serif({ fontSize: 13, color: C.muted }), padding: "7px 9px" }}>{b.note || "—"}</td><td style={{ padding: "7px 9px", whiteSpace: "nowrap" }}>{this.editLogBtn("boss", i)}<span onClick={() => this.delLog("boss", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td></tr>
             ))}{log.length === 0 && <tr><td colSpan={8} style={serif({ fontStyle: "normal", color: C.muted, padding: 16 })}>No kills logged. Start a field session above, or track KC here after the fact — the Focus tab computes your drop-rate luck, and timed sessions teach Session Rates your real kills/hr.</td></tr>}</tbody>
           </table>
         </Card>
@@ -3396,8 +3495,8 @@ export default class Almanac extends React.Component {
         <Card>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>{["Date", "Task", "XP", "Loot", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i > 1 && i < 4 ? "right" : "left", padding: "7px 9px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
-            <tbody>{log.map((s, i) => (
-              <tr key={i}><td style={{ ...mono({ fontSize: 11 }), padding: "7px 9px" }}>{this.dShort(s.date)}</td><td style={{ ...cinzel({ fontWeight: 600, fontSize: 13 }), padding: "7px 9px" }}>{s.task}</td><td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{this.short(s.xp || 0)}</td><td style={{ ...mono({ fontSize: 12, color: C.green }), padding: "7px 9px", textAlign: "right" }}>{this.signed(s.gp || 0)}</td><td style={{ padding: "7px 9px" }}><span onClick={() => this.delLog("slayerLog", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td></tr>
+            <tbody>{log.map((s, i) => this.isEditingLog("slayerLog", i) ? this.logEditorRow("slayerLog", i, 5) : (
+              <tr key={i}><td style={{ ...mono({ fontSize: 11 }), padding: "7px 9px" }}>{this.dShort(s.date)}</td><td style={{ ...cinzel({ fontWeight: 600, fontSize: 13 }), padding: "7px 9px" }}>{s.task}</td><td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px", textAlign: "right" }}>{this.short(s.xp || 0)}</td><td style={{ ...mono({ fontSize: 12, color: C.green }), padding: "7px 9px", textAlign: "right" }}>{this.signed(s.gp || 0)}</td><td style={{ padding: "7px 9px", whiteSpace: "nowrap" }}>{this.editLogBtn("slayerLog", i)}<span onClick={() => this.delLog("slayerLog", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td></tr>
             ))}{log.length === 0 && <tr><td colSpan={5} style={serif({ fontStyle: "normal", color: C.muted, padding: 16 })}>No tasks logged yet.</td></tr>}</tbody>
           </table>
         </Card>
@@ -3997,13 +4096,14 @@ export default class Almanac extends React.Component {
           })()}
           <Card style={{ marginTop: 14 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
-              <Kicker color={C.goldDeep}>Run history · newest first · delete a bad entry and re-log it (undo has your back)</Kicker>
+              <Kicker color={C.goldDeep}>Run history · newest first · ✎ fixes a bad entry in place (undo has your back)</Kicker>
               <span style={mono({ fontSize: 10.5, color: C.muted2 })}>{loggedRuns} runs · {this.short(loggedNet)} total · {loggedRuns ? this.short(loggedNet / loggedRuns) + "/run avg" : "—"}</span>
             </div>
             <div className="sheetwrap" style={{ marginTop: 8 }}>
               <table className="sheet">
                 <thead><tr>{["Date", "Tier", "Farm lvl", "Runs", "Herbs", "Patch breakdown", "Net / run", "Net", ""].map((h, i) => <th key={i} className={i >= 2 && i <= 4 || i === 6 || i === 7 ? "num" : ""}>{h}</th>)}</tr></thead>
                 <tbody>{this.logs.herb.map((h, i) => {
+                  if (this.isEditingLog("herb", i)) return this.logEditorRow("herb", i, 9);
                   const runs = h.runs || 1;
                   const detail = h.perPatch ? Object.entries(h.perPatch).map(([id, n]) => { const pt = this.herbPatches.find((x) => x.id === id); return { name: pt ? pt.name : id, n: n || 0 }; }) : null;
                   return (
@@ -4020,7 +4120,7 @@ export default class Almanac extends React.Component {
                       ) : <span style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted })}>model estimate</span>}</td>
                       <td className="num" style={mono({ fontSize: 12, color: C.muted2 })}>{this.short(h.net / runs)}</td>
                       <td className="num" style={mono({ fontSize: 12, fontWeight: 600, color: h.net >= 0 ? C.green : C.red })}>{this.signed(h.net)}</td>
-                      <td><span onClick={() => this.delLog("herb", i)} title="Delete entry" style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 12 }) }}>✕</span></td>
+                      <td style={{ whiteSpace: "nowrap" }}>{this.editLogBtn("herb", i)}<span onClick={() => this.delLog("herb", i)} title="Delete entry" style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 12 }) }}>✕</span></td>
                     </tr>
                   );
                 })}
