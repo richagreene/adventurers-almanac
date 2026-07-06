@@ -947,16 +947,17 @@ export default class Almanac extends React.Component {
   };
   sessKills = (n) => { const s = this.bossSession; if (!s) return; s.kills = Math.max(0, (s.kills || 0) + n); s.lastAt = Date.now(); this._saveSess(); this.bump(); };
   sessLoot = (raw) => { const s = this.bossSession; if (!s) return; s.otherLoot = Math.max(0, Math.round(this.parseNum(raw) || 0)); this._saveSess(); this.bump(); };
-  sessAddDrop = (name, val) => {
+  sessAddDrop = (name, val, qty) => {
     const s = this.bossSession; if (!s || !name) return;
     const tbl = (this.bossDrops[s.boss] || []).find((d) => d.n.toLowerCase() === name.toLowerCase());
     // Instant placeholder (table value / last market scan), then the REAL
-    // number: every drop re-prices itself from the live GE feed the moment
-    // it's logged, so session loot is quoted at kill-time prices — not the
-    // table's last refresh. A hand-edited value is never overwritten.
+    // number: every drop re-prices its UNIT value from the live GE feed the
+    // moment it's logged — the row's worth is qty × that kill-time quote, so
+    // a 500-rune drop is 500 × today's rune price, not a stale table guess.
+    // A hand-edited unit value is never overwritten.
     let v = val != null ? val : tbl ? tbl.v : 0;
     if (!v && this.priceRows) { const m = this.priceRows.find((r) => (r.name || "").toLowerCase() === name.toLowerCase()); if (m) v = m.sell || m.buy || 0; }
-    const drop = { n: tbl ? tbl.n : name, v: v || 0, at: Date.now(), tbl: !!tbl, src: tbl ? "table" : "" };
+    const drop = { n: tbl ? tbl.n : name, v: v || 0, q: Math.max(1, Math.round(qty || 1)), at: Date.now(), tbl: !!tbl, src: tbl ? "table" : "" };
     s.drops.push(drop);
     s.lastAt = Date.now();
     this._saveSess(); this.setState({ sessQ: "", sessOpen: false });
@@ -968,12 +969,24 @@ export default class Almanac extends React.Component {
     }).catch(() => {});
   };
   sessSetDropV = (i, raw) => { const s = this.bossSession; if (!s || !s.drops[i]) return; const v = Math.max(0, Math.round(this.parseNum(raw) || 0)); if (v === s.drops[i].v) return; s.drops[i].v = v; s.drops[i].src = "manual"; this._saveSess(); this.bump(); };
+  // Quantity is independent of price provenance — the unit quote stays live.
+  sessSetDropQ = (i, raw) => { const s = this.bossSession; if (!s || !s.drops[i]) return; s.drops[i].q = Math.max(1, Math.round(this.parseNum(raw) || 1)); this._saveSess(); this.bump(); };
+  // Session loot: Σ qty × unit value across logged drops.
+  sessDropGp(s) { return (s.drops || []).reduce((a, d) => a + (d.v || 0) * (d.q || 1), 0); }
+  // "500 death rune" / "death rune x500" → { qty, rest } for the drop picker.
+  sessParseQty(q) {
+    let m = (q || "").match(/^\s*(\d[\d,]*)\s*[x×]?\s+(.+)$/);
+    if (m) return { qty: parseInt(m[1].replace(/,/g, ""), 10), rest: m[2] };
+    m = (q || "").match(/^(.+?)\s*[x×]\s*(\d[\d,]*)\s*$/i);
+    if (m) return { qty: parseInt(m[2].replace(/,/g, ""), 10), rest: m[1] };
+    return { qty: 1, rest: q || "" };
+  }
   sessDelDrop = (i) => { const s = this.bossSession; if (!s) return; s.drops.splice(i, 1); this._saveSess(); this.bump(); };
   endBossSession = (save) => {
     const s = this.bossSession; if (!s) return;
     if (save && ((s.kills || 0) > 0 || s.drops.length > 0)) {
       const mins = Math.max(1, Math.round((Date.now() - s.startAt) / 60000));
-      const dropGp = s.drops.reduce((a, d) => a + (d.v || 0), 0);
+      const dropGp = this.sessDropGp(s);
       const loot = dropGp + (s.otherLoot || 0);
       // Drops land at your KC as of the END of this session.
       const priorKc = this.logs.boss.filter((x) => x.boss === s.boss).reduce((a, x) => a + (x.kills || 0), 0);
@@ -3053,11 +3066,12 @@ export default class Almanac extends React.Component {
     const elapsed = emins >= 60 ? Math.floor(emins / 60) + "h " + (emins % 60) + "m" : emins + "m";
     const hrsF = elapsedMs / 3600000;
     const kph = s.kills > 0 && hrsF > 0.016 ? Math.round((s.kills / hrsF) * 10) / 10 : null;
-    const dropGp = s.drops.reduce((a, d) => a + (d.v || 0), 0);
+    const dropGp = this.sessDropGp(s);
     const loot = dropGp + (s.otherLoot || 0);
     const gpHr = loot > 0 && hrsF > 0.016 ? Math.round(loot / hrsF) : null;
     const q = this.state.sessQ || "";
-    const opts = this.sessDropOptions(s.boss, q);
+    const qp = this.sessParseQty(q);
+    const opts = this.sessDropOptions(s.boss, qp.rest);
     const catColor = { unique: C.gold, tertiary: C.purple, common: C.muted2, market: C.teal };
     return (
       <Card style={ember.card}>
@@ -3084,20 +3098,20 @@ export default class Almanac extends React.Component {
           </div>
           <div>
             <div style={{ position: "relative" }}>
-              <input className="led" value={q} placeholder={"Log a drop… (search " + s.boss + "'s table or any GE item)"}
+              <input className="led" value={q} placeholder={"Log a drop… try \"500 death rune\" (searches " + s.boss + "'s table + the GE)"}
                 onChange={(ev) => this.setState({ sessQ: ev.target.value, sessOpen: true })}
                 onFocus={() => this.setState({ sessOpen: true })}
                 onBlur={() => this.setState({ sessOpen: false })}
-                onKeyDown={(ev) => { if (ev.key === "Enter" && opts.length) this.sessAddDrop(opts[0].n); }}
+                onKeyDown={(ev) => { if (ev.key === "Enter" && opts.length) this.sessAddDrop(opts[0].n, opts[0].tbl ? opts[0].v : null, qp.qty); }}
                 style={{ width: "100%" }} />
               {this.state.sessOpen && opts.length > 0 && (
                 <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 30, background: "#fbf6e8", border: "1px solid rgba(44,32,19,.3)", borderRadius: 6, boxShadow: "0 10px 24px rgba(30,16,6,.25)", maxHeight: 260, overflowY: "auto" }}>
                   {opts.map((o, i) => (
-                    <div key={o.n + i} onMouseDown={(ev) => { ev.preventDefault(); this.sessAddDrop(o.n, o.tbl ? o.v : null); }}
+                    <div key={o.n + i} onMouseDown={(ev) => { ev.preventDefault(); this.sessAddDrop(o.n, o.tbl ? o.v : null, qp.qty); }}
                       style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", cursor: "pointer", borderBottom: "1px solid rgba(44,32,19,.07)", background: i === 0 ? "rgba(201,162,74,.10)" : "transparent" }}>
-                      <span style={{ flex: 1, ...serif({ fontSize: 12.5, fontStyle: "normal", color: C.ink }) }}>{o.n}</span>
+                      <span style={{ flex: 1, ...serif({ fontSize: 12.5, fontStyle: "normal", color: C.ink }) }}>{qp.qty > 1 ? <strong>{this.fmt(qp.qty)}× </strong> : null}{o.n}</span>
                       <span style={mono({ fontSize: 8.5, letterSpacing: ".08em", color: catColor[o.cat] || C.muted, textTransform: "uppercase" })}>{o.tbl ? o.cat : "ge item"}</span>
-                      {o.v > 0 && <span style={mono({ fontSize: 10.5, color: C.muted2 })}>{this.short(o.v)}</span>}
+                      {o.v > 0 && <span style={mono({ fontSize: 10.5, color: C.muted2 })}>{qp.qty > 1 ? `${this.short(o.v)} ea ≈ ${this.short(o.v * qp.qty)}` : this.short(o.v)}</span>}
                     </div>
                   ))}
                 </div>
@@ -3110,10 +3124,13 @@ export default class Almanac extends React.Component {
                     <Icon url={itemIconUrl(d.n)} name={d.n} size={20} />
                     <span style={{ flex: 1, ...serif({ fontSize: 12.5, fontStyle: "normal", color: C.ink }) }}>{d.n}{!d.tbl && <span style={mono({ fontSize: 8.5, color: C.teal })}> · off-table</span>}</span>
                     <span style={mono({ fontSize: 9, color: C.muted })}>{new Date(d.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-                    {d.src === "live" ? <span title="Quoted from the live GE feed when you logged it" style={mono({ fontSize: 8, fontWeight: 600, letterSpacing: ".08em", color: "#3c5322" })}>● LIVE</span>
-                      : d.src === "manual" ? <span title="You set this value by hand — it won't be re-priced" style={mono({ fontSize: 8, fontWeight: 600, letterSpacing: ".08em", color: "#9a7530" })}>EDITED</span>
+                    {d.src === "live" ? <span title="Unit price quoted from the live GE feed when you logged it" style={mono({ fontSize: 8, fontWeight: 600, letterSpacing: ".08em", color: "#3c5322" })}>● LIVE</span>
+                      : d.src === "manual" ? <span title="You set this unit value by hand — it won't be re-priced" style={mono({ fontSize: 8, fontWeight: 600, letterSpacing: ".08em", color: "#9a7530" })}>EDITED</span>
                       : d.src === "table" ? <span title="Drop-table estimate — no live quote available" style={mono({ fontSize: 8, fontWeight: 600, letterSpacing: ".08em", color: C.muted })}>TABLE</span> : null}
-                    <input className="led" key={"dv" + i + "_" + d.v} defaultValue={this.fmt(d.v)} onBlur={(ev) => this.sessSetDropV(i, ev.target.value)} style={{ width: 92, padding: "3px 6px", textAlign: "right", fontSize: 11 }} />
+                    <span style={mono({ fontSize: 10, color: C.muted })}>×</span>
+                    <input className="led" key={"dq" + i + "_" + (d.q || 1)} defaultValue={this.fmt(d.q || 1)} title="Quantity" onBlur={(ev) => this.sessSetDropQ(i, ev.target.value)} style={{ width: 58, padding: "3px 6px", textAlign: "right", fontSize: 11 }} />
+                    <input className="led" key={"dv" + i + "_" + d.v} defaultValue={this.fmt(d.v)} title="Unit value (gp each)" onBlur={(ev) => this.sessSetDropV(i, ev.target.value)} style={{ width: 92, padding: "3px 6px", textAlign: "right", fontSize: 11 }} />
+                    {(d.q || 1) > 1 && <span style={mono({ fontSize: 10.5, color: C.gold, minWidth: 52, textAlign: "right" })}>= {this.short((d.v || 0) * d.q)}</span>}
                     <span onClick={() => this.sessDelDrop(i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span>
                   </div>
                 ))}
