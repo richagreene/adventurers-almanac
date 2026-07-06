@@ -1607,11 +1607,29 @@ export default class Almanac extends React.Component {
     };
     const hero = cands[0] ? mk(cands[0], 0) : null;
     const queue = cands.slice(1, 7).map((c, i) => mk(c, i + 1));
+    // ---- Standing Order: reconcile the flat ranking into a command structure.
+    // DO NOW is the hero (best grind for the next hour). BUT FIRST is the best
+    // cheap ONE-TIME win to grab before grinding — a stat-ready quest or a
+    // claimable diary sitting high in the ranking (permanent, you keep it). The
+    // reconciliation line says, in plain terms, why DO NOW beats the best
+    // alternative in a different domain.
+    const ONE_TIME = { quest: 1, diary: 1 };
+    const bfCand = cands.slice(1, 10).find((c) => ONE_TIME[c.domain] && (c.access == null || c.access >= 100));
+    const counselButFirst = bfCand ? (() => { const m = mk(bfCand, cands.indexOf(bfCand)); m.reward = bfCand.metric || bfCand.title; return m; })() : null;
+    let counselRecon = "";
+    if (cands[0]) {
+      const h = cands[0], ru = cands.slice(1).find((c) => c.domain !== h.domain) || cands[1];
+      if (ru) {
+        if (h.gpHr > 0 && ru.gpHr > 0 && h.gpHr / ru.gpHr >= 1.12) counselRecon = "≈" + (h.gpHr / ru.gpHr).toFixed(1) + "× the gp/hr of " + ru.title;
+        else if (h.xpHr > 0 && ru.xpHr > 0 && h.xpHr / ru.xpHr >= 1.12) counselRecon = "≈" + (h.xpHr / ru.xpHr).toFixed(1) + "× the xp/hr of " + ru.title;
+        else counselRecon = "outranks " + ru.title + " for your " + L.label + " focus";
+      }
+    }
     const synthCount = (D.quests || []).length + (D.diaries || []).length + (D.bosses || []).length + (D.slayer || []).length + this.skillsRaw.length + goals.length + ((this.logs && this.logs.flips) || []).length + (this.alchItems || []).length + (this.farmRunDefs || []).length;
     const topBn = bottleneck[0], bnc = topBn ? topBn.cnt : {}; const bnParts = []; if (bnc.boss) bnParts.push(bnc.boss + " bosses"); if (bnc.task) bnParts.push(bnc.task + " tasks"); if (bnc.quest) bnParts.push(bnc.quest + " quests"); if (bnc.diary) bnParts.push(bnc.diary + " diaries");
     const lenses = LD.map((x) => ({ id: x.id, label: x.label, active: x.id === lens, bg: x.id === lens ? "#e3c878" : "transparent", fg: x.id === lens ? "#2c2013" : "#c9a24e" }));
     return {
-      counselHero: hero, counselQueue: queue, counselLenses: lenses, counselSynth: "" + synthCount, counselDomains: "9", counselBnLabel: topBn ? cap(topBn.skill) + " " + (lv[topBn.skill] || 1) : "—", counselBnParts: bnParts.join(" · ") || "nothing right now", counselLensName: L.label,
+      counselHero: hero, counselQueue: queue, counselButFirst, counselRecon, counselLenses: lenses, counselSynth: "" + synthCount, counselDomains: "9", counselBnLabel: topBn ? cap(topBn.skill) + " " + (lv[topBn.skill] || 1) : "—", counselBnParts: bnParts.join(" · ") || "nothing right now", counselLensName: L.label,
       counselGoals: goalChips, counselGoalActive: goalActive, counselGoalLabel: gspec.label, counselGoalPct: (Math.max(0, Math.min(1, goalPct)) * 100).toFixed(1) + "%", counselGoalPctLabel: Math.round(Math.min(1, goalPct) * 100) + "%", counselGoalPath: goalPath,
     };
   }
@@ -1800,6 +1818,12 @@ export default class Almanac extends React.Component {
   renderCounsel() {
     const cm = this.computeCounsel();
     const hero = cm.counselHero;
+    const bf = cm.counselButFirst;
+    // "On the horizon" — the single best thing one unlock away (Pathfinder's
+    // near-frontier), surfaced as a nudge so the command center points past
+    // what you can do today to the highest-value thing just out of reach.
+    const pf = this.computePathfinder();
+    const horizon = (pf.pfFrontier || [])[0] || null;
     const rule = <span style={{ height: 1, flex: 1, background: "linear-gradient(90deg, rgba(227,200,120,.34), transparent)" }} />;
     return (
       <div style={{ position: "relative", border: "2px solid #6b5226", borderRadius: 9, overflow: "hidden", marginBottom: 26, background: "radial-gradient(130% 150% at 12% 0%, #241a33 0%, #1b1526 44%, #130e1b 100%)", boxShadow: "0 14px 38px rgba(18,10,28,.42), inset 0 1px 0 rgba(227,200,120,.14)" }}>
@@ -1808,8 +1832,8 @@ export default class Almanac extends React.Component {
         <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 15, padding: "17px 22px 14px", borderBottom: "1px solid rgba(227,200,120,.18)", flexWrap: "wrap", rowGap: 11 }}>
           <div style={{ width: 46, height: 46, flex: "0 0 46px", borderRadius: "50%", background: "radial-gradient(circle at 35% 28%, #f0dc98, #c39a44 58%, #7c5520)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 23, boxShadow: "0 0 20px rgba(227,200,120,.4), inset 0 1px 2px rgba(255,255,255,.5)" }}>🔮</div>
           <div style={{ flex: 1, minWidth: 230 }}>
-            <div style={cinzel({ fontWeight: 800, fontSize: 21, color: "#f2e2b2", letterSpacing: ".01em" })}>The Oracle’s Counsel</div>
-            <div style={mono({ fontSize: 10.5, color: "#9a86c0", marginTop: 2 })}>Synthesised <span style={{ color: "#e3c878" }}>{cm.counselSynth}</span> signals across {cm.counselDomains} domains · reading the whole ledger for your next move</div>
+            <div style={cinzel({ fontWeight: 800, fontSize: 21, color: "#f2e2b2", letterSpacing: ".01em" })}>The Standing Order</div>
+            <div style={mono({ fontSize: 10.5, color: "#9a86c0", marginTop: 2 })}>Reconciled <span style={{ color: "#e3c878" }}>{cm.counselSynth}</span> signals across {cm.counselDomains} domains into one order — priced live, weighed against your logs</div>
           </div>
           <div style={{ display: "flex", gap: 3, padding: 3, background: "rgba(0,0,0,.3)", border: "1px solid rgba(227,200,120,.2)", borderRadius: 9 }}>
             {cm.counselLenses.map((L) => (
@@ -1842,7 +1866,7 @@ export default class Almanac extends React.Component {
           {hero && (
             <div style={{ padding: "19px 22px 21px", borderRight: "1px solid rgba(227,200,120,.14)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-                <span style={mono({ fontWeight: 600, fontSize: 10, color: "#9a86c0", letterSpacing: ".24em" })}>TOP COUNSEL</span>{rule}
+                <span style={mono({ fontWeight: 600, fontSize: 10, color: "#e3c878", letterSpacing: ".24em" })}>◈ DO NOW</span><span style={mono({ fontSize: 9, color: "#8a7aa8" })}>best use of your next hour</span>{rule}
               </div>
               <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
                 <div style={{ width: 54, height: 54, flex: "0 0 54px", borderRadius: 11, background: hero.domColor, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 27, boxShadow: "0 5px 14px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.18)" }}>{hero.glyph}</div>
@@ -1857,7 +1881,8 @@ export default class Almanac extends React.Component {
               </div>
               <div style={{ fontSize: 13, lineHeight: 1.58, color: "#d4c7ae", margin: "13px 0 16px" }}>{hero.why}</div>
               <div style={cinzel({ fontWeight: 800, fontSize: 22, color: "#e3c878", marginBottom: 4 })}>{hero.metric}</div>
-              {hero.hasSrc && <div style={mono({ fontSize: 9, letterSpacing: ".14em", color: hero.srcColor, marginBottom: 16 })}>● {hero.src}</div>}
+              {hero.hasSrc && <div style={mono({ fontSize: 9, letterSpacing: ".14em", color: hero.srcColor, marginBottom: cm.counselRecon ? 6 : 16 })}>● {hero.src === "your data" ? "MEASURED FROM YOUR LOGS" : "BOOK ESTIMATE"}</div>}
+              {cm.counselRecon && <div style={{ marginBottom: 16, ...serif({ fontSize: 12.5, fontStyle: "italic", color: "#c9b78a" }) }}>Why it wins: {cm.counselRecon}.</div>}
               <div style={{ marginBottom: 17 }}>
                 <div style={mono({ fontSize: 8.5, letterSpacing: ".22em", color: "#8a7aa8", marginBottom: 11 })}>WHY IT RANKS · SIGNAL FINGERPRINT</div>
                 <div style={{ display: "flex", gap: 13 }}>
@@ -1896,6 +1921,30 @@ export default class Almanac extends React.Component {
             ))}
           </div>
         </div>
+        {/* but first — the cheap one-time win to grab before grinding */}
+        {bf && (
+          <a href="#" onClick={(e) => { e.preventDefault(); this.go(bf.goto); }} style={{ position: "relative", display: "flex", alignItems: "center", gap: 13, padding: "12px 22px", borderTop: "1px solid rgba(227,200,120,.16)", background: "linear-gradient(90deg, rgba(92,110,53,.20), rgba(92,110,53,.04))", textDecoration: "none" }}>
+            <span style={mono({ fontWeight: 600, fontSize: 10, color: "#a9c46a", letterSpacing: ".2em", flex: "0 0 auto" })}>◈ BUT FIRST</span>
+            <span style={{ width: 30, height: 30, flex: "0 0 30px", borderRadius: 7, background: bf.domColor, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>{bf.glyph}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={cinzel({ fontWeight: 700, fontSize: 14, color: "#eae0c8" })}>{bf.title}</div>
+              <div style={mono({ fontSize: 10, color: "#a7b98a" })}>one-time · {bf.reward} · grab it before you grind — you keep it forever</div>
+            </div>
+            <span style={mono({ fontSize: 11, color: "#a9c46a", flex: "0 0 auto" })}>go →</span>
+          </a>
+        )}
+        {/* on the horizon — the best thing one unlock away */}
+        {horizon && (
+          <a href="#" onClick={(e) => { e.preventDefault(); this.go(horizon.goto); }} style={{ position: "relative", display: "flex", alignItems: "center", gap: 13, padding: "12px 22px", borderTop: "1px solid rgba(227,200,120,.16)", background: "linear-gradient(90deg, rgba(106,74,138,.20), rgba(106,74,138,.04))", textDecoration: "none" }}>
+            <span style={mono({ fontWeight: 600, fontSize: 10, color: "#b8a6d8", letterSpacing: ".2em", flex: "0 0 auto" })}>◈ ON THE HORIZON</span>
+            <span style={{ width: 30, height: 30, flex: "0 0 30px", borderRadius: 7, background: horizon.typeColor, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>{horizon.glyph}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={cinzel({ fontWeight: 700, fontSize: 14, color: "#eae0c8" })}>{horizon.name}</div>
+              <div style={mono({ fontSize: 10, color: "#b8a6d8" })}>one unlock away · {horizon.blocker}{horizon.type === "boss" ? " · ≈" + this.short(horizon.value * 1e4) + "/hr once open" : ""}</div>
+            </div>
+            <span style={mono({ fontSize: 11, color: "#b8a6d8", flex: "0 0 auto" })}>chart it →</span>
+          </a>
+        )}
         {/* footer: bottleneck + lens name */}
         <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 11, padding: "12px 22px", borderTop: "1px solid rgba(227,200,120,.16)", background: "rgba(0,0,0,.24)", flexWrap: "wrap" }}>
           <span style={{ fontSize: 15 }}>⛓️</span>
