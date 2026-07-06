@@ -3643,7 +3643,10 @@ export default class Almanac extends React.Component {
       const items = s.items.filter((it) => { const m = it.mode || "both"; return m === "both" || m === mode; }).map((it) => { const price = this.gearPrices[it.n] != null ? this.gearPrices[it.n] : it.gp; const usable = (it.lvl || 1) <= (gsLvl[it.gs || "none"] || 99); return { ...it, price, usable }; });
       let curName = ""; for (let i = items.length - 1; i >= 0; i--) if (items[i].usable) { curName = items[i].n; break; }
       const names = items.map((it) => it.n);
-      const equippedName = lo[s.slot] && names.includes(lo[s.slot]) ? lo[s.slot] : curName;
+      // "__none__" = you deliberately emptied this slot; otherwise a saved pick,
+      // else the best piece your stats unlock.
+      const raw = lo[s.slot];
+      const equippedName = raw === "__none__" ? "" : (raw && names.includes(raw) ? raw : curName);
       const best = items[items.length - 1];
       const bisName = best ? best.n : "";
       return { slot: s.slot, items: items.map((m, i) => ({ ...m, order: i + 1, current: m.n === bisName, equipped: m.n === equippedName })), curName, bisName, equippedName };
@@ -3662,6 +3665,8 @@ export default class Almanac extends React.Component {
   openGearDetail = (slot, item) => { ensureItemStats(item, () => this.bump()); this.setState({ gearDetail: { slot, item } }); };
   closeGearDetail = () => this.setState({ gearDetail: null });
   equipItem = (slot, name) => { const st = this.state.gearStyle; if (!this.loadout[st]) this.loadout[st] = {}; this.loadout[st][slot] = name; this._save("almanac.loadout.v1", this.loadout); ensureItemStats(name, () => this.bump()); this.setState({ gearItem: name, gearSlot: slot, gearStatMode: "item" }); };
+  // Explicitly leave a slot bare (distinct from "no pick" → best-usable default).
+  unequipSlot = (slot) => { const st = this.state.gearStyle; if (!this.loadout[st]) this.loadout[st] = {}; this.loadout[st][slot] = "__none__"; this._save("almanac.loadout.v1", this.loadout); this.setState({ gearItem: null, gearSlot: slot, gearStatMode: "set" }); };
   resetLoadout = () => { const st = this.state.gearStyle; this.loadout[st] = {}; this._save("almanac.loadout.v1", this.loadout); this.bump(); };
   // Ownership ledger: which gear-path pieces the player actually HAS (banked or
   // equipped) — independent of what their stats unlock. Feeds the boss guides.
@@ -3760,11 +3765,12 @@ export default class Almanac extends React.Component {
             <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
               <span style={cinzel({ fontWeight: 700, fontSize: 21, color: C.ink })}>{sel}</span>
               <span style={mono({ fontSize: 9, letterSpacing: ".16em", color: C.muted, textTransform: "uppercase" })}>{selData.items.length} tiers · you own {selData.items.filter((x) => this.gearOwned[x.n]).length}</span>
-              <span style={{ marginLeft: "auto", ...serif({ fontSize: 13, color: C.muted2 }) }}>equipped: <strong style={{ color: C.green }}>{selData.equippedName || "—"}</strong></span>
+              <span style={{ marginLeft: "auto", ...serif({ fontSize: 13, color: C.muted2 }) }}>equipped: <strong style={{ color: selData.equippedName ? C.green : C.muted }}>{selData.equippedName || "empty"}</strong></span>
+              {selData.equippedName ? <span onClick={() => this.unequipSlot(sel)} title="Leave this slot empty" style={{ cursor: "pointer", ...mono({ fontSize: 10, color: C.red }) }}>✕ empty slot</span> : null}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(214px,1fr))", gap: 12 }}>
               {selData.items.map((it, i) => (
-                <div key={i} onClick={() => this.equipItem(sel, it.n)} style={{ position: "relative", cursor: "pointer", background: it.equipped ? "rgba(201,162,74,.16)" : it.usable ? C.cardLight : "#ece1c6", border: it.equipped ? "2px solid " + C.gold : it.usable ? "1px solid rgba(44,32,19,.18)" : "1px dashed rgba(44,32,19,.28)", borderRadius: 6, padding: "11px 12px 12px", boxShadow: it.equipped ? "0 2px 12px rgba(201,162,74,.3)" : "none", opacity: it.usable ? 1 : 0.72 }}>
+                <div key={i} onClick={() => it.equipped ? this.unequipSlot(sel) : this.equipItem(sel, it.n)} title={it.equipped ? "Click to unequip (leave this slot empty)" : "Click to equip"} style={{ position: "relative", cursor: "pointer", background: it.equipped ? "rgba(201,162,74,.16)" : it.usable ? C.cardLight : "#ece1c6", border: it.equipped ? "2px solid " + C.gold : it.usable ? "1px solid rgba(44,32,19,.18)" : "1px dashed rgba(44,32,19,.28)", borderRadius: 6, padding: "11px 12px 12px", boxShadow: it.equipped ? "0 2px 12px rgba(201,162,74,.3)" : "none", opacity: it.usable ? 1 : 0.72 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 7 }}>
                     <div style={{ width: 40, height: 40, flex: "0 0 40px", display: "flex", alignItems: "center", justifyContent: "center", background: "#efe4c8", border: "1px solid rgba(44,32,19,.16)", borderRadius: 5 }}><Icon url={itemIconUrl(it.n)} name={it.n} size={32} /></div>
                     <div style={{ flex: 1, minWidth: 0 }}>

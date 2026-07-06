@@ -42,10 +42,21 @@ export function itemId(name) { return _itemIds ? _itemIds[itemKey(name)] : undef
 export function itemIconUrl(name) {
   if (!name) return "";
   const urls = [];
+  const wiki = (n) => "https://oldschool.runescape.wiki/w/Special:FilePath/" + encodeURIComponent(n.replace(/ /g, "_") + ".png");
+  const key = itemKey(name);
   const id = itemId(name);
   if (id != null) urls.push("https://static.runelite.net/cache/item/icon/" + id + ".png");
-  const f = itemKey(name).replace(/ /g, "_") + ".png";
-  urls.push("https://oldschool.runescape.wiki/w/Special:FilePath/" + encodeURIComponent(f));
+  urls.push(wiki(key));
+  // Variant fallback: charged/imbued/finished markers ((c)/(i)/(f)/(or)/(nz)…)
+  // often lack their own id, and their wiki file lives under the base name — so
+  // "Blade of saeldor (c)" falls back to "Blade of saeldor", clearing the last
+  // of the letter-placeholder cases.
+  const base = key.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  if (base && base !== key) {
+    const bid = _itemIds ? _itemIds[base] : undefined;
+    if (bid != null) urls.push("https://static.runelite.net/cache/item/icon/" + bid + ".png");
+    urls.push(wiki(base));
+  }
   return urls;
 }
 

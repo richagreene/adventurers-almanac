@@ -10,11 +10,14 @@ export const GEAR_DATA = {
   { slot:'Weapon', items:[
    { n:'Rune scimitar', lvl:40, gs:'att', req:'40 Attack', gp:15000, bestFor:'F2P & early training; Sand Crabs', get:'Smith (2 rune bars) or buy' },
    { n:'Dragon scimitar', lvl:60, gs:'att', req:'60 Attack · Monkey Madness I', gp:58000, bestFor:'Best slash DPS pre-whip; Slayer, Sand Crabs', get:'Ape Atoll shop after Monkey Madness I' },
+   { n:'Granite maul', lvl:50, gs:'att', req:'50 Attack · 50 Strength', gp:38000, bestFor:'Instant-hit spec for PKing & boss finishers', get:'Drop: Cave horrors / buy' },
    { n:'Leaf-bladed battleaxe', lvl:55, gs:'att', req:'55 Attack · 55 Slayer', gp:34000, bestFor:'Turoth & Kurask Slayer tasks', get:'Slayer shop / drop' },
+   { n:'Zamorakian hasta', lvl:60, gs:'att', req:'60 Attack', gp:16000000, bestFor:'One-handed crush/stab for shield use; Vorkath, GWD', get:'Reforge Zamorakian spear at Otherworldly being' },
    { n:'Abyssal whip', lvl:70, gs:'att', req:'70 Attack', gp:1500000, bestFor:'Long-term BIS slash; most Slayer & training', get:'Drop: Abyssal demons (1/512)' },
    { n:'Abyssal tentacle', lvl:75, gs:'att', req:'75 Attack', gp:3900000, bestFor:'Whip upgrade; general Slayer & bossing', get:'Combine whip + Kraken tentacle' },
    { n:'Saradomin sword', lvl:75, gs:'att', req:'75 Attack', gp:280000, bestFor:'Magic-weak targets; Kalphite Queen, GWD', get:'Drop: Commander Zilyana' },
    { n:'Dragon hunter lance', lvl:78, gs:'att', req:'78 Attack · Dragon Slayer II', gp:62000000, bestFor:'Draconic bosses: Vorkath, rune dragons, Hydra', get:'Drop: Alchemical Hydra' },
+   { n:'Osmumten’s fang', lvl:82, gs:'att', req:'82 Attack', gp:24000000, bestFor:'BIS stab vs high-defence bosses; ToA, CoX, general', get:'Drop: Tombs of Amascut' },
    { n:'Inquisitor\u2019s mace', lvl:70, gs:'att', req:'70 Attack', gp:80000000, bestFor:'BIS crush; Slayer with inquisitor set, Nightmare', get:'Drop: The Nightmare' },
    { n:'Ghrazi rapier', lvl:75, gs:'att', req:'75 Attack', gp:90000000, bestFor:'BIS stab; most bosses & high Slayer', get:'Drop: Theatre of Blood' },
    { n:'Blade of saeldor (c)', lvl:75, gs:'att', req:'75 Attack · Song of the Elves', gp:0, bestFor:'BIS slash; cheap to charge, general use', get:'Combine Enhanced crystal weapon seed (Gauntlet)' },
@@ -39,6 +42,7 @@ export const GEAR_DATA = {
   ]},
   { slot:'Helm', items:[
    { n:'Rune full helm', lvl:40, gs:'def', req:'40 Defence', gp:21000, bestFor:'Early defence', get:'Smith / buy' },
+   { n:'Berserker helm', lvl:45, gs:'def', req:'45 Defence · The Fremennik Trials', gp:44000, bestFor:'Cheap Str-bonus helm before neitiznot', get:'Reward: The Fremennik Trials / drop' },
    { n:'Helm of neitiznot', lvl:55, gs:'def', req:'55 Defence · The Fremennik Isles', gp:44000, bestFor:'Cheap all-round helm; long-term budget BIS', get:'Reward: The Fremennik Isles' },
    { n:'Serpentine helm', lvl:52, gs:'def', req:'52 Defence', gp:8500000, bestFor:'Anti-venom + offence; Zulrah, Slayer', get:'Combine magma/tanzanite mutagen + serp visage (Zulrah)' },
    { n:'Neitiznot faceguard', lvl:70, gs:'def', req:'70 Defence · The Fremennik Exiles', gp:0, bestFor:'Strong budget helm; Slayer & bossing', get:'Combine helm of neitiznot + basalt (Fremennik Exiles)' },
@@ -70,6 +74,7 @@ export const GEAR_DATA = {
    { n:'Rune boots', lvl:40, gs:'def', req:'40 Defence', gp:30000, bestFor:'Early defensive boots', get:'Drop: Cyclopes (Warriors\u2019 Guild)' },
    { n:'Dragon boots', lvl:60, gs:'def', req:'60 Defence', gp:165000, bestFor:'Cheap Str boots; long-term budget BIS', get:'Drop: Spiritual mages (GWD)' },
    { n:'Guardian boots', lvl:75, gs:'def', req:'75 Defence', gp:33000000, bestFor:'Tank boots; ToB, Inferno', get:'Combine bandos boots + black tourmaline core' },
+   { n:'Echo boots', lvl:75, gs:'def', req:'75 Defence', gp:22000000, bestFor:'Strong hybrid defensive boots; ToA, tanky Slayer', get:'Drop: Tombs of Amascut / combine' },
    { n:'Primordial boots', lvl:75, gs:'def', req:'75 Defence', gp:31000000, bestFor:'BIS Str boots; all melee bossing & Slayer', get:'Combine primordial crystal (Cerberus) + dragon boots' },
   ]},
   { slot:'Cape', items:[
@@ -89,6 +94,7 @@ export const GEAR_DATA = {
    { n:'Warrior ring', lvl:1, gs:'none', req:'\u2014', gp:55000, bestFor:'Cheap melee accuracy ring', get:'Drop: Dagannoth Rex' },
    { n:'Berserker ring', lvl:1, gs:'none', req:'\u2014', gp:2700000, bestFor:'Best budget Str ring; Slayer & bossing', get:'Drop: Dagannoth Rex' },
    { n:'Berserker ring (i)', lvl:1, gs:'none', req:'Soul Wars / imbue', gp:0, bestFor:'Imbued Str ring; all melee PvM', get:'Imbue at Soul Wars / Nightmare Zone' },
+   { n:'Brimstone ring', lvl:1, gs:'none', req:'\u2014', gp:4300000, bestFor:'All-round hybrid ring (magic-def proc); Slayer, mixed PvM', get:'Combine hydra ring pieces (Alchemical Hydra)' },
    { n:'Ultor ring', lvl:1, gs:'none', req:'\u2014', gp:0, bestFor:'BIS melee Str ring; endgame PvM', get:'Combine ultor vestige (Vardorvis, DT2)' },
   ]},
  ],
@@ -96,6 +102,8 @@ export const GEAR_DATA = {
   { slot:'Weapon', items:[
    { n:'Magic shortbow', lvl:50, gs:'range', req:'50 Ranged', gp:1300, bestFor:'Early DPS + special; F2P-friendly, training', get:'Fletch (magic logs) / buy' },
    { n:'Rune crossbow', lvl:61, gs:'range', req:'61 Ranged', gp:18000, bestFor:'Cheap accurate cbow; Slayer, early bossing', get:'Fletch / buy' },
+   { n:'Dragon crossbow', lvl:64, gs:'range', req:'64 Ranged', gp:800000, bestFor:'Budget dragon-bolt platform; mid-game bossing', get:'Fletch (dragon limbs + magic stock)' },
+   { n:'Karil’s crossbow', lvl:70, gs:'range', req:'70 Ranged', gp:120000, bestFor:'Barrows repeating cbow; budget rapid ranged', get:'Drop: Barrows (Karil)' },
    { n:'Toxic blowpipe', lvl:75, gs:'range', req:'75 Ranged', gp:4000000, bestFor:'Best DPS for years; Slayer, Zulrah, most bosses', get:'Combine tanzanite fang (Zulrah) + chisel' },
    { n:'Armadyl crossbow', lvl:70, gs:'range', req:'70 Ranged', gp:30000000, bestFor:'High-tier cbow; God Wars, Slayer', get:'Drop: Commander Zilyana' },
    { n:'Dragon hunter crossbow', lvl:65, gs:'range', req:'65 Ranged', gp:62000000, bestFor:'BIS vs dragons; Vorkath, Hydra, rune drags', get:'Drop: Alchemical Hydra' },
@@ -114,6 +122,7 @@ export const GEAR_DATA = {
   ]},
   { slot:'Helm', items:[
    { n:'Coif', lvl:1, gs:'range', req:'1 Ranged · 1 Defence', gp:120, bestFor:'Starter ranged helm', get:'Craft (leather)' },
+   { n:'Robin hood hat', lvl:40, gs:'range', req:'40 Ranged', gp:600000, bestFor:'Best pure-ranged-bonus hat; training & budget DPS', get:'Reward: Temple Trekking / drop' },
    { n:'Archer helm', lvl:45, gs:'def', req:'45 Ranged · 45 Defence · Fremennik Trials', gp:48000, bestFor:'Cheap real ranged helm; training & Slayer', get:'Fremennik Trials reward / drop' },
    { n:'Black d\u2019hide coif', lvl:60, gs:'range', req:'60 Ranged', gp:0, bestFor:'Budget d\u2019hide helm', get:'Craft (black dragonhide)' },
    { n:'Armadyl helmet', lvl:70, gs:'range', req:'70 Ranged', gp:18000000, bestFor:'Strong ranged helm; God Wars, Slayer', get:'Drop: Kree\u2019arra (GWD)' },
@@ -121,6 +130,7 @@ export const GEAR_DATA = {
    { n:'Crystal helm', lvl:70, gs:'range', req:'70 Ranged · Roving Elves', gp:0, bestFor:'BIS with crystal bow set; Bof, Gauntlet', get:'Singing Bowl (crystal shards + armour seed)' },
   ]},
   { slot:'Body', items:[
+   { n:'Red d\u2019hide body', lvl:60, gs:'range', req:'60 Ranged', gp:4000, bestFor:'Cheap early d\u2019hide body before black', get:'Craft (red dragonhide)' },
    { n:'Black d\u2019hide body', lvl:70, gs:'range', req:'70 Ranged', gp:6500, bestFor:'Cheap d\u2019hide body for ages; training & Slayer', get:'Craft (black dragonhide)' },
    { n:'Karil\u2019s leathertop', lvl:70, gs:'range', req:'70 Ranged · 70 Defence', gp:2800000, bestFor:'Barrows ranged body; mid-game bossing', get:'Drop: Barrows (Karil)' },
    { n:'Armadyl chestplate', lvl:70, gs:'range', req:'70 Ranged', gp:32000000, bestFor:'Strong ranged body; God Wars, Slayer, raids', get:'Drop: Kree\u2019arra (GWD)' },
@@ -169,15 +179,19 @@ export const GEAR_DATA = {
   { slot:'Weapon', items:[
    { n:'Mystic mud staff', lvl:1, gs:'mage', req:'40 Magic to wield well', gp:1300000, bestFor:'Early elemental + autocast', get:'Combine mud battlestaff + mystic' },
    { n:'Iban\u2019s staff', lvl:50, gs:'mage', req:'50 Magic · Underground Pass', gp:200000, bestFor:'Cheap strong nuke; early Slayer & training', get:'Reward: Underground Pass' },
+   { n:'Master wand', lvl:60, gs:'mage', req:'60 Magic', gp:35000, bestFor:'Cheap high-tier wand for autocast; budget bossing', get:'Mage Training Arena (points)' },
+   { n:'Warped sceptre', lvl:62, gs:'mage', req:'62 Magic', gp:600000, bestFor:'Cheap built-in magic attack; Slayer & mid-game DPS', get:'Combine warped sceptre pieces (Temple of the Eye)' },
    { n:'Trident of the seas', lvl:75, gs:'mage', req:'75 Magic', gp:130000, bestFor:'Best budget magic DPS; Slayer, early bossing', get:'Drop: Kraken / combine uncharged' },
    { n:'Trident of the swamp', lvl:75, gs:'mage', req:'75 Magic', gp:1600000, bestFor:'Stronger trident; Slayer & bossing', get:'Combine magic fang (Zulrah) + trident' },
    { n:'Sanguinesti staff', lvl:75, gs:'mage', req:'75 Magic', gp:75000000, bestFor:'Healing magic DPS; ToB, CoX, high Slayer', get:'Drop: Theatre of Blood' },
+   { n:'Ancient sceptre', lvl:70, gs:'mage', req:'70 Magic · 70 Attack · Secrets of the North', gp:19000000, bestFor:'Boosts Ancient Magicks; barrage Slayer, freezing', get:'Combine master wand + smoke/blood/ice/shadow (Muspah)' },
    { n:'Harmonised nightmare staff', lvl:75, gs:'mage', req:'75 Magic', gp:0, bestFor:'BIS for standard-spell DPS; raids, Slayer', get:'Combine nightmare staff + harmonised orb' },
    { n:'Tumeken\u2019s shadow', lvl:85, gs:'mage', req:'85 Magic', gp:0, bestFor:'BIS magic weapon; triples bonuses, all PvM', get:'Drop: Tombs of Amascut' },
    { n:'Kodai wand', lvl:80, gs:'mage', req:'80 Magic', gp:90000000, bestFor:'BIS wand (offhand-friendly); ancients, freezing', get:'Combine kodai insignia (CoX) + master wand' },
   ]},
   { slot:'Helm', items:[
    { n:'Mystic hat', lvl:40, gs:'mage', req:'40 Magic', gp:6500, bestFor:'Cheap early magic helm', get:'Buy / drop' },
+   { n:'Infinity hat', lvl:50, gs:'mage', req:'50 Magic · 25 Defence', gp:190000, bestFor:'Strong offensive magic hat; Slayer & training', get:'Mage Training Arena (points)' },
    { n:'Farseer helm', lvl:45, gs:'def', req:'45 Defence · Fremennik Trials', gp:35000, bestFor:'Magic helm with defence; Slayer', get:'Fremennik Trials / drop' },
    { n:'Ahrim\u2019s hood', lvl:70, gs:'mage', req:'70 Magic · 70 Defence', gp:1200000, bestFor:'Barrows magic helm; mid-game bossing', get:'Drop: Barrows (Ahrim)' },
    { n:'Ancestral hat', lvl:75, gs:'mage', req:'75 Magic', gp:55000000, bestFor:'BIS magic helm; raids, high-end PvM', get:'Drop: Chambers of Xeric' },
@@ -185,12 +199,14 @@ export const GEAR_DATA = {
   ]},
   { slot:'Body', items:[
    { n:'Mystic robe top', lvl:40, gs:'mage', req:'40 Magic', gp:24000, bestFor:'Cheap early magic body', get:'Buy / drop' },
+   { n:'Infinity top', lvl:50, gs:'mage', req:'50 Magic · 25 Defence', gp:2400000, bestFor:'Strong offensive magic body; Slayer & bossing', get:'Mage Training Arena (points)' },
    { n:'Ahrim\u2019s robetop', lvl:70, gs:'mage', req:'70 Magic · 70 Defence', gp:2600000, bestFor:'Barrows magic body; mid-game bossing & Slayer', get:'Drop: Barrows (Ahrim)' },
    { n:'Ancestral robe top', lvl:75, gs:'mage', req:'75 Magic', gp:230000000, bestFor:'BIS magic body; raids, end-game PvM', get:'Drop: Chambers of Xeric' },
    { n:'Virtus robe top', lvl:78, gs:'mage', req:'78 Magic', gp:0, bestFor:'BIS for ancient magicks; DT2, Slayer barrage', get:'Drop: DT2 bosses' },
   ]},
   { slot:'Legs', items:[
    { n:'Mystic robe bottom', lvl:40, gs:'mage', req:'40 Magic', gp:23000, bestFor:'Cheap early magic legs', get:'Buy / drop' },
+   { n:'Infinity bottoms', lvl:50, gs:'mage', req:'50 Magic · 25 Defence', gp:2000000, bestFor:'Strong offensive magic legs; Slayer & bossing', get:'Mage Training Arena (points)' },
    { n:'Ahrim\u2019s robeskirt', lvl:70, gs:'mage', req:'70 Magic · 70 Defence', gp:2300000, bestFor:'Barrows magic legs; mid-game', get:'Drop: Barrows (Ahrim)' },
    { n:'Ancestral robe bottom', lvl:75, gs:'mage', req:'75 Magic', gp:130000000, bestFor:'BIS magic legs; raids, end-game PvM', get:'Drop: Chambers of Xeric' },
    { n:'Virtus robe legs', lvl:78, gs:'mage', req:'78 Magic', gp:0, bestFor:'BIS for ancient magicks; DT2, barrage Slayer', get:'Drop: DT2 bosses' },
