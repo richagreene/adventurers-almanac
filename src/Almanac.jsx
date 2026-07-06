@@ -289,6 +289,9 @@ export default class Almanac extends React.Component {
     this._undoSuspended = true;
     this.loadState();
     this.recordXpSnapshot(); // stamp today's baseline so history accrues on real accounts
+    // Seed the briefing baseline the first time we see an account, so the first
+    // visit doesn't diff against nothing (or the demo) and show a bogus delta.
+    if (!this._load("almanac.briefbase.v1", null)) this._save("almanac.briefbase.v1", this._briefSnapshot());
     this._undoSuspended = false;
     this._undoStack = []; this._redoStack = [];
     this.gearPrices = {};
@@ -646,9 +649,13 @@ export default class Almanac extends React.Component {
     this.setState({ fetching: true, fetchMsg: "Consulting the hiscores…" });
     const res = await fetchPlayer(rsn);
     if (!res.ok) { this.setState({ fetching: false, fetchMsg: res.error }); return; }
+    const prevBase = this._load("almanac.briefbase.v1", null);
     this.stats = { rsn: res.rsn, skills: res.skills, mode: res.mode || this.mode, source: res.source, qpApi: res.qp, at: Date.now(), demo: false };
     this.skillsRaw = res.skills; this._save("almanac.stats.v1", this.stats);
     this.recordXpSnapshot();
+    // Loading a different account resets the briefing baseline so it tracks
+    // progress for THIS account, not a phantom jump from the demo/previous name.
+    if (!prevBase || prevBase.rsn !== res.rsn) this._save("almanac.briefbase.v1", this._briefSnapshot());
     this.setState({ fetching: false, fetchMsg: `Loaded ${res.rsn} · combat ${res.combat} · ${res.source}` });
   };
   // ---------- XP velocity ----------
@@ -1060,6 +1067,47 @@ export default class Almanac extends React.Component {
   toggleBlock = (t) => { this.blocks[t] = !this.blocks[t]; this._save("almanac.blocks.v1", this.blocks); this.bump(); };
   setBossOv = (boss, key, raw) => { const v = Math.max(0, Math.round(this.parseNum(raw) || 0)); if (!this.bossOv[boss]) this.bossOv[boss] = {}; this.bossOv[boss][key] = v; this._save("almanac.bossov.v1", this.bossOv); this.bump(); };
   resetBossOv = (boss) => { delete this.bossOv[boss]; this._save("almanac.bossov.v1", this.bossOv); this.bump(); };
+
+  // ---------- "since you last opened" briefing ----------
+  // A compact snapshot of the account state the briefing diffs against. The
+  // baseline is re-seeded when you Mark as read (or load a different account),
+  // so the briefing always reports progress since you last acknowledged it.
+  _briefSnapshot() {
+    const xp = {}, lvl = {}; let total = 0;
+    this.skillsRaw.forEach(([n, l, x]) => { xp[n] = x || 0; lvl[n] = l || 1; total += x || 0; });
+    const qDone = (D.quests || []).filter((q) => this.questDone(q)).length;
+    const qReady = (D.quests || []).filter((q) => this.qStatus(q) === "Stat-ready").map((q) => q.n);
+    const diReady = (D.diaries || []).filter((d) => this.diaryStatus(d) === "Stat-ready").map((d) => d.region + " " + d.tier);
+    const nwLast = this.logs && this.logs.nw && this.logs.nw.length ? this.logs.nw[this.logs.nw.length - 1] : { cash: 0, items: 0 };
+    return { rsn: (this.stats && this.stats.rsn) || "", at: Date.now(), day: this.today(), total, xp, lvl, netWorth: (nwLast.cash || 0) + (nwLast.items || 0), qDone, qRemaining: (D.quests || []).length - qDone, qReady, diReady };
+  }
+  sealBriefing = () => { this._save("almanac.briefbase.v1", this._briefSnapshot()); this.bump(); };
+  // Diff current state vs the acknowledged baseline into a set of report lines.
+  // Returns { has, lines, asOf } — or { seed:true } on a fresh/other account.
+  briefing() {
+    const base = this._load("almanac.briefbase.v1", null);
+    const cur = this._briefSnapshot();
+    if (!base || base.rsn !== cur.rsn) return { seed: true };
+    const cap = (s) => (s || "").charAt(0).toUpperCase() + (s || "").slice(1);
+    const lines = [];
+    const dxp = cur.total - (base.total || 0);
+    if (dxp > 0) {
+      const moved = Object.keys(cur.xp).map((n) => ({ n, d: (cur.xp[n] || 0) - ((base.xp || {})[n] || 0) })).filter((m) => m.d > 0).sort((a, b) => b.d - a.d);
+      const top = moved.slice(0, 3).map((m) => cap(m.n) + " +" + this.short(m.d)).join(", ");
+      lines.push({ icon: "📈", color: C.teal, text: "▲ " + this.short(dxp) + " XP" + (top ? " · " + top : "") });
+    }
+    const ups = Object.keys(cur.lvl).map((n) => ({ n, from: (base.lvl || {})[n] || 1, to: cur.lvl[n] || 1 })).filter((u) => u.to > u.from);
+    if (ups.length) lines.push({ icon: "⬆", color: C.gold, text: "Levelled up · " + ups.map((u) => cap(u.n) + " " + u.from + "→" + u.to).join(" · ") });
+    const dgp = cur.netWorth - (base.netWorth || 0);
+    if (Math.abs(dgp) >= 1) lines.push({ icon: "💰", color: dgp >= 0 ? C.green : C.red, text: (dgp >= 0 ? "▲ " : "▼ ") + this.signed(dgp) + " bank · now " + this.short(cur.netWorth) });
+    const newQ = cur.qReady.filter((n) => !(base.qReady || []).includes(n));
+    if (newQ.length) lines.push({ icon: "📜", color: "#5a4a8a", text: newQ.length === 1 ? newQ[0] + " is now stat-ready" : newQ.length + " quests now stat-ready · " + newQ.slice(0, 3).join(", ") + (newQ.length > 3 ? "…" : "") });
+    const newD = cur.diReady.filter((k) => !(base.diReady || []).includes(k));
+    if (newD.length) lines.push({ icon: "🗺", color: C.gold, text: newD.length + " diar" + (newD.length > 1 ? "ies" : "y") + " now claimable · " + newD.slice(0, 3).join(", ") + (newD.length > 3 ? "…" : "") });
+    const qCleared = (base.qRemaining || 0) - cur.qRemaining;
+    if (qCleared > 0) lines.push({ icon: "🏅", color: C.red, text: qCleared + " quest" + (qCleared > 1 ? "s" : "") + " done · " + cur.qRemaining + " from the Quest Cape" });
+    return { has: lines.length > 0, lines, asOf: base.day, atMs: base.at };
+  }
   // Your logged reality for a boss, from the same two logs the Focus tab uses:
   //   kills/hr  — timed kill-log sessions only (entries carrying minutes)
   //   gp/kill   — priced drop log ÷ ALL logged KC. Only uniques get logged, so
@@ -1985,8 +2033,30 @@ export default class Almanac extends React.Component {
       { name: this.short(bankGoal) + " Bank", note: this.short(d.netWorth) + " of " + this.short(bankGoal) + " · " + this.short(d.gpDay) + "/day", pct: Math.min(100, (d.netWorth / bankGoal) * 100) },
       { name: "Base " + baseGoal, note: "lowest combat skill is " + baseLow + (baseLow >= baseGoal ? " · reached" : " · +" + (baseGoal - baseLow) + " to go"), pct: Math.min(100, (baseLow / baseGoal) * 100) },
     ];
+    const brief = this.briefing();
+    const briefRsn = (this.stats && this.stats.rsn) || "Adventurer";
     return (
       <div>
+        {brief.has && (
+          <Card style={{ marginBottom: 16, borderLeft: `4px solid ${C.gold}`, background: "linear-gradient(180deg, rgba(201,162,74,.09), rgba(201,162,74,.02))" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+              <div>
+                <Kicker color={C.goldDeep}>Welcome back, {briefRsn}</Kicker>
+                <div style={serif({ fontSize: 12.5, fontStyle: "normal", color: C.muted, marginTop: 3 })}>What's changed since {brief.asOf === this.today() ? "you last checked in today" : brief.asOf}:</div>
+              </div>
+              <span onClick={this.sealBriefing} title="Reset the baseline to now" style={{ cursor: "pointer", padding: "5px 11px", borderRadius: 6, border: "1px solid rgba(44,32,19,.2)", ...mono({ fontSize: 10.5, letterSpacing: ".04em", color: C.muted2 }) }}>Mark as read ✓</span>
+            </div>
+            <div style={{ marginTop: 11, display: "flex", flexDirection: "column", gap: 7 }}>
+              {brief.lines.map((l, i) => (
+                <div key={i} style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+                  <span style={{ fontSize: 13, flex: "0 0 auto" }}>{l.icon}</span>
+                  <span style={{ ...serif({ fontSize: 13.5, fontStyle: "normal" }), color: l.color, fontWeight: 600 }}>{l.text}</span>
+                </div>
+              ))}
+            </div>
+            <div style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted, marginTop: 10 })}>↓ Your Standing Order below is already re-reckoned against these.</div>
+          </Card>
+        )}
         {this.renderCounsel()}
         {/* hero */}
         <Card style={{ marginBottom: 16, background: "linear-gradient(135deg,#2a1a10,#3a2410)", border: "1px solid #6b5226", display: "flex", alignItems: "center", gap: 20 }}>
