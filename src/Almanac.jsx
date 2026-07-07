@@ -62,7 +62,7 @@ export default class Almanac extends React.Component {
     questMethod: "optimal", qsortCol: "", qsortDir: 1, qFilterOpen: "", qfSeries: [], qfType: [], qfStatus: [], qName: "", qGate: "",
     tSort: {}, tFilt: {}, tOpen: "", flipPrefill: null, objType: "bank", objBoss: "", flipShowWatch: false, flipCfgVer: 0, _v: 0,
     counselLens: "balanced", goalId: "none", pfSort: "lev", farmView: "planner", bossPage: "",
-    mixView: "planner", mixSort: "nethr", mixOpen: "",
+    mixView: "planner", mixSort: "nethr", mixOpen: "", mixChainOpen: "",
     jSel: null, jEdit: null, jSeal: "crimson",
   };
 
@@ -3387,19 +3387,58 @@ export default class Almanac extends React.Component {
               <div style={{ marginTop: 8 }}>
                 {stocks.map((s) => {
                   const h = HERBS.find((x) => x.key === s.key);
-                  const raw = Math.round(s.stock * geSellNet(this.mixPrice(h.grimy).sell));
-                  const best = rows.filter((r) => r.unlocked && r.ownKey === s.key).sort((a, b) => b.net - a.net)[0];
+                  const gp = this.mixPrice(h.grimy);
+                  const rawEa = geSellNet(gp.sell);
+                  const raw = Math.round(s.stock * rawEa);
+                  // Every unlocked recipe that would draw from this stock,
+                  // best premium first — the expanded panel lays out its
+                  // arithmetic so nothing has to be taken on faith.
+                  const cands = rows.filter((r) => r.unlocked && r.ownKey === s.key).sort((a, b) => b.net - a.net);
+                  const best = cands[0];
                   const fd = (this.farmDefs || []).find((f) => f.herbItem === h.grimy);
                   const farmNet = fd ? (this.logs.herb || []).filter((e) => e.tier === fd.tier).reduce((a, e) => a + (e.net || 0), 0) : 0;
+                  const open = this.state.mixChainOpen === s.key;
                   return (
-                    <div key={s.key} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", padding: "7px 0", borderBottom: "1px solid rgba(44,32,19,.08)" }}>
-                      <span style={cinzel({ fontWeight: 700, fontSize: 14 })}>{this.fmt(s.stock)} {h.clean}</span>
-                      <span style={mono({ fontSize: 10.5, color: C.muted })} title={"harvested " + this.fmt(s.harvested) + (s.est ? " (some model-estimated)" : " (from your logged counts)") + " − " + this.fmt(s.used) + " used by mix sessions"}>in stock{s.est ? " ≈" : ""}</span>
-                      <span style={serif({ fontSize: 12.5, fontStyle: "normal", color: C.muted })}>sold raw ⇒ <strong style={{ color: C.ink }}>{this.short(raw)}</strong></span>
-                      {best && best.net > 0
-                        ? <span style={serif({ fontSize: 12.5, fontStyle: "normal", color: C.muted })}>· best mix <strong style={{ color: C.ink }}>{best.name}</strong> ⇒ <strong style={{ color: C.green }}>{this.short(raw + s.stock * best.net)}</strong> ({this.signed(s.stock * best.net)} premium{best.xp > 0 ? " · +" + this.short(s.stock * best.xp) + " xp" : ""})</span>
-                        : <span style={serif({ fontSize: 12.5, fontStyle: "normal", color: "#9a6a3a" })}>· every mix loses money at current prices — sell them raw{best && best.xp > 0 ? ", unless you're buying the xp (" + best.name + " at " + this.signed(s.stock * best.net) + ")" : ""}</span>}
-                      {farmNet !== 0 && <span style={mono({ fontSize: 10.5, color: C.muted2 })} title="what your logged farm runs for this tier netted, herbs valued at sale">farm log: {this.signed(farmNet)}</span>}
+                    <div key={s.key} style={{ borderBottom: "1px solid rgba(44,32,19,.08)" }}>
+                      <div onClick={() => this.setState({ mixChainOpen: open ? "" : s.key })} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", padding: "7px 0", cursor: "pointer" }}>
+                        <span style={mono({ fontSize: 9, color: C.muted2 })}>{open ? "▾" : "▸"}</span>
+                        <span style={cinzel({ fontWeight: 700, fontSize: 14 })}>{this.fmt(s.stock)} {h.clean}</span>
+                        <span style={mono({ fontSize: 10.5, color: C.muted })} title={"harvested " + this.fmt(s.harvested) + (s.est ? " (some model-estimated)" : " (from your logged counts)") + " − " + this.fmt(s.used) + " used by mix sessions"}>in stock{s.est ? " ≈" : ""}</span>
+                        <span style={serif({ fontSize: 12.5, fontStyle: "normal", color: C.muted })}>sold raw ⇒ <strong style={{ color: C.ink }}>{this.short(raw)}</strong> <span style={mono({ fontSize: 10.5 })}>({this.fmt(rawEa)} ea)</span></span>
+                        {best && best.net > 0
+                          ? <span style={serif({ fontSize: 12.5, fontStyle: "normal", color: C.muted })}>· best mix <strong style={{ color: C.ink }}>{best.name}</strong> ⇒ <strong style={{ color: C.green }}>{this.short(raw + s.stock * best.net)}</strong> <span style={mono({ fontSize: 10.5 })}>({this.fmt(rawEa + best.net)}/herb)</span> · {this.signed(s.stock * best.net)} premium{best.xp > 0 ? " · +" + this.short(s.stock * best.xp) + " xp" : ""}</span>
+                          : <span style={serif({ fontSize: 12.5, fontStyle: "normal", color: "#9a6a3a" })}>· every mix loses money at current prices — sell them raw{best && best.xp > 0 ? ", unless you're buying the xp (" + best.name + " at " + this.signed(s.stock * best.net) + ")" : ""}</span>}
+                        {farmNet !== 0 && <span style={mono({ fontSize: 10.5, color: C.muted2 })} title="what your logged farm runs for this tier netted, herbs valued at sale">farm log: {this.signed(farmNet)}</span>}
+                        <span style={mono({ fontSize: 9.5, color: TH.accent })}>{open ? "hide the math" : "show the math"}</span>
+                      </div>
+                      {open && (
+                        <div style={{ margin: "0 0 10px 18px", padding: "10px 14px", background: "rgba(46,125,100,.07)", borderLeft: `3px solid ${TH.accent}`, borderRadius: 6 }}>
+                          <div style={mono({ fontSize: 10.5, color: C.ink })}>
+                            SELL RAW · the baseline: {this.fmt(gp.sell)} insta-sell − 2% GE tax = <strong>{this.fmt(rawEa)}/herb</strong> × {this.fmt(s.stock)} = <strong>{this.short(raw)}</strong>
+                          </div>
+                          <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+                            <thead><tr>{["Convert to", "Product sells (after tax)", "− extras /pot", "= value /herb", "vs raw /herb", "× " + this.fmt(s.stock) + " herbs", "XP"].map((hd, i) => (
+                              <th key={i} style={{ ...mono({ fontSize: 8.5, letterSpacing: ".08em", color: C.muted }), textAlign: i > 0 ? "right" : "left", padding: "5px 8px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{hd}</th>))}</tr></thead>
+                            <tbody>{cands.map((r) => {
+                              const revenue = r.net + r.cost; // product sell net (incl. chem EV)
+                              return (
+                                <tr key={r.id}>
+                                  <td style={{ padding: "5px 8px" }} title={r.label}><span style={cinzel({ fontWeight: 600, fontSize: 12.5 })}>{r.name}</span><div style={serif({ fontSize: 10, fontStyle: "normal", color: C.muted })}>{r.label}</div></td>
+                                  <td style={{ ...mono({ fontSize: 11.5 }), padding: "5px 8px", textAlign: "right" }} title={r.prod + " insta-sell minus the 2% GE tax" + (r.chemEv > 0 ? " + " + r.chemEv + " amulet-of-chemistry EV" : "")}>{this.fmt(revenue)}</td>
+                                  <td style={{ ...mono({ fontSize: 11.5 }), padding: "5px 8px", textAlign: "right" }} title="everything except the herb: vial, secondaries, Zahur fees — actual gp out of pocket per potion">{this.fmt(r.outlay)}</td>
+                                  <td style={{ ...mono({ fontSize: 11.5, fontWeight: 600 }), padding: "5px 8px", textAlign: "right" }}>{this.fmt(revenue - r.outlay)}</td>
+                                  <td style={{ ...mono({ fontSize: 11.5, fontWeight: 600, color: r.net >= 0 ? C.green : C.red }), padding: "5px 8px", textAlign: "right" }} title="value/herb minus the raw baseline — the mixing premium per herb">{(r.net >= 0 ? "+" : "−") + this.fmt(Math.abs(r.net))}</td>
+                                  <td style={{ ...mono({ fontSize: 11.5, fontWeight: 600, color: r.net >= 0 ? C.green : C.red }), padding: "5px 8px", textAlign: "right" }}>{this.signed(s.stock * r.net)}</td>
+                                  <td style={{ ...mono({ fontSize: 11.5, color: C.muted }), padding: "5px 8px", textAlign: "right" }}>{r.xp > 0 ? "+" + this.short(s.stock * r.xp) : "—"}</td>
+                                </tr>
+                              );
+                            })}</tbody>
+                          </table>
+                          <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted, marginTop: 6 })}>
+                            Each row: what the product insta-sells for after the 2% tax, minus the non-herb shopping (vial · secondaries · Zahur fees), is what one herb becomes. Compare that against the {this.fmt(rawEa)}/herb raw baseline — the difference is the premium, times your {this.fmt(s.stock)} in stock. Rows are the same engine paths as the recipe book below.
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
