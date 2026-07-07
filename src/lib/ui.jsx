@@ -40,6 +40,7 @@ export const THEME = {
   slayer:    { accent: "#8a3b30", lite: "#c87a5a", g1: "#2a1410", g2: "#46211a", icon: "🗡" },
   gear:      { accent: "#4a5e70", lite: "#8aa6bc", g1: "#19242e", g2: "#2c3e4c", icon: "🛡" },
   farming:   { accent: "#5c6e35", lite: "#9fbf6a", g1: "#1f2c16", g2: "#36431f", icon: "🌱" },
+  herblore:  { accent: "#2e7d64", lite: "#6fc4a4", g1: "#0f2a21", g2: "#1c4534", icon: "🧪" },
   quests:    { accent: "#5a4a8a", lite: "#9a8ad0", g1: "#1e1a36", g2: "#332c56", icon: "📜" },
   diary:     { accent: "#8a6a38", lite: "#d8b878", g1: "#2e2212", g2: "#4a3820", icon: "🏅" },
   journal:   { accent: "#7a4a2a", lite: "#c89a6a", g1: "#2c180a", g2: "#4a2c16", icon: "🖋" },

@@ -17,6 +17,7 @@ import { SKILL_MILESTONES } from "./data/skillMilestones.js";
 import { CONTENT_REQS } from "./data/contentReqs.js";
 import { QUEST_DEPS } from "./data/questDeps.js";
 import { BOSS_GUIDES } from "./data/bossGuides.js";
+import { HERBS, POTIONS, ZAHUR_CLEAN_FEE, ZAHUR_UNF_FEE, CHEM_AMULET, MIX_SNAPSHOT, mixItemNames } from "./data/herbloreData.js";
 import { refreshActivityGp, liveGpRate, geSellNet } from "./lib/activityPrices.js";
 import { fetchPlayer, fetchPrices, priceById, combatLevel, fetchItemNames, natureRunePrice, wikiExtract, wikiSections } from "./lib/api.js";
 import { C, mono, serif, cinzel, Card, Kicker, SectionTitle, StatCards, Bar, Seg, Tag, Btn, DataTable, Hero, themeFor, LineChart, BarChartH, Icon, Donut, BandBar } from "./lib/ui.jsx";
@@ -39,7 +40,7 @@ const NAV = [
   { label: "Overview", items: [["dashboard", "Dashboard"], ["skills", "Skills"], ["pathfinder", "Pathfinder"], ["goals", "Goals"]] },
   { label: "Treasury", items: [["networth", "Net Worth"], ["flipping", "GE Flipping"], ["alchemy", "High Alchemy"]] },
   { label: "Combat", items: [["bossing", "Bossing"], ["slayer", "Slayer"], ["gear", "Gear Path"]] },
-  { label: "Skilling", items: [["farming", "Farming"], ["quests", "Quests"], ["diary", "Diary & CA"]] },
+  { label: "Skilling", items: [["farming", "Farming"], ["herblore", "Herblore"], ["quests", "Quests"], ["diary", "Diary & CA"]] },
   { label: "Chronicle", items: [["journal", "Journal"]] },
 ];
 const TITLES = {
@@ -48,6 +49,7 @@ const TITLES = {
   flipping: ["Grand Exchange", "Flipping Desk"], alchemy: ["Arcane Profit", "High Alchemy"],
   bossing: ["Command Centre", "Bossing Compendium"], slayer: ["The Slayer", "Task Planner"],
   gear: ["The Armoury", "Gear Progression"], farming: ["The Allotments", "Farming Engine"],
+  herblore: ["The Apothecary", "Herblore Engine"],
   quests: ["The Adventure Log", "Quest Sequencer"], diary: ["Regional Renown", "Diary & Combat Achievements"],
   journal: ["The Chronicle", "Adventurer's Journal"],
 };
@@ -60,6 +62,7 @@ export default class Almanac extends React.Component {
     questMethod: "optimal", qsortCol: "", qsortDir: 1, qFilterOpen: "", qfSeries: [], qfType: [], qfStatus: [], qName: "", qGate: "",
     tSort: {}, tFilt: {}, tOpen: "", flipPrefill: null, objType: "bank", objBoss: "", flipShowWatch: false, flipCfgVer: 0, _v: 0,
     counselLens: "balanced", goalId: "none", pfSort: "lev", farmView: "planner", bossPage: "",
+    mixView: "planner", mixSort: "nethr", mixOpen: "",
     jSel: null, jEdit: null, jSeal: "crimson",
   };
 
@@ -327,7 +330,7 @@ export default class Almanac extends React.Component {
     this.skillsRaw = this.stats.skills;
     const savedLogs = this._load("almanac.logs.v1", null);
     this.logs = savedLogs || JSON.parse(JSON.stringify(D.seeds || {}));
-    ["nw", "flips", "alch", "herb", "boss", "slayerLog", "watch", "scan", "drop"].forEach((k) => { if (!this.logs[k]) this.logs[k] = []; });
+    ["nw", "flips", "alch", "herb", "mix", "boss", "slayerLog", "watch", "scan", "drop"].forEach((k) => { if (!this.logs[k]) this.logs[k] = []; });
     if (!savedLogs && !this.logs.scan.length) this.logs.scan = JSON.parse(JSON.stringify(this.scanSeed));
     this.goals = this._load("almanac.goals.v1", null) || this.defaultGoals.map((x) => ({ ...x }));
     this.questOv = this._load("almanac.questdone.v1", null);
@@ -340,6 +343,9 @@ export default class Almanac extends React.Component {
     this.flipcfg = this._load("almanac.flipcfg.v1", null) || { ...this.flipDefaults };
     this.alchcfg = this._load("almanac.alchcfg.v1", null) || { castsPerHour: 1200, fireSource: "staff", natRune: 127, fireRune: 5 };
     this.farmcfg = { lapsPerDay: 1, compost: "ultra", secateurs: true, farmCape: false, attas: false, herbsOverride: 0, patchOrder: null, patchOv: {}, runsPerDay: {}, herbCrop: "Snapdragon", runPriority: "gp", ...(this._load("almanac.farmcfg.v1", null) || {}) };
+    // The Apothecary's bench + logistics settings. mixesPerHour is bench
+    // ACTIONS per hour (a 2-step self-unf path halves finished potions/hr).
+    this.mixcfg = { mixesPerHour: 2400, cleansPerHour: 6000, zahur: true, buyUnf: "auto", chemAmulet: false, inputPref: "auto", ...(this._load("almanac.mixcfg.v1", null) || {}) };
     if (!this.farmcfg.patchOv) this.farmcfg.patchOv = {};
     if (!this.farmcfg.runsPerDay) this.farmcfg.runsPerDay = {};
     this.compostPrices = this.compostPrices || { compost: 80, super: 450, ultra: 750 };
@@ -361,7 +367,7 @@ export default class Almanac extends React.Component {
   // Every persisted key. _save snapshots the *pre-mutation* state of these keys
   // (localStorage lags the in-memory mutation by one write), grouped per
   // synchronous action, so any add/edit/delete/config change is one undo step.
-  _undoKeys = ["almanac.logs.v1", "almanac.goals.v1", "almanac.objectives.v1", "almanac.flipcfg.v1", "almanac.alchcfg.v1", "almanac.farmcfg.v1", "almanac.gcfg.v1", "almanac.blocks.v1", "almanac.bossov.v1", "almanac.questdone.v1", "almanac.stats.v1", "almanac.avoiddismiss.v1", "almanac.loadout.v1", "almanac.gearowned.v1", "almanac.diarydone.v1", "almanac.cadone.v1", "almanac.journal.v1"];
+  _undoKeys = ["almanac.logs.v1", "almanac.goals.v1", "almanac.objectives.v1", "almanac.flipcfg.v1", "almanac.alchcfg.v1", "almanac.farmcfg.v1", "almanac.mixcfg.v1", "almanac.gcfg.v1", "almanac.blocks.v1", "almanac.bossov.v1", "almanac.questdone.v1", "almanac.stats.v1", "almanac.avoiddismiss.v1", "almanac.loadout.v1", "almanac.gearowned.v1", "almanac.diarydone.v1", "almanac.cadone.v1", "almanac.journal.v1"];
   _snap() { const s = {}; this._undoKeys.forEach((k) => { s[k] = localStorage.getItem(k); }); return s; }
   _restore(snap) {
     this._undoSuspended = true;
@@ -374,7 +380,7 @@ export default class Almanac extends React.Component {
   redo = () => { if (!this._redoStack || !this._redoStack.length) return; (this._undoStack = this._undoStack || []).push(this._snap()); this._restore(this._redoStack.pop()); };
   clearAllLogs = () => {
     if (typeof window !== "undefined" && !window.confirm("Clear every logged entry (flips, kills, snapshots, herb runs, drops…)? You can undo this.")) return;
-    const empty = {}; ["nw", "flips", "alch", "herb", "boss", "slayerLog", "watch", "scan", "drop"].forEach((k) => (empty[k] = []));
+    const empty = {}; ["nw", "flips", "alch", "herb", "mix", "boss", "slayerLog", "watch", "scan", "drop"].forEach((k) => (empty[k] = []));
     this.logs = empty; this.saveLogs(); this.bump();
   };
 
@@ -722,6 +728,12 @@ export default class Almanac extends React.Component {
           r.gpRun = -Math.round((r.patches || 1) * ((sap.high || sap.low) + payCost));
         }
       });
+      // Herblore: re-price the Apothecary's entire recipe book. Buy side pays
+      // the ask (high), sell side insta-sells (low) — mixPrice() reads this
+      // map and falls back to the data module's snapshots where the feed had
+      // no quote. Ages + buy limits only exist on the live side.
+      this.mixPrices = this.mixPrices || {};
+      mixItemNames().forEach((nm) => { const m = byName[nm.toLowerCase()]; if (m && (m.high || m.low)) this.mixPrices[nm] = { buy: m.high || m.low, sell: m.low || m.high, limit: m.limit || 0, age: quoteAge(m) }; });
       // Keep the whole tradeable market so the scanner ranks real flips, not just
       // a handful of seed items. Drop items with no live buy & sell.
       this.priceRows = Object.values(byId).filter((m) => m.high > 0 && m.low > 0).map((m) => ({ name: m.name, buy: m.low, sell: m.high, vol: m.volume || 0, limit: m.limit || 0, age: quoteAge(m), avgHigh1h: m.avgHigh1h, avgLow1h: m.avgLow1h, hvol1h: m.hvol1h, lvol1h: m.lvol1h }));
@@ -748,7 +760,7 @@ export default class Almanac extends React.Component {
   };
 
   // ---------- handlers: navigation & forms ----------
-  go = (s) => { this.setState({ section: s, openForm: null, editLog: null }); if ((s === "flipping" || s === "farming") && !this.priceRows && !this._marketLoading) { this._marketLoading = true; this.refreshPrices(); } };
+  go = (s) => { this.setState({ section: s, openForm: null, editLog: null }); if ((s === "flipping" || s === "farming" || s === "herblore") && !this.priceRows && !this._marketLoading) { this._marketLoading = true; this.refreshPrices(); } };
   setLens = (id) => this.setState({ counselLens: id });
   setGoal = (id) => { this.setState({ goalId: id }); this._save("almanac.counselgoal.v1", id); };
   setPfSort = (id) => this.setState({ pfSort: id });
@@ -860,6 +872,151 @@ export default class Almanac extends React.Component {
   addDrop = () => { const boss = this.val("drop_boss") || this.state.bossFocus, drop = this.val("drop_name"); if (!boss || !drop) return; this.logs.drop.unshift({ date: this.today(), boss, drop, kc: this.num("drop_kc") }); this.saveLogs(); this.setState({ openForm: null }); };
   delLog = (t, i) => { if (this.logs[t]) { this.logs[t].splice(i, 1); this.saveLogs(); this.setState({ editLog: null }); } };
 
+  // ===================== HERBLORE ENGINE (the Apothecary) =====================
+  // Every potion is a three-item spread trade: inputs at the ask, product
+  // insta-sold minus the 2% GE tax (same conservative convention as farmNet).
+  // gp is LIVE (mixPrices ← wiki feed, MIX_SNAPSHOT fallback); xp is STABLE.
+  mixPrice(name) {
+    const live = this.mixPrices && this.mixPrices[name];
+    if (live) return { buy: live.buy || live.sell || 0, sell: live.sell || live.buy || 0, limit: live.limit || 0, age: live.age, live: true };
+    const p = MIX_SNAPSHOT[name] || 0;
+    return { buy: p, sell: p, limit: 0, age: null, live: false };
+  }
+  get mixLvl() { return (this.skillMap.Herblore || { l: 1 }).l; }
+  // Cheapest way to hold ONE clean herb: buy clean, self-clean grimy (bonus xp
+  // but bench time), or grimy + Zahur's 200gp cleaning (instant, no level).
+  mixCleanPaths(h) {
+    const cfg = this.mixcfg, lvl = this.mixLvl;
+    const g = this.mixPrice(h.grimy), c = this.mixPrice(h.clean);
+    const out = [];
+    if (cfg.inputPref !== "grimy" && c.buy > 0) out.push({ cost: c.buy, xp: 0, cleans: 0, buys: [{ name: h.clean, qty: 1 }], label: "buy clean" });
+    if (cfg.inputPref !== "clean" && g.buy > 0) {
+      if (lvl >= h.cleanLvl) out.push({ cost: g.buy, xp: h.cleanXp, cleans: 1, buys: [{ name: h.grimy, qty: 1 }], label: "grimy, self-clean" });
+      if (cfg.zahur) out.push({ cost: g.buy + ZAHUR_CLEAN_FEE, xp: 0, cleans: 0, buys: [{ name: h.grimy, qty: 1 }], label: "grimy + Zahur clean" });
+    }
+    return out.length ? out : [{ cost: c.buy, xp: 0, cleans: 0, buys: [{ name: h.clean, qty: 1 }], label: "buy clean" }];
+  }
+  _mixBestPath(paths) { return paths.slice().sort((a, b) => a.cost - b.cost || (a.steps || 0) + a.cleans - ((b.steps || 0) + b.cleans))[0]; }
+  // Cheapest way to hold ONE unfinished potion. steps counts extra bench
+  // actions beyond the finishing mix (self-made unf costs a full action).
+  mixUnfPaths(recipe, h) {
+    const cfg = this.mixcfg;
+    const unfName = recipe.unf || h.unf, vialName = recipe.vial || "Vial of water";
+    const unf = this.mixPrice(unfName), vial = this.mixPrice(vialName);
+    const out = [];
+    if (cfg.buyUnf !== "never" && unf.buy > 0) out.push({ cost: unf.buy, xp: 0, cleans: 0, steps: 0, buys: [{ name: unfName, qty: 1 }], label: "buy " + unfName });
+    if (cfg.buyUnf !== "always") {
+      this.mixCleanPaths(h).forEach((cp) => {
+        const buys = cp.buys.concat([{ name: vialName, qty: 1 }]);
+        // Zahur only works vials of water (bastion/battlemage brew on blood).
+        if (cfg.zahur && vialName === "Vial of water") out.push({ cost: cp.cost + vial.buy + ZAHUR_UNF_FEE, xp: cp.xp, cleans: cp.cleans, steps: 0, buys, label: cp.label + " → Zahur unf" });
+        out.push({ cost: cp.cost + vial.buy, xp: cp.xp, cleans: cp.cleans, steps: 1, buys, label: cp.label + " → make unf" });
+      });
+    }
+    return out;
+  }
+  // Full economics for one recipe row at current prices/config. `cash` sizes
+  // affordability (0 = skip the afford maths).
+  mixEcon(row, cash) {
+    const cfg = this.mixcfg, mph = Math.max(300, cfg.mixesPerHour || 2400), cph = Math.max(600, cfg.cleansPerHour || 6000);
+    let cost = 0, xp = row.xp || 0, steps = 1, cleans = 0, buys = [], label = "", rate = mph;
+    if (row.kind === "clean") {
+      const h = row.h; const g = this.mixPrice(h.grimy);
+      cost = g.buy; xp = h.cleanXp; steps = 1; rate = cph; buys = [{ name: h.grimy, qty: 1 }]; label = "buy grimy, clean at bench";
+    } else if (row.kind === "unf") {
+      const h = row.h; const cp = this._mixBestPath(this.mixCleanPaths(h)); const vial = this.mixPrice("Vial of water");
+      cost = cp.cost + vial.buy; xp = cp.xp; cleans = cp.cleans; steps = 1; buys = cp.buys.concat([{ name: "Vial of water", qty: 1 }]); label = cp.label + " → make unf, sell";
+    } else if (row.combine) {
+      steps = 1; label = "combine";
+      const bits = [];
+      row.combine.forEach((c) => {
+        if (c.item) { const p = this.mixPrice(c.item); cost += p.buy * (c.qty || 1); buys.push({ name: c.item, qty: c.qty || 1 }); bits.push((c.qty || 1) > 1 ? (c.qty || 1) + "× " + c.item : c.item); }
+        else if (c.herb) { const h = this.mixHerbOf(c.herb); const cp = this._mixBestPath(this.mixCleanPaths(h)); cost += cp.cost; xp += cp.xp; cleans += cp.cleans; buys = buys.concat(cp.buys); bits.push(h.clean + " (" + cp.label + ")"); }
+      });
+      label = "combine: " + bits.join(" + ");
+    } else {
+      const h = this.mixHerbOf(row.herb);
+      const up = this._mixBestPath(this.mixUnfPaths(row, h));
+      cost = up.cost; xp += up.xp; cleans = up.cleans; steps = 1 + up.steps; buys = up.buys.slice(); label = up.label;
+      (row.sec || []).forEach((s) => { const p = this.mixPrice(s.item); cost += p.buy * (s.qty || 1); buys.push({ name: s.item, qty: s.qty || 1 }); label += " + " + ((s.qty || 1) > 1 ? (s.qty || 1) + "× " : "") + s.item; });
+    }
+    const prod = this.mixPrice(row.prod);
+    let revenue = geSellNet(prod.sell), chemEv = 0;
+    // Amulet of chemistry EV: 5% of mixes come out 4-dose; the charge is only
+    // consumed on the proc. Applies to unf-finishing mixes, not combines.
+    if (cfg.chemAmulet && row.prod4 && !row.combine && row.kind !== "unf" && row.kind !== "clean") {
+      const p4 = this.mixPrice(row.prod4), amu = this.mixPrice(CHEM_AMULET.item);
+      chemEv = Math.round(CHEM_AMULET.chance * (geSellNet(p4.sell) - geSellNet(prod.sell) - amu.buy / CHEM_AMULET.charges));
+      if (chemEv > 0) revenue += chemEv; else chemEv = 0;
+    }
+    const net = Math.round(revenue - cost);
+    // Bench-time model: a self-made unf is a second full action; cleaning runs
+    // at its own (faster) rate, folded in as step-equivalents.
+    const stepEq = steps + cleans * (rate / cph) * (row.kind === "clean" ? 0 : 1);
+    const potsPerHr = rate / Math.max(0.1, stepEq);
+    // Affordability: the scarcest input's live buy limit AND your logged cash.
+    let lim = Infinity;
+    buys.forEach((b) => { const p = this.mixPrice(b.name); if (p.live && p.limit > 0) lim = Math.min(lim, Math.floor(p.limit / (b.qty || 1))); });
+    const byCash = cash > 0 && cost > 0 ? Math.floor(cash / cost) : 0;
+    const qtyAfford = cash > 0 ? Math.max(0, Math.min(lim === Infinity ? byCash : lim, byCash)) : 0;
+    let ageMax = null, anyLive = false;
+    buys.concat([{ name: row.prod, qty: 1 }]).forEach((b) => { const p = this.mixPrice(b.name); if (p.live) { anyLive = true; if (p.age != null) ageMax = Math.max(ageMax || 0, p.age); } });
+    return { cost: Math.round(cost), net, xp, gpXp: xp > 0 ? net / xp : null, potsPerHr, stepEq, netHr: Math.round(net * potsPerHr), xpHr: Math.round(xp * potsPerHr), qtyAfford, totalAfford: net * qtyAfford, limCap: lim !== Infinity ? lim : null, ageMax, live: anyLive, label, buys, chemEv };
+  }
+  // Every row the planner ranks: the potion ladder + unf-profit + cleaning.
+  mixRows(cash) {
+    const lvl = this.mixLvl;
+    const rows = [];
+    POTIONS.forEach((p) => rows.push({ id: p.id, name: p.name, kind: p.combine ? "combine" : "potion", req: p.lvl, xp: p.xp, herb: p.herb, sec: p.sec, combine: p.combine, vial: p.vial, unf: p.unf, prod: p.prod, prod4: p.prod4 }));
+    HERBS.filter((h) => h.rows).forEach((h) => {
+      rows.push({ id: "unf-" + h.key, name: h.clean + " (unf)", kind: "unf", req: 3, xp: 0, h, prod: h.unf });
+      rows.push({ id: "clean-" + h.key, name: "Clean " + h.grimy.replace(/^Grimy /i, "").toLowerCase(), kind: "clean", req: h.cleanLvl, xp: h.cleanXp, h, prod: h.clean });
+    });
+    return rows.map((r) => ({ ...r, unlocked: lvl >= r.req, ...this.mixEcon(r, cash) }));
+  }
+  mixHerbOf(key) { return HERBS.find((h) => h.key === key); }
+  // The two verdicts: best money mix and cheapest xp (potions only — the unf/
+  // cleaning money rows barely train the skill and would pollute the xp hero).
+  mixBest(cash) {
+    const rows = this.mixRows(cash).filter((r) => r.unlocked);
+    const profit = rows.filter((r) => r.net > 0).sort((a, b) => b.netHr - a.netHr)[0] || null;
+    const xpRows = rows.filter((r) => (r.kind === "potion" || r.kind === "combine") && r.xp >= 25);
+    const cheapXp = xpRows.sort((a, b) => (b.gpXp || -1e9) - (a.gpXp || -1e9))[0] || null;
+    return { profit, cheapXp, rows };
+  }
+  // Log a mix session. Net defaults to the CURRENT model net × qty (frozen at
+  // log time, like a flip — realized numbers never re-price); xp is stable.
+  addMix = () => {
+    const potion = this.val("mix_potion") || POTIONS[0].name;
+    const qty = this.num("mix_qty") || 1, mins = this.num("mix_mins"), netRaw = this.val("mix_net");
+    const row = this.mixRows(0).find((r) => r.name === potion);
+    const net = netRaw !== "" ? Math.round(this.parseNum(netRaw)) : row ? row.net * qty : 0;
+    const entry = { date: this.today(), potion, qty, net, xp: row ? Math.round(row.xp * qty) : 0, lvl: this.mixLvl };
+    if (mins > 0) entry.mins = Math.round(mins);
+    const note = this.val("mix_note"); if (note) entry.note = note;
+    this.logs.mix.unshift(entry); this.saveLogs(); this.setState({ openForm: null });
+  };
+  // Realized mixing vs the live model, per potion — plus your measured bench
+  // rate (actions/hr) across every timed session, adoptable into the config.
+  mixReality() {
+    const byP = {};
+    (this.logs.mix || []).forEach((e) => {
+      const p = byP[e.potion] || (byP[e.potion] = { potion: e.potion, n: 0, qty: 0, net: 0, xp: 0, mins: 0, tQty: 0 });
+      p.n++; p.qty += e.qty || 0; p.net += e.net || 0; p.xp += e.xp || 0;
+      if (e.mins > 0) { p.mins += e.mins; p.tQty += e.qty || 0; }
+    });
+    const model = this.mixRows(0);
+    let benchActs = 0, mins = 0;
+    const rows = Object.values(byP).map((p) => {
+      const m = model.find((r) => r.name === p.potion);
+      if (p.mins > 0 && m) { benchActs += p.tQty * (m.stepEq || 1); mins += p.mins; }
+      return { ...p, netPer: p.qty > 0 ? Math.round(p.net / p.qty) : null, modelNet: m ? m.net : null, potsHr: p.mins > 0 ? Math.round((p.tQty * 60) / p.mins) : null, modelPotsHr: m ? Math.round(m.potsPerHr) : null };
+    }).sort((a, b) => b.net - a.net);
+    return { rows, bench: mins > 0 ? Math.round((benchActs * 60) / mins) : null, mins };
+  }
+  adoptBench = () => { const r = this.mixReality(); if (r.bench > 0) { this.mixcfg.mixesPerHour = r.bench; this._save("almanac.mixcfg.v1", this.mixcfg); this.bump(); } };
+  setMixOpt = (k, v) => { this.mixcfg[k] = v === "yes" ? true : v === "no" ? false : v; this._save("almanac.mixcfg.v1", this.mixcfg); this.bump(); };
+
   // ---------- universal log editing ----------
   // Every visible log table gets a ✎ beside its ✕. One row edits at a time
   // through a spec-driven inline editor — unique field ids and a single
@@ -914,6 +1071,15 @@ export default class Almanac extends React.Component {
         { k: "lvl", label: "Farm lvl", type: "num", w: 90, opt: true },
         { k: "net", label: "Net gp (total)", type: "num", w: 120 },
       ];
+      case "mix": return [
+        { k: "date", label: "Date", type: "date" },
+        { k: "potion", label: "Potion", type: "sel", opts: sel(POTIONS.map((p) => p.name), entry.potion), w: 180 },
+        { k: "qty", label: "Qty", type: "num", w: 80 },
+        { k: "mins", label: "Minutes", type: "num", w: 90, opt: true },
+        { k: "net", label: "Net gp (total)", type: "num", w: 130, neg: true },
+        { k: "xp", label: "XP", type: "num", w: 100 },
+        { k: "note", label: "Note", type: "str", w: 150 },
+      ];
       default: return [];
     }
   }
@@ -927,7 +1093,10 @@ export default class Almanac extends React.Component {
     this.logEditSpec(e.t, entry).forEach((f) => {
       const raw = this.val("el_" + f.k);
       if (f.type === "num") {
-        const v = Math.max(0, Math.round(this.parseNum(raw) || 0));
+        // `neg` fields (a mix session's net can legitimately be a cost) keep
+        // their sign; everything else clamps at zero as before.
+        const v0 = Math.round(this.parseNum(raw) || 0);
+        const v = f.neg ? v0 : Math.max(0, v0);
         // Optional numerics (minutes, loot, herbs…) clear back OFF the entry
         // when emptied, so "unknown" stays distinct from zero.
         if (f.opt && (!raw || v <= 0)) delete entry[f.k]; else entry[f.k] = v;
@@ -1338,6 +1507,7 @@ export default class Almanac extends React.Component {
             {sec === "slayer" && this.renderSlayer()}
             {sec === "gear" && this.renderGear()}
             {sec === "farming" && this.renderFarming()}
+            {sec === "herblore" && this.renderHerblore()}
             {sec === "quests" && this.renderQuests()}
             {sec === "diary" && this.renderDiary()}
             {sec === "journal" && this.renderJournal()}
@@ -1495,6 +1665,13 @@ export default class Almanac extends React.Component {
       const cost = this.alchCost ? this.alchCost() : 180; let best = 0;
       (this.alchItems || []).forEach((it) => { const m = (it.alch || 0) - (it.buy || 0) - cost; if (m > best) best = m; });
       if (best > 0) { let cph = (this.alchcfg && this.alchcfg.castsPerHour) || 1200; if (!(cph > 0) || cph > 1400) cph = 1200; /* ~1200/hr is the physical alch ceiling; guard bad config */ return { gpHr: Math.min(Math.round(best * cph), 900000) }; }
+    } else if (id === "herblore-potions") {
+      // The Apothecary's best money mix at YOUR level, config and today's
+      // prices. Only overrides when it's actually profitable — paying gp for
+      // xp is not an income and competes on its xp rate instead.
+      const cash = this.logs && this.logs.nw && this.logs.nw.length ? this.logs.nw[this.logs.nw.length - 1].cash || 0 : 0;
+      const best = this.mixBest(cash).profit;
+      if (best && best.netHr > 0) return { gpHr: Math.min(Math.round(best.netHr), 2000000), metric: this.short(best.netHr) + "/hr · " + best.name };
     } else if (id === "ge-flipping") {
       const flips = (this.logs && this.logs.flips) || []; if (!flips.length) return null;
       let roiSum = 0, n = 0;
@@ -1537,7 +1714,7 @@ export default class Almanac extends React.Component {
       const lead = domain === "boss" ? "Combat money & drops" : domain === "slayer" ? "Slayer xp with income" : gpHr > 0 && xpHr > 0 ? "Money while you train" : gpHr > 0 ? "Idle-friendly income" : xpHr > 0 ? "Efficient training" : "Steady progress";
       let why = lead + (bits.length ? " — " + bits.join(", ") + "." : ".");
       if (onGoal) why += " Advances your " + goalId + " goal.";
-      out.push({ domain, title: a.name, gpHr, xpHr, rawLev, fit, access, metric, source, why, goto: GOTO[a.category] || "skills", adv, actId: a.id, daily: a.category === "passive" });
+      out.push({ domain, title: a.name, gpHr, xpHr, rawLev, fit, access, metric, source, why, goto: a.subtype === "herblore" ? "herblore" : GOTO[a.category] || "skills", adv, actId: a.id, daily: a.category === "passive" });
     });
     return out;
   }
@@ -2491,6 +2668,27 @@ export default class Almanac extends React.Component {
             </table>
           </div>
         </Card>
+        {(() => {
+          // The Apothecary feeds the Herblore plan row: live cheapest-xp method
+          // at your level vs whatever the goal currently assumes. Opt-in adopt,
+          // like every other measured/live override in the almanac.
+          const hg = this.goals.find((g) => g.skill === "Herblore");
+          if (!hg || (this.skillMap.Herblore || { l: 1 }).l >= hg.tgt) return null;
+          const cx = this.mixBest(0).cheapXp;
+          if (!cx || !(cx.xpHr > 0)) return null;
+          const adopted = hg.xpHr === cx.xpHr && hg.gpHr === cx.netHr;
+          return (
+            <Card style={{ marginBottom: 14, borderTop: `3px solid ${themeFor("herblore").accent}` }}>
+              <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={serif({ fontSize: 12.5, fontStyle: "normal" })}>
+                  🧪 <strong>The Apothecary says:</strong> cheapest xp at your level right now is <strong>{cx.name}</strong> — {this.short(cx.xpHr)} xp/hr at {this.signed(cx.netHr)} gp/hr (live prices){adopted ? " · your plan row already matches" : ", vs your plan's " + this.short(hg.xpHr) + " xp/hr at " + this.signed(hg.gpHr) + " gp/hr"}.
+                </span>
+                {!adopted && <Btn tone="gold" onClick={() => { hg.method = "Mix " + cx.name + " (Apothecary)"; hg.xpHr = cx.xpHr; hg.gpHr = cx.netHr; this._save("almanac.goals.v1", this.goals); this.bump(); }}>Adopt into plan</Btn>}
+                <a href="#" onClick={(e) => { e.preventDefault(); this.go("herblore"); }} style={{ ...mono({ fontSize: 10.5 }), color: themeFor("herblore").accent }}>open the Apothecary →</a>
+              </div>
+            </Card>
+          );
+        })()}
         <Card>
           <Kicker color={C.goldDeep}>Funding & timeline</Kicker>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginTop: 12 }}>
@@ -3035,6 +3233,246 @@ export default class Almanac extends React.Component {
             </table>
           </Card>
         )}
+      </div>
+    );
+  }
+
+  // ===================== HERBLORE — THE APOTHECARY =====================
+  renderHerblore() {
+    const view = this.state.mixView || "planner";
+    const TH = themeFor("herblore");
+    return (
+      <div>
+        <SectionTitle kicker="The Apothecary · gp live · xp stable" title="Herblore Engine" accent={TH.accent}
+          right={<div style={{ display: "flex", gap: 8 }}><Btn onClick={this.refreshPrices}>⟳ Live prices</Btn><Btn tone="gold" onClick={() => this.setState({ mixView: "log", openForm: "mix" })}>+ Log mix session</Btn></div>} />
+        <div style={{ marginBottom: 14 }}>
+          <Seg options={[{ key: "planner", label: "MIX PLANNER" }, { key: "setup", label: "SETUP" }, { key: "log", label: "MIX LOG" }]} active={view} onPick={(v) => this.setState({ mixView: v })} />
+        </div>
+        {this.state.priceStatus && <div style={{ ...mono({ fontSize: 10.5, color: C.muted2 }), marginBottom: 10 }}>{this.state.priceStatus}</div>}
+        {view === "planner" && this.renderMixPlanner(TH)}
+        {view === "setup" && this.renderMixSetup(TH)}
+        {view === "log" && this.renderMixLog(TH)}
+      </div>
+    );
+  }
+  renderMixPlanner(TH) {
+    const d = this.derive();
+    const lvl = this.mixLvl, curXp = (this.skillMap.Herblore || { x: 0 }).x;
+    const rows = this.mixRows(d.cash);
+    const unlocked = rows.filter((r) => r.unlocked);
+    const profit = unlocked.filter((r) => r.net > 0).sort((a, b) => b.netHr - a.netHr)[0] || null;
+    const cheapXp = unlocked.filter((r) => (r.kind === "potion" || r.kind === "combine") && r.xp >= 25).sort((a, b) => ((b.gpXp != null ? b.gpXp : -1e9) - (a.gpXp != null ? a.gpXp : -1e9)))[0] || null;
+    const xpToNext = Math.max(0, this.xpFor(Math.min(99, lvl + 1)) - curXp);
+    const liveN = Object.keys(this.mixPrices || {}).length;
+    // sortable table
+    const sortKey = this.state.mixSort || "nethr";
+    const keyOf = { nethr: (r) => r.netHr, netpot: (r) => r.net, gpxp: (r) => (r.gpXp != null ? r.gpXp : -1e9), xphr: (r) => r.xpHr, total: (r) => r.totalAfford, lvl: (r) => -r.req };
+    const kf = keyOf[sortKey] || keyOf.nethr;
+    const sorted = unlocked.slice().sort((a, b) => kf(b) - kf(a)).concat(rows.filter((r) => !r.unlocked).sort((a, b) => a.req - b.req));
+    const maxHr = Math.max(1, ...unlocked.map((r) => Math.max(0, r.netHr)));
+    const KIND = { combine: ["COMBINE", C.purple], unf: ["UNF · money", "#9a7530"], clean: ["CLEAN · money", "#9a7530"] };
+    const heroCard = (kick, title, blurb, statLabel, statVal, statSub) => (
+      <div style={{ background: `linear-gradient(115deg, ${TH.g1}, ${TH.g2})`, border: `2px solid ${TH.accent}`, borderRadius: 8, padding: "16px 20px", display: "flex", alignItems: "center", gap: 18, minHeight: 96 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={mono({ fontSize: 9.5, letterSpacing: ".16em", color: TH.lite, textTransform: "uppercase" })}>{kick}</div>
+          <div style={cinzel({ fontWeight: 800, fontSize: 21, color: "#f0e6cf", marginTop: 4 })}>{title}</div>
+          <div style={serif({ fontSize: 12.5, fontStyle: "normal", color: "#cdbf9f", marginTop: 4 })}>{blurb}</div>
+        </div>
+        {statVal != null && (
+          <div style={{ textAlign: "right" }}>
+            <div style={mono({ fontSize: 9, letterSpacing: ".14em", color: TH.lite, textTransform: "uppercase" })}>{statLabel}</div>
+            <div style={cinzel({ fontWeight: 800, fontSize: 26, color: "#f0e6cf" })}>{statVal}</div>
+            {statSub && <div style={mono({ fontSize: 10, color: "#cdbf9f" })}>{statSub}</div>}
+          </div>
+        )}
+      </div>
+    );
+    const th = (label, key, num) => (
+      <th key={label} className={num ? "num" : ""} onClick={key ? () => this.setState({ mixSort: key }) : undefined}
+        style={key ? { cursor: "pointer", color: sortKey === key ? TH.accent : undefined, whiteSpace: "nowrap" } : { whiteSpace: "nowrap" }}>
+        {label}{key ? (sortKey === key ? " ▾" : "") : ""}
+      </th>
+    );
+    return (
+      <div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 12, marginBottom: 14 }}>
+          {profit
+            ? heroCard("💰 Best profit now · at your level " + lvl, profit.name,
+                `${this.signed(profit.net)}/pot · ${profit.label}` + (profit.qtyAfford > 0 ? ` · ${this.fmt(profit.qtyAfford)} affordable → ${this.signed(profit.totalAfford)} total` : " · log a net-worth snapshot to size affordability"),
+                "Net / hr", this.signed(profit.netHr), Math.round(profit.potsPerHr) + " pots/hr")
+            : heroCard("💰 Best profit now", "Nothing mixes green right now", "Every unlocked recipe costs more than its potion sells for at current prices — check back after the market moves, or train on the cheapest xp instead →", null, null, null)}
+          {cheapXp
+            ? heroCard("🧪 Cheapest xp now · at your level " + lvl, cheapXp.name,
+                `${this.short(cheapXp.xpHr)} xp/hr · ${cheapXp.label}` + (xpToNext > 0 && cheapXp.xpHr > 0 ? ` · level ${Math.min(99, lvl + 1)} in ${(xpToNext / cheapXp.xpHr).toFixed(1)}h` : ""),
+                "gp / xp", cheapXp.gpXp != null ? (cheapXp.gpXp >= 0 ? "+" : "−") + Math.abs(cheapXp.gpXp).toFixed(1) : "—",
+                cheapXp.gpXp != null && cheapXp.gpXp >= 0 ? "you get PAID to train" : "cost per xp")
+            : heroCard("🧪 Cheapest xp now", "No potion unlocked yet", "Level " + lvl + " Herblore — the ladder starts at 3 (Attack potion) after Druidic Ritual.", null, null, null)}
+        </div>
+        <Card>
+          <Kicker color={TH.accent}>Recipe book · {liveN > 0 ? liveN + " live quotes" : "snapshot prices — hit ⟳ Live prices"} · afford &amp; est. total use your logged cash {this.short(d.cash)}</Kicker>
+          <div className="sheetwrap" style={{ marginTop: 10 }}>
+            <table className="sheet">
+              <thead><tr>
+                {th("Recipe")}{th("Lvl", "lvl", true)}{th("Path")}{th("Cost/pot", null, true)}{th("Net/pot", "netpot", true)}{th("gp/xp", "gpxp", true)}{th("Net/hr", "nethr", true)}{th("XP/hr", "xphr", true)}{th("Afford", null, true)}{th("Est. total", "total", true)}{th("Age", null, true)}
+              </tr></thead>
+              <tbody>{sorted.map((r) => {
+                const open = this.state.mixOpen === r.id;
+                const kind = KIND[r.kind];
+                const lockStyle = r.unlocked ? {} : { opacity: 0.45 };
+                return (
+                  <React.Fragment key={r.id}>
+                    <tr style={lockStyle}>
+                      <td onClick={() => this.setState({ mixOpen: open ? "" : r.id })} style={{ cursor: "pointer", whiteSpace: "nowrap" }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                          <Icon url={itemIconUrl(r.prod)} name={r.prod} size={20} />
+                          <span style={cinzel({ fontWeight: 600, fontSize: 13.5 })}>{r.name}</span>
+                          {kind && <Tag color={kind[1]} bg="rgba(44,32,19,.08)">{kind[0]}</Tag>}
+                          <span style={mono({ fontSize: 9, color: C.muted2 })}>{open ? "▾" : "▸"}</span>
+                        </span>
+                      </td>
+                      <td className="num"><Tag color={r.unlocked ? C.green : C.red} bg={r.unlocked ? "rgba(92,110,53,.14)" : "rgba(150,58,44,.12)"}>{r.req}</Tag></td>
+                      <td style={{ ...serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted }), maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.label}>{r.label}</td>
+                      <td className="num" style={mono({ fontSize: 12 })}>{this.fmt(r.cost)}</td>
+                      <td className="num" style={mono({ fontSize: 12, fontWeight: 600, color: r.net >= 0 ? C.green : C.red })}>{this.signed(r.net)}</td>
+                      <td className="num" style={mono({ fontSize: 12, color: r.gpXp == null ? C.muted : r.gpXp >= 0 ? C.green : "#9a6a3a" })}>{r.gpXp == null ? "—" : (r.gpXp >= 0 ? "+" : "−") + Math.abs(r.gpXp).toFixed(1)}</td>
+                      <td className="num"><div style={mono({ fontSize: 12, color: r.netHr >= 0 ? C.ink : C.red })}>{this.signed(r.netHr)}</div>{r.netHr > 0 && <Bar pct={Math.min(100, (r.netHr / maxHr) * 100)} c1={TH.accent} c2={TH.lite} h={4} />}</td>
+                      <td className="num" style={mono({ fontSize: 12 })}>{r.xpHr > 0 ? this.short(r.xpHr) : "—"}</td>
+                      <td className="num" style={mono({ fontSize: 12, color: r.qtyAfford > 0 ? C.ink : C.muted })}>{r.qtyAfford > 0 ? this.fmt(r.qtyAfford) : "—"}</td>
+                      <td className="num" title="Net × the most you can buy right now (scarcest input's live buy limit AND your logged cash)" style={mono({ fontSize: 12, fontWeight: 600, color: r.qtyAfford <= 0 ? C.muted : r.totalAfford >= 0 ? C.green : C.red })}>{r.qtyAfford > 0 ? this.signed(r.totalAfford) : "—"}</td>
+                      <td className="num" style={mono({ fontSize: 11, color: r.ageMax != null && r.ageMax > 30 ? C.red : C.muted })}>{r.ageMax != null ? r.ageMax + "m" : r.live ? "live" : "snap"}</td>
+                    </tr>
+                    {open && (
+                      <tr>
+                        <td colSpan={11} style={{ padding: "10px 14px", background: "rgba(46,125,100,.07)", borderTop: `2px solid ${TH.accent}44`, borderBottom: `2px solid ${TH.accent}44` }}>
+                          <div style={{ display: "flex", gap: 26, flexWrap: "wrap", alignItems: "flex-start" }}>
+                            <div>
+                              <div style={mono({ fontSize: 9, letterSpacing: ".12em", color: TH.accent, textTransform: "uppercase", marginBottom: 5 })}>Shopping list · per potion</div>
+                              {r.buys.map((b, j) => { const p = this.mixPrice(b.name); return (
+                                <div key={j} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 3 }}>
+                                  <Icon url={itemIconUrl(b.name)} name={b.name} size={17} />
+                                  <span style={serif({ fontSize: 12, fontStyle: "normal" })}>{b.qty > 1 ? b.qty + "× " : ""}{b.name}</span>
+                                  <span style={mono({ fontSize: 11, color: C.muted })}>{this.fmt(p.buy * (b.qty || 1))} gp{p.live ? (p.age != null ? " · " + p.age + "m" : "") : " · snapshot"}</span>
+                                </div>
+                              ); })}
+                            </div>
+                            <div style={{ maxWidth: 380 }}>
+                              <div style={mono({ fontSize: 9, letterSpacing: ".12em", color: TH.accent, textTransform: "uppercase", marginBottom: 5 })}>The trade</div>
+                              <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.ink })}>
+                                {r.label}. Sells as <strong>{r.prod}</strong> for {this.fmt(this.mixPrice(r.prod).sell)} − 2% GE tax{r.chemEv > 0 ? ` + ${r.chemEv} chem-amulet EV` : ""} ⇒ <strong style={{ color: r.net >= 0 ? C.green : C.red }}>{this.signed(r.net)}/pot</strong>{r.xp > 0 ? ` · ${r.xp} xp` : ""}.
+                              </div>
+                              <div style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted, marginTop: 4 })}>
+                                Bench: {r.stepEq.toFixed(2)} action-equivalents per potion → {Math.round(r.potsPerHr)} pots/hr at your configured rate.{r.limCap != null ? ` Buy limit caps a 4h restock at ${this.fmt(r.limCap)}.` : ""}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}</tbody>
+            </table>
+          </div>
+          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>
+            Inputs buy at the <strong>ask</strong>, products insta-sell minus the 2% GE tax — deliberately conservative, like the farming engine. <strong>Age</strong> is the STALER price side across the whole recipe. Locked rows (red level) are excluded from the verdicts above. Click a recipe for its full shopping list.
+          </div>
+        </Card>
+      </div>
+    );
+  }
+  renderMixSetup(TH) {
+    const cfg = this.mixcfg;
+    const setupCell = { background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" };
+    const amu = this.mixPrice(CHEM_AMULET.item);
+    const sel = (k, cur, opts) => (
+      <select className="led" defaultValue={cur} onChange={(e) => this.setMixOpt(k, e.target.value)} style={{ width: "100%", marginTop: 6 }}>
+        {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+    );
+    const hint = (t) => <div style={serif({ fontSize: 10.5, fontStyle: "normal", color: C.muted, marginTop: 4 })}>{t}</div>;
+    return (
+      <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
+        <Kicker color={TH.accent}>⚗ Bench &amp; logistics — every knob re-prices the whole recipe book instantly</Kicker>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 12, marginTop: 12 }}>
+          <div style={setupCell}><Kicker>Bench actions / hour</Kicker><input className="led" defaultValue={this.fmt(cfg.mixesPerHour)} onBlur={(e) => this.setCfg("mixcfg", "mixesPerHour", e.target.value)} style={{ width: "100%", marginTop: 6 }} />{hint("Mixing at a bank: ~2,400/hr is the practical ceiling. A self-made unf costs a second action — the planner halves those recipes' pots/hr automatically.")}</div>
+          <div style={setupCell}><Kicker>Herb cleans / hour</Kicker><input className="led" defaultValue={this.fmt(cfg.cleansPerHour)} onBlur={(e) => this.setCfg("mixcfg", "cleansPerHour", e.target.value)} style={{ width: "100%", marginTop: 6 }} />{hint("Only matters on self-clean paths (grimy herbs, bonus xp). ~6,000/hr banked.")}</div>
+          <div style={setupCell}><Kicker>Zahur (Nardah)</Kicker>{sel("zahur", cfg.zahur ? "yes" : "no", [["yes", "Use Zahur (200 gp/item)"], ["no", "Skip Zahur"]])}{hint("Cleans grimy herbs and makes water-based unf potions for 200 gp each — instant, noted, no xp, no bench time.")}</div>
+          <div style={setupCell}><Kicker>Unfinished potions</Kicker>{sel("buyUnf", cfg.buyUnf, [["auto", "Auto — cheapest wins"], ["always", "Always buy unf off the GE"], ["never", "Never buy unf"]])}{hint("Auto compares GE unf vs herb+vial (self-made or Zahur) per recipe and takes the cheapest.")}</div>
+          <div style={setupCell}><Kicker>Amulet of chemistry</Kicker>{sel("chemAmulet", cfg.chemAmulet ? "yes" : "no", [["no", "Off (conservative)"], ["yes", "On — add the 4-dose EV"]])}{hint(`${Math.round(CHEM_AMULET.chance * 100)}% of mixes come out 4-dose; the charge (${this.fmt(Math.round(amu.buy / CHEM_AMULET.charges))} gp at today's ${this.fmt(amu.buy)}/amulet) is only spent on the proc. Applies to unf-finishing mixes.`)}</div>
+          <div style={setupCell}><Kicker>Herb input</Kicker>{sel("inputPref", cfg.inputPref, [["auto", "Auto — cheapest wins"], ["grimy", "Grimy only"], ["clean", "Clean only"]])}{hint("Grimy is usually cheaper and self-cleaning adds bonus xp; clean is faster. Auto lets each recipe decide.")}</div>
+        </div>
+      </Card>
+    );
+  }
+  renderMixLog(TH) {
+    const log = this.logs.mix || [];
+    const R = this.mixReality();
+    const cfg = this.mixcfg;
+    const tot = { qty: log.reduce((a, x) => a + (x.qty || 0), 0), net: log.reduce((a, x) => a + (x.net || 0), 0), xp: log.reduce((a, x) => a + (x.xp || 0), 0) };
+    return (
+      <div>
+        <StatCards cols={4} items={[
+          { label: "Sessions logged", value: "" + log.length },
+          { label: "Potions mixed", value: tot.qty ? this.fmt(tot.qty) : "—" },
+          { label: "Net gp", value: log.length ? this.signed(tot.net) : "—", color: tot.net >= 0 ? C.green : C.red },
+          { label: "Herblore XP", value: tot.xp ? this.short(tot.xp) : "—" },
+        ]} />
+        {this.state.openForm === "mix" && (
+          <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <div><div style={mono({ fontSize: 8.5, letterSpacing: ".12em", color: C.muted, textTransform: "uppercase", marginBottom: 3 })}>Potion</div>
+                <select className="led" id="mix_potion" style={{ width: 190 }}>{POTIONS.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}</select></div>
+              {this.field("mix_qty", "Qty mixed", { w: 100 })}{this.field("mix_mins", "Minutes (opt)", { w: 110 })}{this.field("mix_net", "Net gp (opt)", { w: 130 })}{this.field("mix_note", "Note", { w: 150 })}
+              <Btn tone="gold" onClick={this.addMix}>Save</Btn>
+            </div>
+            <div style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Leave <strong>Net gp</strong> blank to price the session from the live model at today's prices (frozen once logged — realized numbers never re-price). Minutes turn the entry into a measured throughput.</div>
+          </Card>
+        )}
+        {R.rows.length > 0 && (
+          <Card style={{ marginBottom: 14 }}>
+            <Kicker color={TH.accent}>Your bench vs the model — realized per-potion economics against today's live prices</Kicker>
+            <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+              <thead><tr>{["Potion", "Sessions", "Mixed", "Your net/pot", "Model net/pot", "Your pots/hr", "Model"].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i > 0 ? "right" : "left", padding: "6px 8px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
+              <tbody>{R.rows.map((p, i) => (
+                <tr key={i}>
+                  <td style={{ ...serif({ fontSize: 13 }), padding: "6px 8px" }}>{p.potion}</td>
+                  <td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{p.n}</td>
+                  <td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{this.fmt(p.qty)}</td>
+                  <td style={{ ...mono({ fontSize: 12, fontWeight: 600, color: (p.netPer || 0) >= 0 ? C.green : C.red }), padding: "6px 8px", textAlign: "right" }}>{p.netPer != null ? this.signed(p.netPer) : "—"}</td>
+                  <td style={{ ...mono({ fontSize: 12, color: C.muted }), padding: "6px 8px", textAlign: "right" }}>{p.modelNet != null ? this.signed(p.modelNet) : "—"}</td>
+                  <td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{p.potsHr != null ? this.fmt(p.potsHr) : "—"}</td>
+                  <td style={{ ...mono({ fontSize: 12, color: C.muted }), padding: "6px 8px", textAlign: "right" }}>{p.modelPotsHr != null ? this.fmt(p.modelPotsHr) : "—"}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+            {R.bench != null && (
+              <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 10, padding: "8px 12px", background: "rgba(46,125,100,.08)", borderRadius: 6 }}>
+                <span style={serif({ fontSize: 12.5, fontStyle: "normal" })}>Measured bench rate across {this.fmt(R.mins)} timed minutes: <strong>{this.fmt(R.bench)} actions/hr</strong> vs configured {this.fmt(cfg.mixesPerHour)}.</span>
+                {R.bench !== cfg.mixesPerHour && <Btn tone="gold" onClick={this.adoptBench}>Adopt as my bench rate</Btn>}
+              </div>
+            )}
+          </Card>
+        )}
+        <Card>
+          <Kicker color={TH.accent}>Mix log</Kicker>
+          {log.length === 0 && <div style={serif({ fontSize: 12.5, color: C.muted, marginTop: 8 })}>No sessions yet — hit “+ Log mix session” after a bench stint and the Apothecary starts grading its model against your reality.</div>}
+          {log.length > 0 && (
+            <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+              <thead><tr>{["Date", "Potion", "Qty", "Mins", "Net", "XP", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i > 1 && i < 6 ? "right" : "left", padding: "6px 8px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
+              <tbody>{log.map((e, i) => this.isEditingLog("mix", i) ? this.logEditorRow("mix", i, 7) : (
+                <tr key={i}>
+                  <td style={{ ...mono({ fontSize: 11 }), padding: "6px 8px" }}>{this.dShort(e.date)}</td>
+                  <td style={{ ...serif({ fontSize: 13 }), padding: "6px 8px" }}>{e.potion}{e.note ? <span style={mono({ fontSize: 10, color: C.muted2 })}> · {e.note}</span> : null}</td>
+                  <td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{this.fmt(e.qty)}</td>
+                  <td style={{ ...mono({ fontSize: 12, color: C.muted }), padding: "6px 8px", textAlign: "right" }}>{e.mins != null ? e.mins : "—"}</td>
+                  <td style={{ ...mono({ fontSize: 12, fontWeight: 600, color: (e.net || 0) >= 0 ? C.green : C.red }), padding: "6px 8px", textAlign: "right" }}>{this.signed(e.net || 0)}</td>
+                  <td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{this.short(e.xp || 0)}</td>
+                  <td style={{ padding: "6px 8px", whiteSpace: "nowrap", textAlign: "right" }}>{this.editLogBtn("mix", i)}<span onClick={() => this.delLog("mix", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          )}
+        </Card>
       </div>
     );
   }
