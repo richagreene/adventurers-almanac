@@ -3414,28 +3414,39 @@ export default class Almanac extends React.Component {
                       {open && (
                         <div style={{ margin: "0 0 10px 18px", padding: "10px 14px", background: "rgba(46,125,100,.07)", borderLeft: `3px solid ${TH.accent}`, borderRadius: 6 }}>
                           <div style={mono({ fontSize: 10.5, color: C.ink })}>
-                            SELL RAW · the baseline: {this.fmt(gp.sell)} insta-sell − 2% GE tax = <strong>{this.fmt(rawEa)}/herb</strong> × {this.fmt(s.stock)} = <strong>{this.short(raw)}</strong>
+                            SELL RAW · the baseline: {this.fmt(gp.sell)} insta-sell − 2% GE tax = <strong>{this.fmt(rawEa)}/herb</strong> × {this.fmt(s.stock)} herbs = <strong>{this.fmt(raw)}</strong>
                           </div>
                           <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
-                            <thead><tr>{["Convert to", "Product sells (after tax)", "− extras /pot", "= value /herb", "vs raw /herb", "× " + this.fmt(s.stock) + " herbs", "XP"].map((hd, i) => (
-                              <th key={i} style={{ ...mono({ fontSize: 8.5, letterSpacing: ".08em", color: C.muted }), textAlign: i > 0 ? "right" : "left", padding: "5px 8px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{hd}</th>))}</tr></thead>
+                            <thead>
+                              <tr>
+                                <th rowSpan={2} style={{ ...mono({ fontSize: 8.5, letterSpacing: ".08em", color: C.muted }), textAlign: "left", padding: "5px 8px", borderBottom: "2px solid rgba(44,32,19,.2)", verticalAlign: "bottom" }}>Convert to</th>
+                                <th colSpan={3} style={{ ...mono({ fontSize: 8.5, letterSpacing: ".1em", color: TH.accent }), textAlign: "center", padding: "4px 8px", borderBottom: "1px solid rgba(44,32,19,.14)" }}>PER POTION</th>
+                                <th colSpan={4} style={{ ...mono({ fontSize: 8.5, letterSpacing: ".1em", color: TH.accent }), textAlign: "center", padding: "4px 8px", borderBottom: "1px solid rgba(44,32,19,.14)", borderLeft: "1px solid rgba(44,32,19,.14)" }}>CONVERT ALL {this.fmt(s.stock)} — TOTALS</th>
+                                <th rowSpan={2} style={{ ...mono({ fontSize: 8.5, letterSpacing: ".08em", color: C.muted }), textAlign: "right", padding: "5px 8px", borderBottom: "2px solid rgba(44,32,19,.2)", verticalAlign: "bottom" }}>XP</th>
+                              </tr>
+                              <tr>{["sells (after tax)", "− extras", "= value /herb", "pots sell for", "− extras", "= you'd bank", "vs " + this.fmt(raw) + " raw"].map((hd, i) => (
+                                <th key={i} style={{ ...mono({ fontSize: 8.5, letterSpacing: ".06em", color: C.muted }), textAlign: "right", padding: "4px 8px", borderBottom: "2px solid rgba(44,32,19,.2)", borderLeft: i === 3 ? "1px solid rgba(44,32,19,.14)" : undefined }}>{hd}</th>))}</tr>
+                            </thead>
                             <tbody>{cands.map((r) => {
                               const revenue = r.net + r.cost; // product sell net (incl. chem EV)
+                              const gross = s.stock * revenue, extrasTot = s.stock * r.outlay, bank = gross - extrasTot, delta = bank - raw;
                               return (
                                 <tr key={r.id}>
                                   <td style={{ padding: "5px 8px" }} title={r.label}><span style={cinzel({ fontWeight: 600, fontSize: 12.5 })}>{r.name}</span><div style={serif({ fontSize: 10, fontStyle: "normal", color: C.muted })}>{r.label}</div></td>
                                   <td style={{ ...mono({ fontSize: 11.5 }), padding: "5px 8px", textAlign: "right" }} title={r.prod + " insta-sell minus the 2% GE tax" + (r.chemEv > 0 ? " + " + r.chemEv + " amulet-of-chemistry EV" : "")}>{this.fmt(revenue)}</td>
                                   <td style={{ ...mono({ fontSize: 11.5 }), padding: "5px 8px", textAlign: "right" }} title="everything except the herb: vial, secondaries, Zahur fees — actual gp out of pocket per potion">{this.fmt(r.outlay)}</td>
-                                  <td style={{ ...mono({ fontSize: 11.5, fontWeight: 600 }), padding: "5px 8px", textAlign: "right" }}>{this.fmt(revenue - r.outlay)}</td>
-                                  <td style={{ ...mono({ fontSize: 11.5, fontWeight: 600, color: r.net >= 0 ? C.green : C.red }), padding: "5px 8px", textAlign: "right" }} title="value/herb minus the raw baseline — the mixing premium per herb">{(r.net >= 0 ? "+" : "−") + this.fmt(Math.abs(r.net))}</td>
-                                  <td style={{ ...mono({ fontSize: 11.5, fontWeight: 600, color: r.net >= 0 ? C.green : C.red }), padding: "5px 8px", textAlign: "right" }}>{this.signed(s.stock * r.net)}</td>
+                                  <td style={{ ...mono({ fontSize: 11.5, fontWeight: 600 }), padding: "5px 8px", textAlign: "right" }} title="what one herb becomes on this conversion">{this.fmt(revenue - r.outlay)}</td>
+                                  <td style={{ ...mono({ fontSize: 11.5 }), padding: "5px 8px", textAlign: "right", borderLeft: "1px solid rgba(44,32,19,.14)" }} title={this.fmt(s.stock) + " × " + this.fmt(revenue) + " — gross from selling every potion made from your stock"}>{this.fmt(gross)}</td>
+                                  <td style={{ ...mono({ fontSize: 11.5 }), padding: "5px 8px", textAlign: "right" }} title={this.fmt(s.stock) + " × " + this.fmt(r.outlay) + " — total spent on vials, secondaries and fees"}>{this.fmt(extrasTot)}</td>
+                                  <td style={{ ...mono({ fontSize: 11.5, fontWeight: 700 }), padding: "5px 8px", textAlign: "right" }} title="gross minus extras — the gp you'd actually bank converting the whole stock">{this.fmt(bank)}</td>
+                                  <td style={{ ...mono({ fontSize: 11.5, fontWeight: 700, color: delta >= 0 ? C.green : C.red }), padding: "5px 8px", textAlign: "right" }} title={this.fmt(bank) + " banked vs " + this.fmt(raw) + " from selling the herbs raw"}>{(delta >= 0 ? "+" : "−") + this.fmt(Math.abs(delta))}</td>
                                   <td style={{ ...mono({ fontSize: 11.5, color: C.muted }), padding: "5px 8px", textAlign: "right" }}>{r.xp > 0 ? "+" + this.short(s.stock * r.xp) : "—"}</td>
                                 </tr>
                               );
                             })}</tbody>
                           </table>
                           <div style={serif({ fontSize: 11, fontStyle: "normal", color: C.muted, marginTop: 6 })}>
-                            Each row: what the product insta-sells for after the 2% tax, minus the non-herb shopping (vial · secondaries · Zahur fees), is what one herb becomes. Compare that against the {this.fmt(rawEa)}/herb raw baseline — the difference is the premium, times your {this.fmt(s.stock)} in stock. Rows are the same engine paths as the recipe book below.
+                            Left: one herb's economics — the product's after-tax sale minus the non-herb shopping (vial · secondaries · Zahur fees). Right: the whole stock — all {this.fmt(s.stock)} converted, every potion sold: gross − extras = what you'd bank, against {this.fmt(raw)} from selling the herbs raw. Rows are the same engine paths as the recipe book below.
                           </div>
                         </div>
                       )}
