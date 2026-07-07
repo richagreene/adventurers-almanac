@@ -18,6 +18,7 @@ import { CONTENT_REQS } from "./data/contentReqs.js";
 import { QUEST_DEPS } from "./data/questDeps.js";
 import { BOSS_GUIDES } from "./data/bossGuides.js";
 import { HERBS, POTIONS, ZAHUR_CLEAN_FEE, ZAHUR_UNF_FEE, CHEM_AMULET, MIX_SNAPSHOT, mixItemNames } from "./data/herbloreData.js";
+import { ESSENCE, POUCHES, RC_RUNES, RC_DIRECT, RC_XPONLY, RC_SNAPSHOT, rcItemNames } from "./data/runecraftData.js";
 import { refreshActivityGp, liveGpRate, geSellNet } from "./lib/activityPrices.js";
 import { fetchPlayer, fetchPrices, priceById, combatLevel, fetchItemNames, natureRunePrice, wikiExtract, wikiSections } from "./lib/api.js";
 import { C, mono, serif, cinzel, Card, Kicker, SectionTitle, StatCards, Bar, Seg, Tag, Btn, DataTable, Hero, themeFor, LineChart, BarChartH, Icon, Donut, BandBar } from "./lib/ui.jsx";
@@ -40,7 +41,7 @@ const NAV = [
   { label: "Overview", items: [["dashboard", "Dashboard"], ["skills", "Skills"], ["pathfinder", "Pathfinder"], ["goals", "Goals"]] },
   { label: "Treasury", items: [["networth", "Net Worth"], ["flipping", "GE Flipping"], ["alchemy", "High Alchemy"]] },
   { label: "Combat", items: [["bossing", "Bossing"], ["slayer", "Slayer"], ["gear", "Gear Path"]] },
-  { label: "Skilling", items: [["farming", "Farming"], ["herblore", "Herblore"], ["quests", "Quests"], ["diary", "Diary & CA"]] },
+  { label: "Skilling", items: [["farming", "Farming"], ["herblore", "Herblore"], ["runecraft", "Runecraft"], ["quests", "Quests"], ["diary", "Diary & CA"]] },
   { label: "Chronicle", items: [["journal", "Journal"]] },
 ];
 const TITLES = {
@@ -50,6 +51,7 @@ const TITLES = {
   bossing: ["Command Centre", "Bossing Compendium"], slayer: ["The Slayer", "Task Planner"],
   gear: ["The Armoury", "Gear Progression"], farming: ["The Allotments", "Farming Engine"],
   herblore: ["The Apothecary", "Herblore Engine"],
+  runecraft: ["The Rune Forge", "Runecraft Engine"],
   quests: ["The Adventure Log", "Quest Sequencer"], diary: ["Regional Renown", "Diary & Combat Achievements"],
   journal: ["The Chronicle", "Adventurer's Journal"],
 };
@@ -63,6 +65,7 @@ export default class Almanac extends React.Component {
     tSort: {}, tFilt: {}, tOpen: "", flipPrefill: null, objType: "bank", objBoss: "", flipShowWatch: false, flipCfgVer: 0, _v: 0,
     counselLens: "balanced", goalId: "none", pfSort: "lev", farmView: "planner", bossPage: "",
     mixView: "planner", mixSort: "nethr", mixOpen: "", mixChainOpen: "",
+    rcView: "planner", rcSort: "nethr", rcOpen: "",
     jSel: null, jEdit: null, jSeal: "crimson",
   };
 
@@ -330,7 +333,7 @@ export default class Almanac extends React.Component {
     this.skillsRaw = this.stats.skills;
     const savedLogs = this._load("almanac.logs.v1", null);
     this.logs = savedLogs || JSON.parse(JSON.stringify(D.seeds || {}));
-    ["nw", "flips", "alch", "herb", "mix", "boss", "slayerLog", "watch", "scan", "drop"].forEach((k) => { if (!this.logs[k]) this.logs[k] = []; });
+    ["nw", "flips", "alch", "herb", "mix", "rc", "boss", "slayerLog", "watch", "scan", "drop"].forEach((k) => { if (!this.logs[k]) this.logs[k] = []; });
     if (!savedLogs && !this.logs.scan.length) this.logs.scan = JSON.parse(JSON.stringify(this.scanSeed));
     this.goals = this._load("almanac.goals.v1", null) || this.defaultGoals.map((x) => ({ ...x }));
     this.questOv = this._load("almanac.questdone.v1", null);
@@ -346,6 +349,11 @@ export default class Almanac extends React.Component {
     // The Apothecary's bench + logistics settings. mixesPerHour is bench
     // ACTIONS per hour (a 2-step self-unf path halves finished potions/hr).
     this.mixcfg = { mixesPerHour: 2400, cleansPerHour: 6000, zahur: true, buyUnf: "auto", chemAmulet: false, inputPref: "auto", ownHerbs: true, ...(this._load("almanac.mixcfg.v1", null) || {}) };
+    // The Rune Forge: pouch ownership, Abyss access, Magic Imbue, plus
+    // per-row measured rate overrides adopted from the run log.
+    this.rccfg = { small: true, medium: true, large: true, giant: true, colossal: false, abyss: true, imbue: false, tripsOv: {}, directOv: {}, ...(this._load("almanac.rccfg.v1", null) || {}) };
+    if (!this.rccfg.tripsOv) this.rccfg.tripsOv = {};
+    if (!this.rccfg.directOv) this.rccfg.directOv = {};
     if (!this.farmcfg.patchOv) this.farmcfg.patchOv = {};
     if (!this.farmcfg.runsPerDay) this.farmcfg.runsPerDay = {};
     this.compostPrices = this.compostPrices || { compost: 80, super: 450, ultra: 750 };
@@ -367,7 +375,7 @@ export default class Almanac extends React.Component {
   // Every persisted key. _save snapshots the *pre-mutation* state of these keys
   // (localStorage lags the in-memory mutation by one write), grouped per
   // synchronous action, so any add/edit/delete/config change is one undo step.
-  _undoKeys = ["almanac.logs.v1", "almanac.goals.v1", "almanac.objectives.v1", "almanac.flipcfg.v1", "almanac.alchcfg.v1", "almanac.farmcfg.v1", "almanac.mixcfg.v1", "almanac.gcfg.v1", "almanac.blocks.v1", "almanac.bossov.v1", "almanac.questdone.v1", "almanac.stats.v1", "almanac.avoiddismiss.v1", "almanac.loadout.v1", "almanac.gearowned.v1", "almanac.diarydone.v1", "almanac.cadone.v1", "almanac.journal.v1"];
+  _undoKeys = ["almanac.logs.v1", "almanac.goals.v1", "almanac.objectives.v1", "almanac.flipcfg.v1", "almanac.alchcfg.v1", "almanac.farmcfg.v1", "almanac.mixcfg.v1", "almanac.rccfg.v1", "almanac.gcfg.v1", "almanac.blocks.v1", "almanac.bossov.v1", "almanac.questdone.v1", "almanac.stats.v1", "almanac.avoiddismiss.v1", "almanac.loadout.v1", "almanac.gearowned.v1", "almanac.diarydone.v1", "almanac.cadone.v1", "almanac.journal.v1"];
   _snap() { const s = {}; this._undoKeys.forEach((k) => { s[k] = localStorage.getItem(k); }); return s; }
   _restore(snap) {
     this._undoSuspended = true;
@@ -380,7 +388,7 @@ export default class Almanac extends React.Component {
   redo = () => { if (!this._redoStack || !this._redoStack.length) return; (this._undoStack = this._undoStack || []).push(this._snap()); this._restore(this._redoStack.pop()); };
   clearAllLogs = () => {
     if (typeof window !== "undefined" && !window.confirm("Clear every logged entry (flips, kills, snapshots, herb runs, drops…)? You can undo this.")) return;
-    const empty = {}; ["nw", "flips", "alch", "herb", "mix", "boss", "slayerLog", "watch", "scan", "drop"].forEach((k) => (empty[k] = []));
+    const empty = {}; ["nw", "flips", "alch", "herb", "mix", "rc", "boss", "slayerLog", "watch", "scan", "drop"].forEach((k) => (empty[k] = []));
     this.logs = empty; this.saveLogs(); this.bump();
   };
 
@@ -734,6 +742,10 @@ export default class Almanac extends React.Component {
       // no quote. Ages + buy limits only exist on the live side.
       this.mixPrices = this.mixPrices || {};
       mixItemNames().forEach((nm) => { const m = byName[nm.toLowerCase()]; if (m && (m.high || m.low)) this.mixPrices[nm] = { buy: m.high || m.low, sell: m.low || m.high, limit: m.limit || 0, age: quoteAge(m) }; });
+      // Runecraft: same pass for the Rune Forge's ledger (runes, essence,
+      // lava consumables) — rcPrice() reads this map.
+      this.rcPrices = this.rcPrices || {};
+      rcItemNames().forEach((nm) => { const m = byName[nm.toLowerCase()]; if (m && (m.high || m.low)) this.rcPrices[nm] = { buy: m.high || m.low, sell: m.low || m.high, limit: m.limit || 0, age: quoteAge(m) }; });
       // Keep the whole tradeable market so the scanner ranks real flips, not just
       // a handful of seed items. Drop items with no live buy & sell.
       this.priceRows = Object.values(byId).filter((m) => m.high > 0 && m.low > 0).map((m) => ({ name: m.name, buy: m.low, sell: m.high, vol: m.volume || 0, limit: m.limit || 0, age: quoteAge(m), avgHigh1h: m.avgHigh1h, avgLow1h: m.avgLow1h, hvol1h: m.hvol1h, lvol1h: m.lvol1h }));
@@ -760,7 +772,7 @@ export default class Almanac extends React.Component {
   };
 
   // ---------- handlers: navigation & forms ----------
-  go = (s) => { this.setState({ section: s, openForm: null, editLog: null }); if ((s === "flipping" || s === "farming" || s === "herblore") && !this.priceRows && !this._marketLoading) { this._marketLoading = true; this.refreshPrices(); } };
+  go = (s) => { this.setState({ section: s, openForm: null, editLog: null }); if ((s === "flipping" || s === "farming" || s === "herblore" || s === "runecraft") && !this.priceRows && !this._marketLoading) { this._marketLoading = true; this.refreshPrices(); } };
   setLens = (id) => this.setState({ counselLens: id });
   setGoal = (id) => { this.setState({ goalId: id }); this._save("almanac.counselgoal.v1", id); };
   setPfSort = (id) => this.setState({ pfSort: id });
@@ -1083,6 +1095,161 @@ export default class Almanac extends React.Component {
   adoptBench = () => { const r = this.mixReality(); if (r.bench > 0) { this.mixcfg.mixesPerHour = r.bench; this._save("almanac.mixcfg.v1", this.mixcfg); this.bump(); } };
   setMixOpt = (k, v) => { this.mixcfg[k] = v === "yes" ? true : v === "no" ? false : v; this._save("almanac.mixcfg.v1", this.mixcfg); this.bump(); };
 
+  // ===================== RUNECRAFT ENGINE (the Rune Forge) =====================
+  // One hour at the forge = trip math × breakpoint multiplier × live spread.
+  // gp LIVE (rcPrices ← wiki feed, RC_SNAPSHOT fallback); levels, xp/essence
+  // and the multiple-runes breakpoints are game constants — xp STABLE.
+  rcPrice(name) {
+    const live = this.rcPrices && this.rcPrices[name];
+    if (live) return { buy: live.buy || live.sell || 0, sell: live.sell || live.buy || 0, limit: live.limit || 0, age: live.age, live: true };
+    const p = RC_SNAPSHOT[name] || 0;
+    return { buy: p, sell: p, limit: 0, age: null, live: false };
+  }
+  get rcLvl() { return (this.skillMap.Runecraft || { l: 1 }).l; }
+  // Essence per trip: 28 inventory slots, one taken per pouch carried, plus
+  // what the pouches hold — a pouch only counts if owned AND level-usable.
+  rcEssPerTrip() {
+    const cfg = this.rccfg, lvl = this.rcLvl;
+    let n = 0, held = 0; const used = [];
+    POUCHES.forEach((p) => { if (cfg[p.key] && lvl >= p.lvl) { n++; held += p.holds; used.push(p); } });
+    return { ess: 28 - n + held, n, held, used };
+  }
+  rcMult(row) { let m = 1; (row.mults || []).forEach(([l, x]) => { if (this.rcLvl >= l) m = x; }); return m; }
+  rcNextBreak(row) { return (row.mults || []).find(([l]) => l > this.rcLvl) || null; }
+  // Three-layer gating, all from the app's own state: level, YOUR quest log,
+  // and the Abyss toggle. Quests the ledger doesn't track can't be verified
+  // and are treated as met.
+  rcGate(row) {
+    const qBy = this._rcQBy || (this._rcQBy = (() => { const m = {}; (D.quests || []).forEach((q) => (m[q.n] = q)); return m; })());
+    const quests = (row.quests || []).filter((qn) => qBy[qn] && !this.questDone(qBy[qn]));
+    const abyssBlocked = !!row.abyss && this.rccfg.abyss === false;
+    const lvlOk = this.rcLvl >= row.lvl;
+    return { lvlOk, quests, abyssBlocked, ok: lvlOk && !quests.length && !abyssBlocked };
+  }
+  // Full economics for one forge row at current prices/config/level.
+  rcEcon(row, cash) {
+    const cfg = this.rccfg;
+    const essP = this.rcPrice(ESSENCE);
+    const ageOf = (names) => { let age = null, live = false; names.forEach((nm) => { const p = this.rcPrice(nm); if (p.live) { live = true; if (p.age != null) age = Math.max(age || 0, p.age); } }); return { age, live }; };
+    if (row.kind === "direct") {
+      const runesHr = cfg.directOv[row.id] > 0 ? cfg.directOv[row.id] : row.runesHr;
+      const sellEa = geSellNet(this.rcPrice(row.rune).sell);
+      const a = ageOf([row.rune]);
+      return { mult: 1, sellEa, essCost: 0, profitEss: null, essTrip: null, trips: null, essHr: null, runesHr,
+        netHr: Math.round(runesHr * sellEa), xpHr: Math.round(row.xpHr), gpXp: row.xpHr > 0 ? (runesHr * sellEa) / row.xpHr : null,
+        xpPerRune: row.runesHr > 0 ? row.xpHr / row.runesHr : 0, afford: null, estTotal: null, sustainHrs: null,
+        measured: cfg.directOv[row.id] > 0, ageMax: a.age, live: a.live, unpriced: false };
+    }
+    if (row.kind === "xponly" && !row.xpEss) {
+      // rate-only trainers (ZMI / GOTR): xp is real, the reward stream is
+      // honestly unpriced rather than guessed.
+      return { mult: 1, sellEa: 0, essCost: 0, profitEss: null, essTrip: null, trips: null, essHr: null, runesHr: null,
+        netHr: 0, xpHr: Math.round(row.xpHr), gpXp: null, xpPerRune: 0, afford: null, estTotal: null, sustainHrs: null,
+        measured: false, ageMax: null, live: false, unpriced: true };
+    }
+    // craft rows (and lavas, which are a craft with zero revenue + extras)
+    const t = this.rcEssPerTrip();
+    const mult = row.mults ? this.rcMult(row) : 1;
+    const trips = cfg.tripsOv[row.id] > 0 ? cfg.tripsOv[row.id] : row.trips;
+    const essHr = t.ess * trips;
+    const names = [ESSENCE];
+    let sellEa = 0, extras = 0;
+    if (row.rune) { sellEa = geSellNet(this.rcPrice(row.rune).sell); names.push(row.rune); }
+    (row.perEss || []).forEach((x) => { extras += this.rcPrice(x.item).buy * (x.qty || 1); names.push(x.item); });
+    if (row.talisman && !cfg.imbue) { extras += this.rcPrice(row.talisman).buy / Math.max(1, t.ess); names.push(row.talisman); }
+    if (row.neck) { extras += this.rcPrice(row.neck.item).buy / (row.neck.crafts * Math.max(1, t.ess)); names.push(row.neck.item); }
+    const essCost = essP.buy;
+    const profitEss = mult * sellEa - essCost - extras;
+    const xpEss = row.xpEss || 0;
+    // Affordability: essence buy limit AND your logged cash, in essence units.
+    const lim = essP.live && essP.limit > 0 ? essP.limit : Infinity;
+    const byCash = essCost > 0 ? (cash > 0 ? Math.floor(cash / essCost) : 0) : Infinity;
+    let afford = Math.min(lim, byCash); if (!isFinite(afford)) afford = 0;
+    const a = ageOf(names);
+    return { mult, sellEa, essCost, extras: Math.round(extras * 100) / 100, profitEss: Math.round(profitEss * 10) / 10,
+      essTrip: t.ess, trips, essHr, runesHr: Math.round(essHr * mult),
+      netHr: Math.round(profitEss * essHr), xpHr: Math.round(xpEss * essHr), gpXp: xpEss > 0 ? profitEss / xpEss : null,
+      xpPerRune: 0, afford, estTotal: Math.round(profitEss * afford), sustainHrs: essHr > 0 ? afford / essHr : null,
+      measured: cfg.tripsOv[row.id] > 0, ageMax: a.age, live: a.live, unpriced: false };
+  }
+  // Every row the Forge ranks: the craft ladder + Zeah direct + xp trainers.
+  rcRows(cash) {
+    const rows = [];
+    RC_RUNES.forEach((r) => rows.push({ ...r, kind: "craft", name: r.rune.replace(/ rune$/, "") + " runes" }));
+    RC_DIRECT.forEach((r) => rows.push({ ...r, kind: "direct" }));
+    RC_XPONLY.forEach((r) => rows.push({ ...r, kind: "xponly" }));
+    return rows.map((r) => { const gate = this.rcGate(r); return { ...r, gate, unlocked: gate.ok, ...this.rcEcon(r, cash) }; });
+  }
+  // The two verdicts: best money craft and fastest xp, at your gates.
+  rcBest(cash) {
+    const rows = this.rcRows(cash).filter((r) => r.unlocked);
+    const profit = rows.filter((r) => !r.unpriced && r.netHr > 0).sort((a, b) => b.netHr - a.netHr)[0] || null;
+    const xpBest = rows.filter((r) => r.xpHr > 0).sort((a, b) => b.xpHr - a.xpHr)[0] || null;
+    return { profit, xpBest, rows };
+  }
+  // Your next breakpoints across the whole ladder (quest-met rows), with the
+  // /hr jump each unlocks and days-to-reach at your measured xp pace.
+  rcBreaks(rows) {
+    const vel = this.xpVelocity();
+    const pace = vel.ok ? vel.perSkill.Runecraft || 0 : 0;
+    const curXp = (this.skillMap.Runecraft || { x: 0 }).x;
+    const out = [];
+    rows.filter((r) => r.kind === "craft" && !r.gate.quests.length && !r.gate.abyssBlocked).forEach((r) => {
+      const nb = this.rcNextBreak(r); if (!nb) return;
+      const gainHr = Math.round((nb[1] - (r.gate.lvlOk ? r.mult : 0)) * r.sellEa * (r.essHr || 0));
+      const days = pace > 0 ? Math.ceil(Math.max(0, this.xpFor(nb[0]) - curXp) / pace) : null;
+      out.push({ rune: r.rune, name: r.name, at: nb[0], mult: nb[1], gainHr, days, newHr: (r.netHr || 0) + gainHr });
+    });
+    return out.sort((a, b) => a.at - b.at).slice(0, 3);
+  }
+  // Log a forge session. Net defaults to the CURRENT model economics (frozen
+  // at log time); essence defaults to runes ÷ your multiplier.
+  addRc = () => {
+    const name = this.val("rc_row"); const rows = this.rcRows(0);
+    const row = rows.find((r) => r.name === name) || rows[0];
+    const runes = this.num("rc_runes") || 0, mins = this.num("rc_mins"), netRaw = this.val("rc_net");
+    let ess = this.num("rc_ess");
+    if (!ess && row.kind === "craft" && runes > 0) ess = Math.round(runes / Math.max(1, row.mult));
+    let net;
+    if (netRaw !== "") net = Math.round(this.parseNum(netRaw));
+    else if (row.kind === "direct") net = Math.round(runes * row.sellEa);
+    else net = Math.round(runes * row.sellEa - ess * (row.essCost + (row.extras || 0)));
+    const xp = row.kind === "craft" || row.xpEss ? Math.round(ess * (row.xpEss || 0)) : mins > 0 ? Math.round((row.xpHr * mins) / 60) : Math.round(runes * (row.xpPerRune || 0));
+    const entry = { date: this.today(), row: row.name, runes, net, xp, lvl: this.rcLvl };
+    if (ess > 0) entry.ess = ess;
+    if (mins > 0) entry.mins = Math.round(mins);
+    const note = this.val("rc_note"); if (note) entry.note = note;
+    this.logs.rc.unshift(entry); this.saveLogs(); this.setState({ openForm: null });
+  };
+  // Realized forge sessions vs the live model, per row — measured trips/hr
+  // (craft) or runes/hr (direct) adoptable into the config.
+  rcReality() {
+    const byR = {};
+    (this.logs.rc || []).forEach((e) => {
+      const p = byR[e.row] || (byR[e.row] = { row: e.row, n: 0, runes: 0, ess: 0, net: 0, xp: 0, mins: 0, tRunes: 0, tEss: 0 });
+      p.n++; p.runes += e.runes || 0; p.ess += e.ess || 0; p.net += e.net || 0; p.xp += e.xp || 0;
+      if (e.mins > 0) { p.mins += e.mins; p.tRunes += e.runes || 0; p.tEss += e.ess || 0; }
+    });
+    const model = this.rcRows(0);
+    const t = this.rcEssPerTrip();
+    return Object.values(byR).map((p) => {
+      const m = model.find((r) => r.name === p.row);
+      const runesHr = p.mins > 0 ? Math.round((p.tRunes * 60) / p.mins) : null;
+      const tripsHr = p.mins > 0 && p.tEss > 0 && t.ess > 0 ? Math.round(((p.tEss / t.ess) * 60) / p.mins * 10) / 10 : null;
+      return { ...p, m, runesHr, tripsHr, modelRunesHr: m ? m.runesHr : null, netPerRune: p.runes > 0 ? Math.round((p.net / p.runes) * 10) / 10 : null };
+    }).sort((a, b) => b.net - a.net);
+  }
+  adoptRcRate = (p) => {
+    if (!p.m) return;
+    if (p.m.kind === "direct" && p.runesHr > 0) this.rccfg.directOv[p.m.id] = p.runesHr;
+    else if (p.tripsHr > 0) this.rccfg.tripsOv[p.m.id] = Math.round(p.tripsHr);
+    else return;
+    this._save("almanac.rccfg.v1", this.rccfg); this.bump();
+  };
+  setRcOpt = (k, v) => { this.rccfg[k] = v === "yes" ? true : v === "no" ? false : v; this._save("almanac.rccfg.v1", this.rccfg); this.bump(); };
+  // Every name the run log accepts (no econ needed — pure data).
+  rcLogNames() { return RC_RUNES.map((r) => r.rune.replace(/ rune$/, "") + " runes").concat(RC_DIRECT.map((r) => r.name), RC_XPONLY.map((r) => r.name)); }
+
   // ---------- universal log editing ----------
   // Every visible log table gets a ✎ beside its ✕. One row edits at a time
   // through a spec-driven inline editor — unique field ids and a single
@@ -1136,6 +1303,16 @@ export default class Almanac extends React.Component {
         { k: "herbs", label: "Herbs", type: "num", w: 90, opt: true },
         { k: "lvl", label: "Farm lvl", type: "num", w: 90, opt: true },
         { k: "net", label: "Net gp (total)", type: "num", w: 120 },
+      ];
+      case "rc": return [
+        { k: "date", label: "Date", type: "date" },
+        { k: "row", label: "Craft", type: "sel", opts: sel(this.rcLogNames(), entry.row), w: 190 },
+        { k: "runes", label: "Runes", type: "num", w: 90 },
+        { k: "ess", label: "Essence", type: "num", w: 90, opt: true },
+        { k: "mins", label: "Minutes", type: "num", w: 90, opt: true },
+        { k: "net", label: "Net gp (total)", type: "num", w: 130, neg: true },
+        { k: "xp", label: "XP", type: "num", w: 100 },
+        { k: "note", label: "Note", type: "str", w: 150 },
       ];
       case "mix": return [
         { k: "date", label: "Date", type: "date" },
@@ -1575,6 +1752,7 @@ export default class Almanac extends React.Component {
             {sec === "gear" && this.renderGear()}
             {sec === "farming" && this.renderFarming()}
             {sec === "herblore" && this.renderHerblore()}
+            {sec === "runecraft" && this.renderRunecraft()}
             {sec === "quests" && this.renderQuests()}
             {sec === "diary" && this.renderDiary()}
             {sec === "journal" && this.renderJournal()}
@@ -1739,6 +1917,12 @@ export default class Almanac extends React.Component {
       const cash = this.logs && this.logs.nw && this.logs.nw.length ? this.logs.nw[this.logs.nw.length - 1].cash || 0 : 0;
       const best = this.mixBest(cash).profit;
       if (best && best.netHr > 0) return { gpHr: Math.min(Math.round(best.netHr), 2000000), metric: this.short(best.netHr) + "/hr · " + best.name };
+    } else if (id === "double-nats" || id === "blood-runes") {
+      // The Rune Forge prices these from YOUR level, pouches, quest log and
+      // today's rune spread — replacing the library's static snapshots.
+      const rows = this.rcRows(0);
+      const r = rows.find((x) => x.id === (id === "double-nats" ? "nature" : "blood-zeah"));
+      if (r && r.unlocked && r.netHr > 0) return { gpHr: Math.min(r.netHr, 2500000), metric: this.short(r.netHr) + "/hr · " + (r.mult > 1 ? "×" + r.mult + " " : "") + r.name };
     } else if (id === "ge-flipping") {
       const flips = (this.logs && this.logs.flips) || []; if (!flips.length) return null;
       let roiSum = 0, n = 0;
@@ -1781,7 +1965,7 @@ export default class Almanac extends React.Component {
       const lead = domain === "boss" ? "Combat money & drops" : domain === "slayer" ? "Slayer xp with income" : gpHr > 0 && xpHr > 0 ? "Money while you train" : gpHr > 0 ? "Idle-friendly income" : xpHr > 0 ? "Efficient training" : "Steady progress";
       let why = lead + (bits.length ? " — " + bits.join(", ") + "." : ".");
       if (onGoal) why += " Advances your " + goalId + " goal.";
-      out.push({ domain, title: a.name, gpHr, xpHr, rawLev, fit, access, metric, source, why, goto: a.subtype === "herblore" ? "herblore" : GOTO[a.category] || "skills", adv, actId: a.id, daily: a.category === "passive" });
+      out.push({ domain, title: a.name, gpHr, xpHr, rawLev, fit, access, metric, source, why, goto: a.subtype === "herblore" ? "herblore" : a.subtype === "runecraft" ? "runecraft" : GOTO[a.category] || "skills", adv, actId: a.id, daily: a.category === "passive" });
     });
     return out;
   }
@@ -2756,6 +2940,26 @@ export default class Almanac extends React.Component {
             </Card>
           );
         })()}
+        {(() => {
+          // The Rune Forge feeds the Runecraft plan row the same way the
+          // Apothecary feeds Herblore: live best-xp method, opt-in adopt.
+          const rg = this.goals.find((g) => g.skill === "Runecraft");
+          if (!rg || (this.skillMap.Runecraft || { l: 1 }).l >= rg.tgt) return null;
+          const xb = this.rcBest(0).xpBest;
+          if (!xb || !(xb.xpHr > 0)) return null;
+          const adopted = rg.xpHr === xb.xpHr && rg.gpHr === xb.netHr;
+          return (
+            <Card style={{ marginBottom: 14, borderTop: `3px solid ${themeFor("runecraft").accent}` }}>
+              <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={serif({ fontSize: 12.5, fontStyle: "normal" })}>
+                  🌀 <strong>The Rune Forge says:</strong> best xp at your level right now is <strong>{xb.name}</strong> — {this.short(xb.xpHr)} xp/hr at {this.signed(xb.netHr)} gp/hr{xb.unpriced ? " (rewards unpriced)" : " (live prices)"}{adopted ? " · your plan row already matches" : ", vs your plan's " + this.short(rg.xpHr) + " xp/hr at " + this.signed(rg.gpHr) + " gp/hr"}.
+                </span>
+                {!adopted && <Btn tone="gold" onClick={() => { rg.method = xb.name + " (Rune Forge)"; rg.xpHr = xb.xpHr; rg.gpHr = xb.netHr; this._save("almanac.goals.v1", this.goals); this.bump(); }}>Adopt into plan</Btn>}
+                <a href="#" onClick={(e) => { e.preventDefault(); this.go("runecraft"); }} style={{ ...mono({ fontSize: 10.5 }), color: themeFor("runecraft").accent }}>open the Rune Forge →</a>
+              </div>
+            </Card>
+          );
+        })()}
         <Card>
           <Kicker color={C.goldDeep}>Funding & timeline</Kicker>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginTop: 12 }}>
@@ -3621,6 +3825,308 @@ export default class Almanac extends React.Component {
                   <td style={{ ...mono({ fontSize: 12, fontWeight: 600, color: (e.net || 0) >= 0 ? C.green : C.red }), padding: "6px 8px", textAlign: "right" }}>{this.signed(e.net || 0)}</td>
                   <td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{this.short(e.xp || 0)}</td>
                   <td style={{ padding: "6px 8px", whiteSpace: "nowrap", textAlign: "right" }}>{this.editLogBtn("mix", i)}<span onClick={() => this.delLog("mix", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          )}
+        </Card>
+      </div>
+    );
+  }
+
+  // ===================== RUNECRAFT — THE RUNE FORGE =====================
+  renderRunecraft() {
+    const view = this.state.rcView || "planner";
+    const TH = themeFor("runecraft");
+    return (
+      <div>
+        <SectionTitle kicker="The Rune Forge · gp live · xp stable" title="Runecraft Engine" accent={TH.accent}
+          right={<div style={{ display: "flex", gap: 8 }}><Btn onClick={this.refreshPrices}>⟳ Live prices</Btn><Btn tone="gold" onClick={() => this.setState({ rcView: "log", openForm: "rc" })}>+ Log forge run</Btn></div>} />
+        <div style={{ marginBottom: 14 }}>
+          <Seg options={[{ key: "planner", label: "FORGE PLANNER" }, { key: "setup", label: "SETUP" }, { key: "log", label: "RUN LOG" }]} active={view} onPick={(v) => this.setState({ rcView: v })} />
+        </div>
+        {this.state.priceStatus && <div style={{ ...mono({ fontSize: 10.5, color: C.muted2 }), marginBottom: 10 }}>{this.state.priceStatus}</div>}
+        {view === "planner" && this.renderRcPlanner(TH)}
+        {view === "setup" && this.renderRcSetup(TH)}
+        {view === "log" && this.renderRcLog(TH)}
+      </div>
+    );
+  }
+  renderRcPlanner(TH) {
+    const d = this.derive();
+    const lvl = this.rcLvl;
+    const rows = this.rcRows(d.cash);
+    const unlocked = rows.filter((r) => r.unlocked);
+    const profit = unlocked.filter((r) => !r.unpriced && r.netHr > 0).sort((a, b) => b.netHr - a.netHr)[0] || null;
+    const xpBest = unlocked.filter((r) => r.xpHr > 0).sort((a, b) => b.xpHr - a.xpHr)[0] || null;
+    const breaks = this.rcBreaks(rows);
+    const liveN = Object.keys(this.rcPrices || {}).length;
+    const sortKey = this.state.rcSort || "nethr";
+    const keyOf = { nethr: (r) => r.netHr, ess: (r) => (r.profitEss != null ? r.profitEss : -1e9), gpxp: (r) => (r.gpXp != null ? r.gpXp : -1e9), xphr: (r) => r.xpHr, total: (r) => (r.estTotal != null ? r.estTotal : -1e9), lvl: (r) => -r.lvl };
+    const kf = keyOf[sortKey] || keyOf.nethr;
+    const sorted = unlocked.slice().sort((a, b) => kf(b) - kf(a)).concat(rows.filter((r) => !r.unlocked).sort((a, b) => a.lvl - b.lvl));
+    const maxHr = Math.max(1, ...unlocked.map((r) => Math.max(0, r.netHr)));
+    const heroCard = (kick, title, blurb, statLabel, statVal, statSub) => (
+      <div style={{ background: `linear-gradient(115deg, ${TH.g1}, ${TH.g2})`, border: `2px solid ${TH.accent}`, borderRadius: 8, padding: "16px 20px", display: "flex", alignItems: "center", gap: 18, minHeight: 96 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={mono({ fontSize: 9.5, letterSpacing: ".16em", color: TH.lite, textTransform: "uppercase" })}>{kick}</div>
+          <div style={cinzel({ fontWeight: 800, fontSize: 21, color: "#f0e6cf", marginTop: 4 })}>{title}</div>
+          <div style={serif({ fontSize: 12.5, fontStyle: "normal", color: "#c6cbe8", marginTop: 4 })}>{blurb}</div>
+        </div>
+        {statVal != null && (
+          <div style={{ textAlign: "right" }}>
+            <div style={mono({ fontSize: 9, letterSpacing: ".14em", color: TH.lite, textTransform: "uppercase" })}>{statLabel}</div>
+            <div style={cinzel({ fontWeight: 800, fontSize: 26, color: "#f0e6cf" })}>{statVal}</div>
+            {statSub && <div style={mono({ fontSize: 10, color: "#c6cbe8" })}>{statSub}</div>}
+          </div>
+        )}
+      </div>
+    );
+    const th = (label, key, num) => (
+      <th key={label} className={num ? "num" : ""} onClick={key ? () => this.setState({ rcSort: key }) : undefined}
+        style={key ? { cursor: "pointer", color: sortKey === key ? TH.accent : undefined, whiteSpace: "nowrap" } : { whiteSpace: "nowrap" }}>
+        {label}{key ? (sortKey === key ? " ▾" : "") : ""}
+      </th>
+    );
+    return (
+      <div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 12, marginBottom: 14 }}>
+          {profit
+            ? heroCard("💰 Best craft now · at your level " + lvl, profit.name,
+                (profit.profitEss != null ? "+" + profit.profitEss + "/ess · ×" + profit.mult + " · " + profit.via : profit.via) + (profit.measured ? " · your measured rate" : ""),
+                "Net / hr", this.signed(profit.netHr), profit.runesHr ? this.fmt(profit.runesHr) + " runes/hr" : "")
+            : heroCard("💰 Best craft now", "Nothing mints green right now", "Every unlocked craft loses to essence + fees at current prices — train on the best xp instead →", null, null, null)}
+          {xpBest
+            ? heroCard("✨ Best xp now · at your level " + lvl, xpBest.name,
+                xpBest.via + (xpBest.unpriced || xpBest.gpXp == null ? "" : " · " + (xpBest.gpXp >= 0 ? "you get PAID " + Math.abs(xpBest.gpXp).toFixed(1) + " gp/xp" : "costs " + Math.abs(xpBest.gpXp).toFixed(1) + " gp/xp")),
+                "XP / hr", this.short(xpBest.xpHr), xpBest.netHr !== 0 ? this.signed(xpBest.netHr) + "/hr" : "")
+            : heroCard("✨ Best xp now", "The forge is cold", "No method unlocked yet — the ladder starts at level 1 air runes.", null, null, null)}
+        </div>
+        {breaks.length > 0 && (
+          <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
+            <Kicker color={TH.accent}>⚡ Your next breakpoints — what one more grind unlocks</Kicker>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12, marginTop: 10 }}>
+              {breaks.map((b, i) => (
+                <div key={i} style={{ background: C.cardLight, padding: "10px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                    <span style={cinzel({ fontWeight: 700, fontSize: 15 })}>{b.at} RC</span>
+                    <Tag color={TH.accent} bg="rgba(68,84,158,.12)">×{b.mult} {b.rune.replace(/ rune$/, "")}s</Tag>
+                  </div>
+                  <div style={{ ...serif({ fontSize: 12, fontStyle: "normal", color: C.muted }), marginTop: 4 }}>
+                    {b.gainHr > 0 ? <>jumps to <strong style={{ color: C.green }}>{this.signed(b.newHr)}/hr</strong> ({this.signed(b.gainHr)})</> : "unlocks the craft"}
+                    {b.days != null ? <span style={mono({ fontSize: 10, color: C.muted2 })}> · ≈{this.fmtDays(b.days)} at your pace</span> : ""}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+        <Card>
+          <Kicker color={TH.accent}>The forge ledger · {liveN > 0 ? liveN + " live quotes" : "snapshot prices — hit ⟳ Live prices"} · afford &amp; est. total use your logged cash {this.short(d.cash)}</Kicker>
+          <div className="sheetwrap" style={{ marginTop: 10 }}>
+            <table className="sheet">
+              <thead><tr>
+                {th("Craft")}{th("Lvl", "lvl", true)}{th("Route")}{th("×", null, true)}{th("Profit/ess", "ess", true)}{th("gp/xp", "gpxp", true)}{th("Net/hr", "nethr", true)}{th("XP/hr", "xphr", true)}{th("Afford (ess)", null, true)}{th("Est. total", "total", true)}{th("Age", null, true)}
+              </tr></thead>
+              <tbody>{sorted.map((r) => {
+                const open = this.state.rcOpen === r.id;
+                const lockStyle = r.unlocked ? {} : { opacity: 0.45 };
+                return (
+                  <React.Fragment key={r.id}>
+                    <tr style={lockStyle}>
+                      <td onClick={() => this.setState({ rcOpen: open ? "" : r.id })} style={{ cursor: "pointer", whiteSpace: "nowrap" }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                          {r.rune ? <Icon url={itemIconUrl(r.rune)} name={r.rune} size={20} /> : <span style={mono({ fontSize: 12 })}>✨</span>}
+                          <span style={cinzel({ fontWeight: 600, fontSize: 13.5 })}>{r.name}</span>
+                          {r.unpriced && <Tag color={C.muted2} bg="rgba(44,32,19,.08)">XP · unpriced</Tag>}
+                          {r.kind === "direct" && <Tag color={C.green} bg="rgba(92,110,53,.12)">no GE input</Tag>}
+                          {r.measured && <Tag color={TH.accent} bg="rgba(68,84,158,.12)">your rate</Tag>}
+                          <span style={mono({ fontSize: 9, color: C.muted2 })}>{open ? "▾" : "▸"}</span>
+                        </span>
+                      </td>
+                      <td className="num"><Tag color={r.gate.lvlOk ? C.green : C.red} bg={r.gate.lvlOk ? "rgba(92,110,53,.14)" : "rgba(150,58,44,.12)"}>{r.lvl}</Tag></td>
+                      <td style={{ maxWidth: 250, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.via}>
+                        {r.gate.quests.length > 0
+                          ? <span onClick={(e) => { e.stopPropagation(); this.go("quests"); }} style={{ ...mono({ fontSize: 10.5 }), color: C.red, cursor: "pointer" }} title="blocked by a quest — open the Quest Sequencer">🔒 {r.gate.quests[0]} →</span>
+                          : r.gate.abyssBlocked
+                            ? <span style={{ ...mono({ fontSize: 10.5 }), color: "#9a7530" }}>needs the Abyss — enable in SETUP</span>
+                            : <span style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted })}>{r.via}</span>}
+                      </td>
+                      <td className="num" style={mono({ fontSize: 12, fontWeight: 600, color: r.mult > 1 ? C.green : C.muted })}>{r.kind === "craft" ? "×" + r.mult : "—"}</td>
+                      <td className="num" style={mono({ fontSize: 12, fontWeight: 600, color: r.profitEss == null ? C.muted : r.profitEss >= 0 ? C.green : C.red })}>{r.profitEss == null ? "—" : (r.profitEss >= 0 ? "+" : "−") + Math.abs(r.profitEss)}</td>
+                      <td className="num" style={mono({ fontSize: 12, color: r.gpXp == null ? C.muted : r.gpXp >= 0 ? C.green : "#9a6a3a" })}>{r.gpXp == null ? "—" : (r.gpXp >= 0 ? "+" : "−") + Math.abs(r.gpXp).toFixed(1)}</td>
+                      <td className="num">{r.unpriced ? <span style={mono({ fontSize: 11, color: C.muted })}>—</span> : <><div style={mono({ fontSize: 12, color: r.netHr >= 0 ? C.ink : C.red })}>{this.signed(r.netHr)}</div>{r.netHr > 0 && <Bar pct={Math.min(100, (r.netHr / maxHr) * 100)} c1={TH.accent} c2={TH.lite} h={4} />}</>}</td>
+                      <td className="num" style={mono({ fontSize: 12 })}>{r.xpHr > 0 ? this.short(r.xpHr) : "—"}</td>
+                      <td className="num" style={mono({ fontSize: 12, color: r.afford > 0 ? C.ink : C.muted })}>{r.afford > 0 ? this.fmt(r.afford) : "—"}</td>
+                      <td className="num" title="profit/ess × the essence you can buy right now (essence buy limit AND your logged cash)" style={mono({ fontSize: 12, fontWeight: 600, color: r.estTotal == null || r.afford <= 0 ? C.muted : r.estTotal >= 0 ? C.green : C.red })}>{r.estTotal != null && r.afford > 0 ? this.signed(r.estTotal) : "—"}</td>
+                      <td className="num" style={mono({ fontSize: 11, color: r.ageMax != null && r.ageMax > 30 ? C.red : C.muted })}>{r.ageMax != null ? r.ageMax + "m" : r.live ? "live" : "snap"}</td>
+                    </tr>
+                    {open && this.rcAuditRow(r, TH)}
+                  </React.Fragment>
+                );
+              })}</tbody>
+            </table>
+          </div>
+          <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>
+            Runes insta-sell minus the 2% GE tax (cheap elementals under the 50 gp floor are tax-exempt); essence buys at the ask. Locked rows show WHY: level (red), a quest from your own log (🔒 click → Quest Sequencer), or the Abyss toggle. Click any craft for its full trip math.
+          </div>
+        </Card>
+      </div>
+    );
+  }
+  // The expanded audit panel: trip math → breakpoint → per-essence arithmetic
+  // → whole-restock totals. Nothing taken on faith.
+  rcAuditRow(r, TH) {
+    const t = this.rcEssPerTrip();
+    const nb = this.rcNextBreak(r);
+    return (
+      <tr>
+        <td colSpan={11} style={{ padding: "10px 14px", background: "rgba(68,84,158,.07)", borderTop: `2px solid ${TH.accent}44`, borderBottom: `2px solid ${TH.accent}44` }}>
+          {r.kind === "craft" || (r.kind === "xponly" && r.xpEss) ? (
+            <div style={{ display: "flex", gap: 30, flexWrap: "wrap" }}>
+              <div style={{ maxWidth: 340 }}>
+                <div style={mono({ fontSize: 9, letterSpacing: ".12em", color: TH.accent, textTransform: "uppercase", marginBottom: 5 })}>Trip math</div>
+                <div style={serif({ fontSize: 12, fontStyle: "normal" })}>
+                  28 slots − {t.n} pouch{t.n === 1 ? "" : "es"} + {t.used.length ? t.used.map((p) => p.name.split(" ")[0].toLowerCase() + " " + p.holds).join(" + ") : "nothing held"} = <strong>{t.ess} essence/trip</strong>
+                </div>
+                <div style={serif({ fontSize: 12, fontStyle: "normal", marginTop: 3 })}>
+                  × {r.trips} trips/hr <span style={mono({ fontSize: 10, color: r.measured ? TH.accent : C.muted })}>({r.measured ? "your measured rate" : "book — adopt yours from the run log"})</span> = <strong>{this.fmt(r.essHr)} ess/hr</strong>
+                </div>
+                <div style={serif({ fontSize: 12, fontStyle: "normal", marginTop: 3 })}>
+                  {r.kind === "craft" ? <>breakpoint <strong style={{ color: r.mult > 1 ? C.green : C.ink }}>×{r.mult}</strong> at your level {this.rcLvl}{nb ? <span style={mono({ fontSize: 10, color: C.muted2 })}> · next: ×{nb[1]} at {nb[0]}</span> : " · maxed"} → <strong>{this.fmt(r.runesHr)} runes/hr</strong></> : "combo runes are vendor trash — this row is priced as pure xp cost"}
+                </div>
+              </div>
+              <div style={{ maxWidth: 360 }}>
+                <div style={mono({ fontSize: 9, letterSpacing: ".12em", color: TH.accent, textTransform: "uppercase", marginBottom: 5 })}>Per essence</div>
+                <div style={serif({ fontSize: 12, fontStyle: "normal" })}>
+                  {r.kind === "craft"
+                    ? <>{r.mult} × {this.fmt(r.sellEa)} ({r.rune} after tax) − {this.fmt(r.essCost)} essence{r.extras > 0 ? " − " + r.extras + " extras" : ""} = <strong style={{ color: r.profitEss >= 0 ? C.green : C.red }}>{(r.profitEss >= 0 ? "+" : "−") + Math.abs(r.profitEss)}/ess</strong> · {r.xpEss} xp</>
+                    : <>{this.fmt(r.essCost)} essence + {r.extras} extras (earth runes · {this.rccfg.imbue ? "Magic Imbue, no talismans" : "talismans"} · necklace charges) = <strong style={{ color: C.red }}>−{Math.abs(r.profitEss)}/ess</strong> · {r.xpEss} xp</>}
+                </div>
+                {r.afford > 0 && r.kind === "craft" && (
+                  <div style={{ ...serif({ fontSize: 12, fontStyle: "normal" }), marginTop: 6 }}>
+                    <span style={mono({ fontSize: 9, letterSpacing: ".12em", color: TH.accent, textTransform: "uppercase" })}>A full restock · </span>
+                    {this.fmt(r.afford)} essence → {this.fmt(r.afford * r.mult)} runes sell for {this.fmt(r.afford * r.mult * r.sellEa)} − {this.fmt(r.afford * r.essCost)} essence = <strong style={{ color: r.estTotal >= 0 ? C.green : C.red }}>{this.signed(r.estTotal)}</strong>{r.sustainHrs ? <span style={mono({ fontSize: 10, color: C.muted2 })}> · {r.sustainHrs.toFixed(1)}h of crafting</span> : null}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.ink })}>
+              {r.kind === "direct"
+                ? <>{this.fmt(r.runesHr)} runes/hr <span style={mono({ fontSize: 10, color: r.measured ? TH.accent : C.muted })}>({r.measured ? "your measured rate" : "book — adopt yours from the run log"})</span> × {this.fmt(r.sellEa)} ({r.rune} after tax) = <strong style={{ color: C.green }}>{this.signed(r.netHr)}/hr</strong>. No GE input — you mine the dense blocks yourself; the trade-off is slow xp ({this.short(r.xpHr)}/hr).</>
+                : <>{this.short(r.xpHr)} xp/hr, book rate. Output ({r.id === "gotr" ? "reward-shop pearls, pouches, needle" : "random runes"}) is real but honestly <strong>not priced</strong> in this ledger — the row competes on xp only.</>}
+            </div>
+          )}
+        </td>
+      </tr>
+    );
+  }
+  renderRcSetup(TH) {
+    const cfg = this.rccfg, lvl = this.rcLvl;
+    const setupCell = { background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" };
+    const t = this.rcEssPerTrip();
+    const sel = (k, cur, opts) => (
+      <select className="led" defaultValue={cur} onChange={(e) => this.setRcOpt(k, e.target.value)} style={{ width: "100%", marginTop: 6 }}>
+        {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+    );
+    const hint = (txt) => <div style={serif({ fontSize: 10.5, fontStyle: "normal", color: C.muted, marginTop: 4 })}>{txt}</div>;
+    return (
+      <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
+        <Kicker color={TH.accent}>⚒ Pouches &amp; logistics — every toggle re-runs the whole ledger</Kicker>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 12, marginTop: 12 }}>
+          <div style={{ ...setupCell, gridColumn: "span 2" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><Kicker>Essence pouches</Kicker><Tag color={TH.accent} bg="rgba(68,84,158,.12)">{t.ess} ess / trip</Tag></div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+              {POUCHES.map((p) => {
+                const usable = lvl >= p.lvl, on = !!cfg[p.key];
+                return (
+                  <div key={p.key} onClick={() => usable && this.setRcOpt(p.key, on ? "no" : "yes")}
+                    title={usable ? p.name + " holds " + p.holds : p.name + " needs " + p.lvl + " RC"}
+                    style={{ padding: "7px 12px", borderRadius: 6, cursor: usable ? "pointer" : "default", opacity: usable ? 1 : 0.4, border: `2px solid ${on && usable ? TH.accent : "rgba(44,32,19,.18)"}`, background: on && usable ? "rgba(68,84,158,.10)" : "transparent" }}>
+                    <div style={cinzel({ fontWeight: 700, fontSize: 12.5 })}>{on && usable ? "✓ " : ""}{p.name}</div>
+                    <div style={mono({ fontSize: 9.5, color: C.muted })}>+{p.holds} ess · lvl {p.lvl}</div>
+                  </div>
+                );
+              })}
+            </div>
+            {hint("28 slots − one per pouch carried + what they hold. Pouches you own but can't use yet (level) are ignored automatically.")}
+          </div>
+          <div style={setupCell}><Kicker>The Abyss</Kicker>{sel("abyss", cfg.abyss !== false ? "yes" : "no", [["yes", "Unlocked (Enter the Abyss)"], ["no", "Not unlocked"]])}{hint("The fast route to cosmic/chaos/nature/law/death altars. Off locks those rows honestly instead of pretending altar-run rates.")}</div>
+          <div style={setupCell}><Kicker>Magic Imbue</Kicker>{sel("imbue", cfg.imbue ? "yes" : "no", [["no", "No (talismans consumed)"], ["yes", "Yes (Lunar spell)"]])}{hint("Removes the consumed talisman from combination-rune costs (lavas).")}</div>
+          <div style={{ ...setupCell, gridColumn: "span 2" }}>
+            <Kicker>Trip &amp; gather rates</Kicker>
+            {hint("Book defaults ship with each route. The honest override is measurement: log timed runs and hit “Adopt” in the RUN LOG — the ledger then carries a “your rate” tag on that row.")}
+            {(Object.keys(cfg.tripsOv).length > 0 || Object.keys(cfg.directOv).length > 0) && (
+              <div style={{ ...mono({ fontSize: 10.5, color: TH.accent }), marginTop: 6 }}>
+                adopted: {Object.entries(cfg.tripsOv).map(([k, v]) => k + " " + v + " trips/hr").concat(Object.entries(cfg.directOv).map(([k, v]) => k + " " + this.fmt(v) + " runes/hr")).join(" · ")}
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
+    );
+  }
+  renderRcLog(TH) {
+    const log = this.logs.rc || [];
+    const R = this.rcReality();
+    const tot = { runes: log.reduce((a, x) => a + (x.runes || 0), 0), net: log.reduce((a, x) => a + (x.net || 0), 0), xp: log.reduce((a, x) => a + (x.xp || 0), 0) };
+    return (
+      <div>
+        <StatCards cols={4} items={[
+          { label: "Runs logged", value: "" + log.length },
+          { label: "Runes crafted", value: tot.runes ? this.fmt(tot.runes) : "—" },
+          { label: "Net gp", value: log.length ? this.signed(tot.net) : "—", color: tot.net >= 0 ? C.green : C.red },
+          { label: "Runecraft XP", value: tot.xp ? this.short(tot.xp) : "—" },
+        ]} />
+        {this.state.openForm === "rc" && (
+          <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <div><div style={mono({ fontSize: 8.5, letterSpacing: ".12em", color: C.muted, textTransform: "uppercase", marginBottom: 3 })}>Craft</div>
+                <select className="led" id="rc_row" style={{ width: 200 }}>{this.rcLogNames().map((n) => <option key={n} value={n}>{n}</option>)}</select></div>
+              {this.field("rc_runes", "Runes crafted", { w: 110 })}{this.field("rc_ess", "Essence (opt)", { w: 110 })}{this.field("rc_mins", "Minutes (opt)", { w: 100 })}{this.field("rc_net", "Net gp (opt)", { w: 120 })}{this.field("rc_note", "Note", { w: 140 })}
+              <Btn tone="gold" onClick={this.addRc}>Save</Btn>
+            </div>
+            <div style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Leave <strong>Essence</strong> blank to derive it from runes ÷ your multiplier, and <strong>Net gp</strong> blank to price the run from today's live model (frozen once logged). Minutes make the run a measured rate you can adopt below.</div>
+          </Card>
+        )}
+        {R.length > 0 && (
+          <Card style={{ marginBottom: 14 }}>
+            <Kicker color={TH.accent}>Your forge vs the model — realized runs against today's live prices</Kicker>
+            <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+              <thead><tr>{["Craft", "Runs", "Runes", "Net", "Your runes/hr", "Model", "Your trips/hr", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i > 0 ? "right" : "left", padding: "6px 8px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
+              <tbody>{R.map((p, i) => (
+                <tr key={i}>
+                  <td style={{ ...serif({ fontSize: 13 }), padding: "6px 8px" }}>{p.row}</td>
+                  <td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{p.n}</td>
+                  <td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{this.fmt(p.runes)}</td>
+                  <td style={{ ...mono({ fontSize: 12, fontWeight: 600, color: p.net >= 0 ? C.green : C.red }), padding: "6px 8px", textAlign: "right" }}>{this.signed(p.net)}</td>
+                  <td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{p.runesHr != null ? this.fmt(p.runesHr) : "—"}</td>
+                  <td style={{ ...mono({ fontSize: 12, color: C.muted }), padding: "6px 8px", textAlign: "right" }}>{p.modelRunesHr != null ? this.fmt(p.modelRunesHr) : "—"}</td>
+                  <td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{p.tripsHr != null ? p.tripsHr : "—"}</td>
+                  <td style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap" }}>{(p.tripsHr > 0 || (p.m && p.m.kind === "direct" && p.runesHr > 0)) && <Btn tone="quiet" onClick={() => this.adoptRcRate(p)}>Adopt rate</Btn>}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </Card>
+        )}
+        <Card>
+          <Kicker color={TH.accent}>Run log</Kicker>
+          {log.length === 0 && <div style={serif({ fontSize: 12.5, color: C.muted, marginTop: 8 })}>No runs yet — hit “+ Log forge run” after a crafting stint and the Forge starts grading its book rates against your reality.</div>}
+          {log.length > 0 && (
+            <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+              <thead><tr>{["Date", "Craft", "Runes", "Ess", "Mins", "Net", "XP", ""].map((h, i) => <th key={i} style={{ ...mono({ fontSize: 9, color: C.muted }), textAlign: i > 1 && i < 7 ? "right" : "left", padding: "6px 8px", borderBottom: "2px solid rgba(44,32,19,.2)" }}>{h}</th>)}</tr></thead>
+              <tbody>{log.map((e, i) => this.isEditingLog("rc", i) ? this.logEditorRow("rc", i, 8) : (
+                <tr key={i}>
+                  <td style={{ ...mono({ fontSize: 11 }), padding: "6px 8px" }}>{this.dShort(e.date)}</td>
+                  <td style={{ ...serif({ fontSize: 13 }), padding: "6px 8px" }}>{e.row}{e.note ? <span style={mono({ fontSize: 10, color: C.muted2 })}> · {e.note}</span> : null}</td>
+                  <td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{this.fmt(e.runes)}</td>
+                  <td style={{ ...mono({ fontSize: 12, color: C.muted }), padding: "6px 8px", textAlign: "right" }}>{e.ess != null ? this.fmt(e.ess) : "—"}</td>
+                  <td style={{ ...mono({ fontSize: 12, color: C.muted }), padding: "6px 8px", textAlign: "right" }}>{e.mins != null ? e.mins : "—"}</td>
+                  <td style={{ ...mono({ fontSize: 12, fontWeight: 600, color: (e.net || 0) >= 0 ? C.green : C.red }), padding: "6px 8px", textAlign: "right" }}>{this.signed(e.net || 0)}</td>
+                  <td style={{ ...mono({ fontSize: 12 }), padding: "6px 8px", textAlign: "right" }}>{this.short(e.xp || 0)}</td>
+                  <td style={{ padding: "6px 8px", whiteSpace: "nowrap", textAlign: "right" }}>{this.editLogBtn("rc", i)}<span onClick={() => this.delLog("rc", i)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 11 }) }}>✕</span></td>
                 </tr>
               ))}</tbody>
             </table>
