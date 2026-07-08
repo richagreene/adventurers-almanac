@@ -2035,7 +2035,7 @@ export default class Almanac extends React.Component {
         <main style={{ flex: 1, minWidth: 0, minHeight: "100vh", background: "#e9dcbf", backgroundImage: `radial-gradient(circle at 15% 0%, rgba(255,250,235,.55), transparent 45%), radial-gradient(circle at 85% 6%, ${TH.accent}1f, transparent 42%), radial-gradient(circle at 85% 100%, rgba(150,120,70,.16), transparent 50%)`, transition: "background-image .4s ease" }}>
           {/* header + RSN bar */}
           <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: mobile ? 8 : 16, padding: mobile ? "10px 12px" : "14px 30px", borderBottom: `2px solid ${TH.accent}`, boxShadow: `inset 0 -4px 0 -2px ${TH.accent}55`, background: "linear-gradient(180deg, rgba(231,217,184,.97), rgba(231,217,184,.85))", position: "sticky", top: 0, zIndex: 25 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: mobile ? 9 : 13, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: mobile ? 9 : 13, minWidth: 0, flexShrink: mobile ? 1 : 0 }}>
               {mobile && <Btn tone="quiet" onClick={() => this.setState((s) => ({ navOpen: !s.navOpen }))} style={{ fontSize: 16, padding: "7px 11px" }}>☰</Btn>}
               {!mobile && <div style={{ width: 34, height: 34, borderRadius: 8, flex: "0 0 34px", background: `linear-gradient(140deg, ${TH.g1}, ${TH.g2})`, border: `1px solid ${TH.accent}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, boxShadow: `0 0 12px ${TH.accent}44` }}>{TH.icon}</div>}
               {!mobile && (
@@ -2804,13 +2804,27 @@ export default class Almanac extends React.Component {
     const farmLvlDash = (sm.Farming || { l: 1 }).l;
     const herbBest = Math.max(0, ...this.farmDefs.filter((f) => farmLvlDash >= f.lvl).map((f) => this.farmNet(f)));
     const flipNet = d.logs.flips.map((f) => this.computeFlip(f)).reduce((a, f) => a + f.net, 0);
+    // The money meta pulls EVERY earner engine in the app — alch, slayer,
+    // bossing, farm runs, the Apothecary, the Rune Forge, and your realized
+    // flip ROI — priced live at your level/gates, ranked best-first.
+    const mixTop = this.mixBest(d.cash).profit;
+    const rcTop = this.rcBest(d.cash).profit;
+    let flipRoi = 0, flipCycle = 0;
+    if (d.logs.flips.length && d.cash > 0) {
+      let rs = 0, rn = 0;
+      d.logs.flips.forEach((f) => { try { const c = this.computeFlip(f); if (c && isFinite(c.roi)) { rs += c.roi; rn++; } } catch (e) {} });
+      if (rn) { flipRoi = rs / rn; flipCycle = Math.round((d.cash * flipRoi) / 100); }
+    }
     const money = [
-      { name: "High Alchemy", note: "magic XP + steady gp, AFK-friendly", rate: this.short(alchBest), unit: "gp / hr", c: C.purple, skill: "Magic" },
-      { name: "Slayer (after blocks)", note: slay.blocked + " tasks blocked", rate: this.short(slay.gp), unit: "loot / hr", c: C.red, skill: "Slayer" },
-      { name: "Best boss (open now)", note: "scaled to your combat & slayer", rate: this.short(accBoss), unit: "gp / hr", c: C.teal, skill: "Hitpoints" },
-      { name: "Herb run", note: "~5 min, best unlocked tier", rate: this.short(herbBest), unit: "gp / run", c: C.green, skill: "Farming" },
-    ];
-    const bestNow = money.slice(0, 3).reduce((b, m) => (this.parseNum(m.rate) > this.parseNum(b.rate) ? m : b));
+      { gp: alchBest, name: "High Alchemy", note: "magic XP + steady gp, AFK-friendly", unit: "gp / hr", c: C.purple, skill: "Magic", goto: "alchemy" },
+      { gp: slay.gp, name: "Slayer (after blocks)", note: slay.blocked + " tasks blocked", unit: "loot / hr", c: C.red, skill: "Slayer", goto: "slayer" },
+      { gp: accBoss, name: "Best boss (open now)", note: "scaled to your combat & slayer", unit: "gp / hr", c: C.teal, skill: "Hitpoints", goto: "bossing" },
+      { gp: herbBest, name: "Herb run", note: "~5 min, best unlocked tier", unit: "gp / run", c: C.green, skill: "Farming", goto: "farming" },
+      mixTop && mixTop.netHr > 0 ? { gp: mixTop.netHr, name: "Herblore · " + mixTop.name, note: "the Apothecary's best mix at your level", unit: "gp / hr", c: themeFor("herblore").accent, skill: "Herblore", goto: "herblore" } : null,
+      rcTop && rcTop.netHr > 0 ? { gp: rcTop.netHr, name: "Runecraft · " + rcTop.name, note: (rcTop.mult > 1 ? "×" + rcTop.mult + " runes · " : "") + "the Rune Forge's best craft", unit: "gp / hr", c: themeFor("runecraft").accent, skill: "Runecraft", goto: "runecraft" } : null,
+      flipCycle > 0 ? { gp: flipCycle, name: "GE Flipping", note: flipRoi.toFixed(1) + "% realized ROI on your ledger × current cash", unit: "gp / cycle", c: C.gold, skill: "", goto: "flipping" } : null,
+    ].filter(Boolean).map((m) => ({ ...m, rate: this.short(m.gp) })).sort((a, b) => b.gp - a.gp);
+    const bestNow = money.filter((m) => /hr/.test(m.unit))[0] || money[0];
     // next quest / diary
     const order = QUEST_ORDER.optimal || [];
     const byName = {}; D.quests.forEach((q) => (byName[q.n] = q));
@@ -2880,8 +2894,8 @@ export default class Almanac extends React.Component {
             <Kicker color={C.goldDeep}>💰 Money meta · earn the most now</Kicker>
             <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
               {money.map((m, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", background: C.cardLight, borderRadius: 6, border: "1px solid rgba(44,32,19,.12)", borderLeft: `4px solid ${m.c}` }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 8, flex: "0 0 36px", display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(44,32,19,.06)", border: `1px solid ${m.c}44` }}><Icon url={skillIconUrl(m.skill)} name={m.skill} size={22} /></div>
+                <div key={i} onClick={() => this.go(m.goto)} title={"open " + m.goto} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", background: C.cardLight, borderRadius: 6, border: "1px solid rgba(44,32,19,.12)", borderLeft: `4px solid ${m.c}`, cursor: "pointer" }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 8, flex: "0 0 36px", display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(44,32,19,.06)", border: `1px solid ${m.c}44` }}>{m.skill ? <Icon url={skillIconUrl(m.skill)} name={m.skill} size={22} /> : <span style={{ fontSize: 17 }}>⚖</span>}</div>
                   <div style={{ flex: 1 }}>
                     <div style={cinzel({ fontWeight: 600, fontSize: 15, color: C.ink })}>{m.name}</div>
                     <div style={serif({ fontSize: 12, color: C.muted })}>{m.note}</div>
