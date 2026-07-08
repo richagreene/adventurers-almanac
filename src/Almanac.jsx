@@ -2337,12 +2337,12 @@ export default class Almanac extends React.Component {
     const diaryUtil = (d) => { const r = (d.reward || "").toLowerCase(); let u = { easy: 1, medium: 1.6, hard: 2.4, elite: 3.4 }[(d.tier || "").toLowerCase()] || 1; let k = 0.4; if (/unlimited teleport|unlimited/.test(r)) k = 2.2; else if (/teleport/.test(r)) k = 1.5; else if (/xp|prayer|run energy|slayer/.test(r)) k = 1.3; else if (/cosmetic|no new benefit/.test(r)) k = 0.3; return u * k; };
 
     // ---- bottleneck (reverse-dependency) graph ----
-    const locked = {}, cnt = {};
-    const addLock = (sk, v, kind) => { if (!sk) return; locked[sk] = (locked[sk] || 0) + v; if (!cnt[sk]) cnt[sk] = { quest: 0, diary: 0, boss: 0, task: 0 }; if (kind) cnt[sk][kind]++; };
-    (D.bosses || []).forEach((b) => { const gp = bossGp(b); if (gp <= 0) return; const rs = bossBlockers(b).filter((r) => r.type !== "quest"); if (!rs.length) return; const share = gp / 1e4 / rs.length; rs.forEach((r) => addLock(r.skill, share, "boss")); });
-    (D.slayer || []).forEach((t) => { if ((t.slay || 1) > (lv.slayer || 1)) addLock("slayer", (t.ev || t.gpHr || 0) / 4e4, "task"); });
-    (D.quests || []).forEach((q) => { if (isDone(q) || this.questReqsMet(q)) return; const gs = this.gateSkills(q.gate).filter((g) => (lv[g.skill] || 1) < g.lvl); if (!gs.length) return; const val = ((q.qp || 1) * 3) / gs.length; gs.forEach((g) => addLock(g.skill, val, "quest")); });
-    (D.diaries || []).forEach((d) => { if (this.diaryStatus(d) === "Done") return; const gs = this.gateSkills(d.gate).filter((g) => (lv[g.skill] || 1) < g.lvl); if (!gs.length) return; const val = (diaryUtil(d) * 2) / gs.length; gs.forEach((g) => addLock(g.skill, val, "diary")); });
+    const locked = {}, cnt = {}, gateLvls = {};
+    const addLock = (sk, v, kind, need) => { if (!sk) return; locked[sk] = (locked[sk] || 0) + v; if (!cnt[sk]) cnt[sk] = { quest: 0, diary: 0, boss: 0, task: 0 }; if (kind) cnt[sk][kind]++; if (need > (lv[sk] || 1)) (gateLvls[sk] = gateLvls[sk] || []).push(need); };
+    (D.bosses || []).forEach((b) => { const gp = bossGp(b); if (gp <= 0) return; const rs = bossBlockers(b).filter((r) => r.type !== "quest"); if (!rs.length) return; const share = gp / 1e4 / rs.length; rs.forEach((r) => addLock(r.skill, share, "boss", r.need)); });
+    (D.slayer || []).forEach((t) => { if ((t.slay || 1) > (lv.slayer || 1)) addLock("slayer", (t.ev || t.gpHr || 0) / 4e4, "task", t.slay); });
+    (D.quests || []).forEach((q) => { if (isDone(q) || this.questReqsMet(q)) return; const gs = this.gateSkills(q.gate).filter((g) => (lv[g.skill] || 1) < g.lvl); if (!gs.length) return; const val = ((q.qp || 1) * 3) / gs.length; gs.forEach((g) => addLock(g.skill, val, "quest", g.lvl)); });
+    (D.diaries || []).forEach((d) => { if (this.diaryStatus(d) === "Done") return; const gs = this.gateSkills(d.gate).filter((g) => (lv[g.skill] || 1) < g.lvl); if (!gs.length) return; const val = (diaryUtil(d) * 2) / gs.length; gs.forEach((g) => addLock(g.skill, val, "diary", g.lvl)); });
     const bottleneck = Object.keys(locked).filter((s) => s !== "combat").map((s) => ({ skill: s, val: locked[s], cnt: cnt[s] || {} })).sort((a, b) => b.val - a.val);
 
     // ---- candidate generation ----
@@ -2369,7 +2369,16 @@ export default class Almanac extends React.Component {
 
     // G. clear a bottleneck skill (top 2 by locked value)
     bottleneck.slice(0, 2).forEach((bn, i) => {
-      const sk = bn.skill, cur = lv[sk] || 1, goal = goalBy[sk], tgt = goal ? goal.tgt : Math.min(70, cur + 20), c = bn.cnt || {};
+      const sk = bn.skill, cur = lv[sk] || 1, goal = goalBy[sk], c = bn.cnt || {};
+      // Target the furthest REAL gate within a ~20-level climb (so the rung
+      // actually unblocks content), falling back to the nearest gate above the
+      // current level. A Goals-tab target only counts while it's still ahead —
+      // never suggest training a skill "down" to an already-passed level.
+      const gs2 = (gateLvls[sk] || []).sort((a, b) => a - b);
+      const within = gs2.filter((l) => l <= cur + 20);
+      const nextGate = within.length ? within[within.length - 1] : gs2[0];
+      const tgt = Math.min(99, goal && goal.tgt > cur ? goal.tgt : nextGate || cur + 5);
+      if (tgt <= cur) return;
       const parts = []; if (c.boss) parts.push(c.boss + " boss" + (c.boss > 1 ? "es" : "")); if (c.task) parts.push(c.task + " slayer task" + (c.task > 1 ? "s" : "")); if (c.quest) parts.push(c.quest + " quest" + (c.quest > 1 ? "s" : "")); if (c.diary) parts.push(c.diary + " diar" + (c.diary > 1 ? "ies" : "y"));
       const blurb = parts.join(", ") || "downstream content";
       push({ domain: "train", skill: sk, title: "Train " + cap(sk) + " " + cur + " → " + tgt, gpHr: 0, xpHr: Math.max(0, goal ? goal.xpHr : 20000), rawLev: Math.sqrt(bn.val) * (i === 0 ? 13 : 9), fit: goal ? 100 : 60, access: 100, metric: "unblocks " + (parts[0] || "content"), why: cap(sk) + " sits at " + cur + " — " + (i === 0 ? "the single deepest lock on your account" : "a major lock") + ". It gates " + blurb + ". Nothing else you do compounds this hard.", goto: "skills" });
@@ -2962,11 +2971,15 @@ export default class Almanac extends React.Component {
   renderSkills() {
     const d = this.derive();
     const TH = themeFor("skills");
+    const M = !!this.state.mobile;
+    // On mobile the grid runs two-up with compact cards, so the xp countdowns
+    // use short units (28.5K) instead of full figures — same facts, half the ink.
+    const nfmt = (v) => (M ? this.short(v) : this.fmt(v));
     const cards = this.skillsRaw.map(([name, level, xp]) => {
       const base = this.xpFor(level), next = this.xpFor(level + 1), need99 = this.xpFor(99);
       const into = xp - base, span = next - base;
       const pctNext = level >= 99 ? 1 : Math.max(0, Math.min(1, span > 0 ? into / span : 0));
-      return { name, level, xp, color: this.skillColor(level), barW: pctNext * 100, toNext: level >= 99 ? "maxed" : this.fmt(next - xp) + " to " + (level + 1), to99: level >= 99 ? "★ 99" : this.fmt(need99 - xp) + " to 99" };
+      return { name, level, xp, color: this.skillColor(level), barW: pctNext * 100, toNext: level >= 99 ? "maxed" : nfmt(next - xp) + " to " + (level + 1), to99: level >= 99 ? "★ 99" : nfmt(need99 - xp) + " to 99" };
     });
     // Mastery spread by level band.
     const bands = [
@@ -3009,23 +3022,23 @@ export default class Almanac extends React.Component {
             ))}
           </div>
         </Card>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px,1fr))", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: M ? "repeat(2, 1fr)" : "repeat(auto-fill, minmax(320px,1fr))", gap: M ? 8 : 12 }}>
           {cards.map((s) => (
-            <Card key={s.name} pad={14}>
-              <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-                <div style={{ width: 38, height: 38, borderRadius: 8, flex: "0 0 38px", display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(44,32,19,.06)", border: `1px solid ${s.color}44` }}>
-                  <Icon url={skillIconUrl(s.name)} name={s.name} size={24} />
+            <Card key={s.name} pad={M ? 10 : 14}>
+              <div style={{ display: "flex", alignItems: "center", gap: M ? 8 : 11 }}>
+                <div style={{ width: M ? 30 : 38, height: M ? 30 : 38, borderRadius: 8, flex: `0 0 ${M ? 30 : 38}px`, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(44,32,19,.06)", border: `1px solid ${s.color}44` }}>
+                  <Icon url={skillIconUrl(s.name)} name={s.name} size={M ? 20 : 24} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={cinzel({ fontWeight: 700, fontSize: 16, color: C.ink })}>{s.name}</div>
-                  <div style={mono({ fontSize: 10, color: C.muted })}>{this.fmt(s.xp)} xp</div>
+                  <div style={{ ...cinzel({ fontWeight: 700, fontSize: M ? 12.5 : 16, color: C.ink }), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name}</div>
+                  <div style={mono({ fontSize: M ? 8.5 : 10, color: C.muted })}>{M ? this.short(s.xp) : this.fmt(s.xp)} xp</div>
                 </div>
-                <div style={cinzel({ fontWeight: 800, fontSize: 26, color: s.color })}>{s.level}</div>
+                <div style={cinzel({ fontWeight: 800, fontSize: M ? 20 : 26, color: s.color })}>{s.level}</div>
               </div>
-              <div style={{ marginTop: 11 }}><Bar pct={s.barW} c1={s.color} c2={s.color} h={6} /></div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5 }}>
-                <span style={mono({ fontSize: 9.5, color: C.muted })}>{s.toNext}</span>
-                <span style={mono({ fontSize: 9.5, color: C.muted })}>{s.to99}</span>
+              <div style={{ marginTop: M ? 8 : 11 }}><Bar pct={s.barW} c1={s.color} c2={s.color} h={M ? 5 : 6} /></div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: M ? 4 : 5, gap: 6 }}>
+                <span style={mono({ fontSize: M ? 8.5 : 9.5, color: C.muted, whiteSpace: "nowrap" })}>{s.toNext}</span>
+                <span style={mono({ fontSize: M ? 8.5 : 9.5, color: C.muted, whiteSpace: "nowrap" })}>{s.to99}</span>
               </div>
             </Card>
           ))}
