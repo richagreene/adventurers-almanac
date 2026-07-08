@@ -442,7 +442,7 @@ export const LEDGER_DATA = {
    "key": "Ancient Magicks (Ice Barrage)"
   },
   {
-   "n": "Desert Treasure II - The Fall of Jhallan",
+   "n": "Desert Treasure II - The Fallen Empire",
    "series": "Desert",
    "mem": "Mem",
    "qp": 5,
@@ -766,15 +766,6 @@ export const LEDGER_DATA = {
    "key": "Temple of Light"
   },
   {
-   "n": "Within the Light",
-   "series": "Elf",
-   "mem": "Mem",
-   "qp": 2,
-   "status": "Stat-ready",
-   "gate": "",
-   "key": "Prifddinas access path"
-  },
-  {
    "n": "Song of the Elves",
    "series": "Elf",
    "mem": "Mem",
@@ -782,15 +773,6 @@ export const LEDGER_DATA = {
    "status": "Blocked",
    "gate": "Herblore 70, Hunter 70, Mining 70, Smithing 70, Woodcutting 70",
    "key": "Prifddinas, Bow of Faerdhinen, Zalcano"
-  },
-  {
-   "n": "Recipe for Disaster",
-   "series": "Misc",
-   "mem": "Mem",
-   "qp": 10,
-   "status": "Blocked",
-   "gate": "Herblore 31, Fishing 50, Cooking 70",
-   "key": "Barrows gloves"
   },
   {
    "n": "Dragon Slayer II",
@@ -830,15 +812,6 @@ export const LEDGER_DATA = {
   },
   {
    "n": "Contact!",
-   "series": "Desert",
-   "mem": "Mem",
-   "qp": 1,
-   "status": "Stat-ready",
-   "gate": "",
-   "key": "-"
-  },
-  {
-   "n": "Dealing with Scabaras",
    "series": "Desert",
    "mem": "Mem",
    "qp": 1,
@@ -1036,7 +1009,7 @@ export const LEDGER_DATA = {
    "key": "Keldagrim access"
   },
   {
-   "n": "Forgettable Tale of a Drunken Dwarf",
+   "n": "Forgettable Tale...",
    "series": "Dwarf",
    "mem": "Mem",
    "qp": 2,
@@ -1403,6 +1376,510 @@ export const LEDGER_DATA = {
    "status": "Stat-ready",
    "gate": "",
    "key": "Fossil Island access"
+  },
+  {
+   "n": "Recipe for Disaster - Another Cook's Quest",
+   "series": "Recipe for Disaster",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Cooking 10",
+   "key": "Starts RFD — the banquet is frozen"
+  },
+  {
+   "n": "Recipe for Disaster - Mountain Dwarf",
+   "series": "Recipe for Disaster",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Culinaromancer’s gloves tier"
+  },
+  {
+   "n": "Recipe for Disaster - Wartface & Bentnoze",
+   "series": "Recipe for Disaster",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Culinaromancer’s gloves tier"
+  },
+  {
+   "n": "Recipe for Disaster - Pirate Pete",
+   "series": "Recipe for Disaster",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Cooking 31",
+   "key": "Culinaromancer’s gloves tier"
+  },
+  {
+   "n": "Recipe for Disaster - Lumbridge Guide",
+   "series": "Recipe for Disaster",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Cooking 40",
+   "key": "Culinaromancer’s gloves tier"
+  },
+  {
+   "n": "Recipe for Disaster - Evil Dave",
+   "series": "Recipe for Disaster",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Cooking 25",
+   "key": "Culinaromancer’s gloves tier"
+  },
+  {
+   "n": "Recipe for Disaster - Skrach Uglogwee",
+   "series": "Recipe for Disaster",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Cooking 41, Firemaking 20",
+   "key": "Culinaromancer’s gloves tier"
+  },
+  {
+   "n": "Recipe for Disaster - Sir Amik Varze",
+   "series": "Recipe for Disaster",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Needs Legends’ Quest started"
+  },
+  {
+   "n": "Recipe for Disaster - King Awowogei",
+   "series": "Recipe for Disaster",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Cooking 70, Agility 48",
+   "key": "Culinaromancer’s gloves tier"
+  },
+  {
+   "n": "Recipe for Disaster - Culinaromancer",
+   "series": "Recipe for Disaster",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Barrows gloves · 175 QP required"
+  },
+  {
+   "n": "Clock Tower",
+   "series": "Misc",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Ardougne novice"
+  },
+  {
+   "n": "Monk's Friend",
+   "series": "Misc",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Ardougne novice"
+  },
+  {
+   "n": "Scorpion Catcher",
+   "series": "Camelot",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Prayer 31",
+   "key": "Needs Alfred Grimhand’s Barcrawl"
+  },
+  {
+   "n": "Ratcatchers",
+   "series": "Misc",
+   "mem": "Mem",
+   "qp": 2,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Rat pits"
+  },
+  {
+   "n": "King's Ransom",
+   "series": "Camelot",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Magic 45, Defence 65",
+   "key": "Knight Waves → Chivalry & Piety"
+  },
+  {
+   "n": "Rag and Bone Man I",
+   "series": "Morytania",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Odd Old Man"
+  },
+  {
+   "n": "Rag and Bone Man II",
+   "series": "Morytania",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Slayer 40, Defence 20",
+   "key": "Bonesack"
+  },
+  {
+   "n": "Tears of Guthix",
+   "series": "Misc",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Firemaking 49, Crafting 20, Mining 20",
+   "key": "Weekly xp lamp minigame · 43 QP required"
+  },
+  {
+   "n": "Temple of the Eye",
+   "series": "Misc",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Runecraft 10",
+   "key": "Unlocks Guardians of the Rift"
+  },
+  {
+   "n": "Sleeping Giants",
+   "series": "Misc",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Smithing 15",
+   "key": "Giants’ Foundry"
+  },
+  {
+   "n": "While Guthix Sleeps",
+   "series": "Misc",
+   "mem": "Mem",
+   "qp": 5,
+   "status": "Blocked",
+   "gate": "Thieving 72, Magic 67, Agility 66, Herblore 65, Farming 65, Hunter 62",
+   "key": "180 QP required · grandmaster"
+  },
+  {
+   "n": "At First Light",
+   "series": "Varlamore",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Hunter 46, Herblore 30, Construction 27",
+   "key": "Varlamore hunting"
+  },
+  {
+   "n": "The Ribbiting Tale of a Lily Pad Labour Dispute",
+   "series": "Varlamore",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Woodcutting 15",
+   "key": "Varlamore novice"
+  },
+  {
+   "n": "Meat and Greet",
+   "series": "Varlamore",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Prayer 43",
+   "key": "Varlamore novice"
+  },
+  {
+   "n": "Ethically Acquired Antiquities",
+   "series": "Varlamore",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Thieving 25",
+   "key": "Varlamore thieving"
+  },
+  {
+   "n": "The Curse of Arrav",
+   "series": "Misc",
+   "mem": "Mem",
+   "qp": 2,
+   "status": "Blocked",
+   "gate": "Mining 64, Ranged 62, Thieving 62, Agility 61, Strength 58, Slayer 37, Prayer 43",
+   "key": "Zemouregal storyline"
+  },
+  {
+   "n": "Shadows of Custodia",
+   "series": "Varlamore",
+   "mem": "Mem",
+   "qp": 2,
+   "status": "Blocked",
+   "gate": "Slayer 54, Fishing 45, Construction 41, Hunter 36",
+   "key": "Varlamore · Lumbridge Elite diary recommended"
+  },
+  {
+   "n": "Scrambled!",
+   "series": "Varlamore",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Agility 40, Construction 38, Cooking 36, Smithing 35",
+   "key": "Varlamore"
+  },
+  {
+   "n": "The Ides of Milk",
+   "series": "Free",
+   "mem": "F2P",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "",
+   "key": "F2P novice"
+  },
+  {
+   "n": "Pandemonium",
+   "series": "Sailing",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Opens the Sailing questline"
+  },
+  {
+   "n": "Learning the Ropes",
+   "series": "Sailing",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Details pending — too new for sources"
+  },
+  {
+   "n": "Prying Times",
+   "series": "Sailing",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Sailing 12, Smithing 30",
+   "key": "Sailing"
+  },
+  {
+   "n": "Current Affairs",
+   "series": "Sailing",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Sailing 22, Fishing 10",
+   "key": "Sailing"
+  },
+  {
+   "n": "Troubled Tortugans",
+   "series": "Sailing",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "Sailing 45, Slayer 51, Hunter 45, Construction 48, Woodcutting 40, Crafting 34",
+   "key": "Sailing"
+  },
+  {
+   "n": "The Red Reef",
+   "series": "Sailing",
+   "mem": "Mem",
+   "qp": 2,
+   "status": "Blocked",
+   "gate": "Sailing 52, Smithing 48, Prayer 40",
+   "key": "Sailing"
+  },
+  {
+   "n": "The Blood Moon Rises",
+   "series": "Varlamore",
+   "mem": "Mem",
+   "qp": 1,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Details pending — too new for sources"
+  },
+  {
+   "n": "Enter the Abyss",
+   "series": "Misc",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Abyss access — the runecrafting artery"
+  },
+  {
+   "n": "Alfred Grimhand's Barcrawl",
+   "series": "Misc",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Scorpion Catcher prereq"
+  },
+  {
+   "n": "Bear Your Soul",
+   "series": "Kourend",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Soul bearer"
+  },
+  {
+   "n": "Curse of the Empty Lord",
+   "series": "Misc",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Ghostly robes"
+  },
+  {
+   "n": "Daddy's Home",
+   "series": "Misc",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "",
+   "key": "PoH starter kit"
+  },
+  {
+   "n": "The Enchanted Key",
+   "series": "Misc",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Treasure hunt"
+  },
+  {
+   "n": "Family Pest",
+   "series": "Misc",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Combined family gauntlets"
+  },
+  {
+   "n": "The Frozen Door",
+   "series": "Misc",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "",
+   "key": "GWD prelude"
+  },
+  {
+   "n": "The General's Shadow",
+   "series": "Misc",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Shadow sword"
+  },
+  {
+   "n": "His Faithful Servants",
+   "series": "Morytania",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Barrows prelude"
+  },
+  {
+   "n": "Hopespear's Will",
+   "series": "Misc",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Goblin ancestral plane"
+  },
+  {
+   "n": "In Search of Knowledge",
+   "series": "Kourend",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Forthos Dungeon"
+  },
+  {
+   "n": "Into the Tombs",
+   "series": "Desert",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Tombs of Amascut prelude"
+  },
+  {
+   "n": "Lair of Tarn Razorlor",
+   "series": "Morytania",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Salve amulet (e)"
+  },
+  {
+   "n": "Mage Arena I",
+   "series": "Misc",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "Magic 60",
+   "key": "God capes"
+  },
+  {
+   "n": "Mage Arena II",
+   "series": "Misc",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "Magic 75",
+   "key": "Imbued god capes"
+  },
+  {
+   "n": "A Night at the Theatre",
+   "series": "Morytania",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Theatre of Blood prelude"
+  },
+  {
+   "n": "Skippy and the Mogres",
+   "series": "Misc",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Mudskipper hat"
+  },
+  {
+   "n": "Barbarian Training",
+   "series": "Misc",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "",
+   "key": "Barb fishing, firemaking, herblore & smithing"
+  },
+  {
+   "n": "Vale Totems",
+   "series": "Varlamore",
+   "mem": "Mini",
+   "qp": 0,
+   "status": "Blocked",
+   "gate": "Fletching 20",
+   "key": "Fletching minigame"
   }
  ],
  "diaries": [

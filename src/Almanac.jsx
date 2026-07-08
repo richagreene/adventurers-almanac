@@ -338,6 +338,22 @@ export default class Almanac extends React.Component {
     this.goals = this._load("almanac.goals.v1", null) || this.defaultGoals.map((x) => ({ ...x }));
     this.questOv = this._load("almanac.questdone.v1", null);
     if (!this.questOv) { this.questOv = {}; (D.quests || []).forEach((q) => { if (q.status === "Done") this.questOv[q.n] = true; }); this._save("almanac.questdone.v1", this.questOv); }
+    // Migrate saved quest progress across the 2026 ledger rebuild: the RFD
+    // umbrella became its ten subquests, and two names drifted from the
+    // canonical in-game quest log.
+    {
+      const ov = this.questOv; let dirty = false;
+      if (ov["Recipe for Disaster"] != null) {
+        const done = ov["Recipe for Disaster"] === true;
+        ["Another Cook's Quest", "Mountain Dwarf", "Wartface & Bentnoze", "Pirate Pete", "Lumbridge Guide", "Evil Dave", "Skrach Uglogwee", "Sir Amik Varze", "King Awowogei", "Culinaromancer"].forEach((s) => { const k = "Recipe for Disaster - " + s; if (ov[k] == null) ov[k] = done; });
+        delete ov["Recipe for Disaster"]; dirty = true;
+      }
+      [["Desert Treasure II - The Fall of Jhallan", "Desert Treasure II - The Fallen Empire"], ["Forgettable Tale of a Drunken Dwarf", "Forgettable Tale..."]].forEach(([o, n]) => { if (ov[o] != null) { if (ov[n] == null) ov[n] = ov[o]; delete ov[o]; dirty = true; } });
+      ["Within the Light", "Dealing with Scabaras"].forEach((n) => { if (ov[n] != null) { delete ov[n]; dirty = true; } }); // RS3-only, removed
+      // Persist directly — a one-time schema migration must run even while
+      // undo capture is suspended during boot, and shouldn't be an undo step.
+      if (dirty) { try { localStorage.setItem("almanac.questdone.v1", JSON.stringify(ov)); } catch (e) {} }
+    }
     // Diary + Combat Achievement completion, user-markable (seeded from the
     // static data statuses the first time, like quests).
     this.diaryOv = this._load("almanac.diarydone.v1", null);
