@@ -66,6 +66,25 @@ export const RC_XPONLY = [
   { id: "gotr", name: "Guardians of the Rift", lvl: 27, xpHr: 40000, via: "The Temple of the Eye minigame (rewards not priced)", quests: ["Temple of the Eye"] },
 ];
 
+// Raiments of the Eye (GOTR reward shop, abyssal pearls — untradeable, so
+// ownership is config, not GE-priced): +10% bonus runes per piece worn,
+// +20% extra with the full set = ×1.6 runes. Bonus runes give no xp.
+export const RAIMENTS = [
+  { key: "rHat",    name: "Hat of the Eye" },
+  { key: "rTop",    name: "Robe top of the Eye" },
+  { key: "rBottom", name: "Robe bottoms of the Eye" },
+  { key: "rBoots",  name: "Boots of the Eye" },
+];
+export const RAIMENT_PIECE = 0.1, RAIMENT_SET = 0.2;
+
+// Account boosts derived from YOUR tracked state, not toggles:
+//   * Karamja gloves 2 (Karamja Medium diary) — +10% xp at the nature altar
+//   * Daeyalt essence (Sins of the Father) — +50% xp on essence crafting;
+//     daeyalt is untradeable (mined in Darkmeyer), so the gp side keeps the
+//     pure-essence cost basis with an explicit disclaimer.
+export const KARAMJA_GLOVES = { region: "Karamja", tier: "Medium", boost: 0.1 };
+export const DAEYALT = { quest: "Sins of the Father", boost: 0.5 };
+
 // Snapshot prices until the live feed lands. Every name above must be here.
 export const RC_SNAPSHOT = {
   "Pure essence": 2,

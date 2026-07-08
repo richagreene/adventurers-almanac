@@ -18,7 +18,7 @@ import { CONTENT_REQS } from "./data/contentReqs.js";
 import { QUEST_DEPS } from "./data/questDeps.js";
 import { BOSS_GUIDES } from "./data/bossGuides.js";
 import { HERBS, POTIONS, ZAHUR_CLEAN_FEE, ZAHUR_UNF_FEE, CHEM_AMULET, MIX_SNAPSHOT, mixItemNames } from "./data/herbloreData.js";
-import { ESSENCE, POUCHES, RC_RUNES, RC_DIRECT, RC_XPONLY, RC_SNAPSHOT, rcItemNames } from "./data/runecraftData.js";
+import { ESSENCE, POUCHES, RC_RUNES, RC_DIRECT, RC_XPONLY, RC_SNAPSHOT, RAIMENTS, RAIMENT_PIECE, RAIMENT_SET, KARAMJA_GLOVES, DAEYALT, rcItemNames } from "./data/runecraftData.js";
 import { refreshActivityGp, liveGpRate, geSellNet } from "./lib/activityPrices.js";
 import { fetchPlayer, fetchPrices, priceById, combatLevel, fetchItemNames, natureRunePrice, wikiExtract, wikiSections } from "./lib/api.js";
 import { C, mono, serif, cinzel, Card, Kicker, SectionTitle, StatCards, Bar, Seg, Tag, Btn, DataTable, Hero, themeFor, LineChart, BarChartH, Icon, Donut, BandBar } from "./lib/ui.jsx";
@@ -351,7 +351,7 @@ export default class Almanac extends React.Component {
     this.mixcfg = { mixesPerHour: 2400, cleansPerHour: 6000, zahur: true, buyUnf: "auto", chemAmulet: false, inputPref: "auto", ownHerbs: true, ...(this._load("almanac.mixcfg.v1", null) || {}) };
     // The Rune Forge: pouch ownership, Abyss access, Magic Imbue, plus
     // per-row measured rate overrides adopted from the run log.
-    this.rccfg = { small: true, medium: true, large: true, giant: true, colossal: false, abyss: true, imbue: false, tripsOv: {}, directOv: {}, ...(this._load("almanac.rccfg.v1", null) || {}) };
+    this.rccfg = { small: true, medium: true, large: true, giant: true, colossal: false, abyss: true, imbue: false, rHat: false, rTop: false, rBottom: false, rBoots: false, daeyalt: false, tripsOv: {}, directOv: {}, ...(this._load("almanac.rccfg.v1", null) || {}) };
     if (!this.rccfg.tripsOv) this.rccfg.tripsOv = {};
     if (!this.rccfg.directOv) this.rccfg.directOv = {};
     if (!this.farmcfg.patchOv) this.farmcfg.patchOv = {};
@@ -1115,6 +1115,23 @@ export default class Almanac extends React.Component {
     return { ess: 28 - n + held, n, held, used };
   }
   rcMult(row) { let m = 1; (row.mults || []).forEach(([l, x]) => { if (this.rcLvl >= l) m = x; }); return m; }
+  // ---- account boosts ----
+  // Raiments of the Eye: +10% bonus runes per owned piece, +20% set bonus.
+  rcRaiment() {
+    const pieces = RAIMENTS.filter((p) => this.rccfg[p.key]).length;
+    return { pieces, mult: Math.round((1 + pieces * RAIMENT_PIECE + (pieces === RAIMENTS.length ? RAIMENT_SET : 0)) * 100) / 100 };
+  }
+  // Karamja gloves 2 (+10% nature-altar xp) — derived from YOUR diary log.
+  rcKaramjaGloves() {
+    const d = (D.diaries || []).find((x) => x.region === KARAMJA_GLOVES.region && x.tier === KARAMJA_GLOVES.tier);
+    return !!d && this.diaryStatus(d) === "Done";
+  }
+  // Daeyalt essence (+50% xp) — gated on Sins of the Father in YOUR quest log.
+  rcDaeyaltQuestDone() {
+    const q = (D.quests || []).find((x) => x.n === DAEYALT.quest);
+    return q ? this.questDone(q) : true;
+  }
+  rcDaeyaltOn() { return this.rccfg.daeyalt === true && this.rcDaeyaltQuestDone(); }
   rcNextBreak(row) { return (row.mults || []).find(([l]) => l > this.rcLvl) || null; }
   // Three-layer gating, all from the app's own state: level, YOUR quest log,
   // and the Abyss toggle. Quests the ledger doesn't track can't be verified
@@ -1132,13 +1149,17 @@ export default class Almanac extends React.Component {
     const essP = this.rcPrice(ESSENCE);
     const ageOf = (names) => { let age = null, live = false; names.forEach((nm) => { const p = this.rcPrice(nm); if (p.live) { live = true; if (p.age != null) age = Math.max(age || 0, p.age); } }); return { age, live }; };
     if (row.kind === "direct") {
-      const runesHr = cfg.directOv[row.id] > 0 ? cfg.directOv[row.id] : row.runesHr;
+      // Raiments boost the book rate only — a MEASURED rate already includes
+      // whatever you were wearing, so the override bypasses the multiplier.
+      const measured = cfg.directOv[row.id] > 0;
+      const rai = measured ? 1 : this.rcRaiment().mult;
+      const runesHr = Math.round((measured ? cfg.directOv[row.id] : row.runesHr) * rai);
       const sellEa = geSellNet(this.rcPrice(row.rune).sell);
       const a = ageOf([row.rune]);
-      return { mult: 1, sellEa, essCost: 0, profitEss: null, essTrip: null, trips: null, essHr: null, runesHr,
+      return { mult: 1, rai, sellEa, essCost: 0, profitEss: null, essTrip: null, trips: null, essHr: null, runesHr,
         netHr: Math.round(runesHr * sellEa), xpHr: Math.round(row.xpHr), gpXp: row.xpHr > 0 ? (runesHr * sellEa) / row.xpHr : null,
         xpPerRune: row.runesHr > 0 ? row.xpHr / row.runesHr : 0, afford: null, estTotal: null, sustainHrs: null,
-        measured: cfg.directOv[row.id] > 0, ageMax: a.age, live: a.live, unpriced: false };
+        measured, ageMax: a.age, live: a.live, unpriced: false, glovesOn: false, daeyOn: false };
     }
     if (row.kind === "xponly" && !row.xpEss) {
       // rate-only trainers (ZMI / GOTR): xp is real, the reward stream is
@@ -1159,16 +1180,24 @@ export default class Almanac extends React.Component {
     if (row.talisman && !cfg.imbue) { extras += this.rcPrice(row.talisman).buy / Math.max(1, t.ess); names.push(row.talisman); }
     if (row.neck) { extras += this.rcPrice(row.neck.item).buy / (row.neck.crafts * Math.max(1, t.ess)); names.push(row.neck.item); }
     const essCost = essP.buy;
-    const profitEss = mult * sellEa - essCost - extras;
+    // Boosts: Raiments multiply the RUNES minted (no bonus xp); Karamja
+    // gloves 2 (from your diary) and daeyalt essence (Sins of the Father +
+    // toggle) multiply XP only. Trips/hr are unaffected by any of them, so a
+    // measured trip rate composes cleanly with the multipliers.
+    const rai = this.rcRaiment().mult;
+    const glovesOn = row.id === "nature" && this.rcKaramjaGloves();
+    const daeyOn = !!row.xpEss && this.rcDaeyaltOn();
+    const profitEss = mult * rai * sellEa - essCost - extras;
     const xpEss = row.xpEss || 0;
+    const xpEssEff = Math.round(xpEss * (glovesOn ? 1 + KARAMJA_GLOVES.boost : 1) * (daeyOn ? 1 + DAEYALT.boost : 1) * 100) / 100;
     // Affordability: essence buy limit AND your logged cash, in essence units.
     const lim = essP.live && essP.limit > 0 ? essP.limit : Infinity;
     const byCash = essCost > 0 ? (cash > 0 ? Math.floor(cash / essCost) : 0) : Infinity;
     let afford = Math.min(lim, byCash); if (!isFinite(afford)) afford = 0;
     const a = ageOf(names);
-    return { mult, sellEa, essCost, extras: Math.round(extras * 100) / 100, profitEss: Math.round(profitEss * 10) / 10,
-      essTrip: t.ess, trips, essHr, runesHr: Math.round(essHr * mult),
-      netHr: Math.round(profitEss * essHr), xpHr: Math.round(xpEss * essHr), gpXp: xpEss > 0 ? profitEss / xpEss : null,
+    return { mult, rai, glovesOn, daeyOn, sellEa, essCost, extras: Math.round(extras * 100) / 100, profitEss: Math.round(profitEss * 10) / 10,
+      essTrip: t.ess, trips, essHr, runesHr: Math.round(essHr * mult * rai), xpEssEff,
+      netHr: Math.round(profitEss * essHr), xpHr: Math.round(xpEssEff * essHr), gpXp: xpEssEff > 0 ? profitEss / xpEssEff : null,
       xpPerRune: 0, afford, estTotal: Math.round(profitEss * afford), sustainHrs: essHr > 0 ? afford / essHr : null,
       measured: cfg.tripsOv[row.id] > 0, ageMax: a.age, live: a.live, unpriced: false };
   }
@@ -1201,6 +1230,52 @@ export default class Almanac extends React.Component {
       out.push({ rune: r.rune, name: r.name, at: nb[0], mult: nb[1], gainHr, days, newHr: (r.netHr || 0) + gainHr });
     });
     return out.sort((a, b) => a.at - b.at).slice(0, 3);
+  }
+  // Account upgrades that would raise your forge rates — quests, diaries,
+  // pouches, Raiments — each with its /hr delta computed live so "what should
+  // I unlock next?" has a number on it.
+  rcUpgrades(rows) {
+    const cfg = this.rccfg, ups = [];
+    const best = rows.filter((r) => r.unlocked && !r.unpriced && r.netHr > 0).sort((a, b) => b.netHr - a.netHr)[0];
+    // quest-locked rows: the whole row's value is on the other side of a quest
+    const byQuest = {};
+    rows.filter((r) => r.gate.quests.length).forEach((r) => {
+      const q = r.gate.quests[0];
+      const val = r.unpriced ? 0 : r.netHr;
+      if (!byQuest[q] || val > byQuest[q].gp) byQuest[q] = { kind: "quest", label: q, what: "unlocks " + r.name, gp: val, xp: r.xpHr, goto: "quests" };
+    });
+    Object.values(byQuest).forEach((u) => ups.push(u));
+    if (cfg.abyss === false) {
+      const bestAbyss = rows.filter((r) => r.gate.abyssBlocked && !r.unpriced).sort((a, b) => b.netHr - a.netHr)[0];
+      if (bestAbyss) ups.push({ kind: "setup", label: "Enter the Abyss", what: "unlocks abyss routes — best: " + bestAbyss.name, gp: bestAbyss.netHr, xp: bestAbyss.xpHr, goto: "rcsetup" });
+    }
+    if (best) {
+      const t = this.rcEssPerTrip();
+      // pouches you don't carry yet: essence/trip delta scales the best craft
+      POUCHES.filter((p) => !cfg[p.key]).forEach((p) => {
+        const gain = Math.round(best.netHr * ((t.ess + p.holds - 1) / t.ess - 1));
+        if (gain > 0) ups.push({ kind: "pouch", label: p.name, what: (this.rcLvl >= p.lvl ? "+" + (p.holds - 1) + " essence/trip" : "needs " + p.lvl + " RC") + (p.key === "colossal" ? " · GOTR reward" : ""), gp: this.rcLvl >= p.lvl ? gain : 0, xp: 0, goto: "rcsetup", future: this.rcLvl < p.lvl ? gain : 0 });
+      });
+      // next Raiments piece: +10% runes (+20% more if it completes the set)
+      const raim = this.rcRaiment();
+      if (raim.pieces < RAIMENTS.length) {
+        const next = 1 + (raim.pieces + 1) * RAIMENT_PIECE + (raim.pieces + 1 === RAIMENTS.length ? RAIMENT_SET : 0);
+        const gain = Math.round(((next - raim.mult) / raim.mult) * best.mult * raim.mult * best.sellEa * (best.essHr || 0));
+        if (gain > 0) ups.push({ kind: "gear", label: "Raiments of the Eye (" + raim.pieces + "/4)", what: "next piece: +" + Math.round((next - raim.mult) * 100) + "% runes · GOTR pearls", gp: gain, xp: 0, goto: "rcsetup" });
+      }
+    }
+    // Karamja Medium diary → gloves 2 → +10% nature xp
+    if (!this.rcKaramjaGloves()) {
+      const nat = rows.find((r) => r.id === "nature");
+      if (nat && nat.gate.lvlOk) ups.push({ kind: "diary", label: "Karamja Medium diary", what: "gloves 2 — +10% xp at the nature altar", gp: 0, xp: Math.round(nat.xpHr * KARAMJA_GLOVES.boost), goto: "diary" });
+    }
+    // Daeyalt essence: quest first, then the toggle
+    const bestXpCraft = rows.filter((r) => r.unlocked && r.xpEss > 0).sort((a, b) => b.xpHr - a.xpHr)[0];
+    if (bestXpCraft) {
+      if (!this.rcDaeyaltQuestDone()) ups.push({ kind: "quest", label: DAEYALT.quest, what: "daeyalt essence — +50% crafting xp", gp: 0, xp: Math.round(bestXpCraft.xpHr * DAEYALT.boost), goto: "quests" });
+      else if (!this.rccfg.daeyalt) ups.push({ kind: "setup", label: "Daeyalt essence", what: "+50% crafting xp — switch on in SETUP", gp: 0, xp: Math.round(bestXpCraft.xpHr * DAEYALT.boost), goto: "rcsetup" });
+    }
+    return ups.sort((a, b) => (b.gp || b.future || 0) - (a.gp || a.future || 0) || b.xp - a.xp).slice(0, 6);
   }
   // Log a forge session. Net defaults to the CURRENT model economics (frozen
   // at log time); essence defaults to runes ÷ your multiplier.
@@ -3921,6 +3996,33 @@ export default class Almanac extends React.Component {
             </div>
           </Card>
         )}
+        {(() => {
+          const ups = this.rcUpgrades(rows);
+          if (!ups.length) return null;
+          const KIND = { quest: ["📜 QUEST", "#5a4a8a"], diary: ["🏅 DIARY", "#8a6a38"], pouch: ["👝 POUCH", "#9a7530"], gear: ["🧿 GEAR", TH.accent], setup: ["⚙ SETUP", C.muted2] };
+          return (
+            <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
+              <Kicker color={TH.accent}>⚒ Forge upgrades — quests, diaries &amp; gear that would raise YOUR rates, quantified</Kicker>
+              <div style={{ marginTop: 8 }}>
+                {ups.map((u, i) => (
+                  <div key={i} onClick={() => (u.goto === "rcsetup" ? this.setState({ rcView: "setup" }) : this.go(u.goto))}
+                    style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", padding: "6px 0", borderBottom: i < ups.length - 1 ? "1px solid rgba(44,32,19,.08)" : "none", cursor: "pointer" }}>
+                    <Tag color={KIND[u.kind][1]} bg="rgba(44,32,19,.07)">{KIND[u.kind][0]}</Tag>
+                    <span style={cinzel({ fontWeight: 700, fontSize: 13.5 })}>{u.label}</span>
+                    <span style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted })}>{u.what}</span>
+                    <span style={{ marginLeft: "auto", ...mono({ fontSize: 11.5, fontWeight: 700 }) }}>
+                      {u.gp > 0 && <span style={{ color: C.green }}>+{this.short(u.gp)}/hr</span>}
+                      {u.gp > 0 && u.xp > 0 && <span style={{ color: C.muted }}> · </span>}
+                      {u.xp > 0 && <span style={{ color: "#9a7530" }}>+{this.short(u.xp)} xp/hr</span>}
+                      {!u.gp && !u.xp && u.future > 0 && <span style={{ color: C.muted }}>≈+{this.short(u.future)}/hr later</span>}
+                      <span style={{ ...mono({ fontSize: 9.5 }), color: TH.accent }}> →</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          );
+        })()}
         <Card>
           <Kicker color={TH.accent}>The forge ledger · {liveN > 0 ? liveN + " live quotes" : "snapshot prices — hit ⟳ Live prices"} · afford &amp; est. total use your logged cash {this.short(d.cash)}</Kicker>
           <div className="sheetwrap" style={{ marginTop: 10 }}>
@@ -3993,20 +4095,25 @@ export default class Almanac extends React.Component {
                   × {r.trips} trips/hr <span style={mono({ fontSize: 10, color: r.measured ? TH.accent : C.muted })}>({r.measured ? "your measured rate" : "book — adopt yours from the run log"})</span> = <strong>{this.fmt(r.essHr)} ess/hr</strong>
                 </div>
                 <div style={serif({ fontSize: 12, fontStyle: "normal", marginTop: 3 })}>
-                  {r.kind === "craft" ? <>breakpoint <strong style={{ color: r.mult > 1 ? C.green : C.ink }}>×{r.mult}</strong> at your level {this.rcLvl}{nb ? <span style={mono({ fontSize: 10, color: C.muted2 })}> · next: ×{nb[1]} at {nb[0]}</span> : " · maxed"} → <strong>{this.fmt(r.runesHr)} runes/hr</strong></> : "combo runes are vendor trash — this row is priced as pure xp cost"}
+                  {r.kind === "craft" ? <>breakpoint <strong style={{ color: r.mult > 1 ? C.green : C.ink }}>×{r.mult}</strong> at your level {this.rcLvl}{nb ? <span style={mono({ fontSize: 10, color: C.muted2 })}> · next: ×{nb[1]} at {nb[0]}</span> : " · maxed"}{r.rai > 1 ? <> × Raiments <strong style={{ color: C.green }}>×{r.rai}</strong></> : ""} → <strong>{this.fmt(r.runesHr)} runes/hr</strong></> : "combo runes are vendor trash — this row is priced as pure xp cost"}
                 </div>
+                {(r.glovesOn || r.daeyOn) && (
+                  <div style={serif({ fontSize: 11.5, fontStyle: "normal", color: "#9a7530", marginTop: 3 })}>
+                    xp boosted: {r.glovesOn ? "+10% Karamja gloves 2 (your Medium diary)" : ""}{r.glovesOn && r.daeyOn ? " · " : ""}{r.daeyOn ? "+50% daeyalt essence (untradeable — mining supply time not priced; gp side still assumes pure essence)" : ""} → {r.xpEssEff} xp/ess
+                  </div>
+                )}
               </div>
               <div style={{ maxWidth: 360 }}>
                 <div style={mono({ fontSize: 9, letterSpacing: ".12em", color: TH.accent, textTransform: "uppercase", marginBottom: 5 })}>Per essence</div>
                 <div style={serif({ fontSize: 12, fontStyle: "normal" })}>
                   {r.kind === "craft"
-                    ? <>{r.mult} × {this.fmt(r.sellEa)} ({r.rune} after tax) − {this.fmt(r.essCost)} essence{r.extras > 0 ? " − " + r.extras + " extras" : ""} = <strong style={{ color: r.profitEss >= 0 ? C.green : C.red }}>{(r.profitEss >= 0 ? "+" : "−") + Math.abs(r.profitEss)}/ess</strong> · {r.xpEss} xp</>
-                    : <>{this.fmt(r.essCost)} essence + {r.extras} extras (earth runes · {this.rccfg.imbue ? "Magic Imbue, no talismans" : "talismans"} · necklace charges) = <strong style={{ color: C.red }}>−{Math.abs(r.profitEss)}/ess</strong> · {r.xpEss} xp</>}
+                    ? <>{r.mult}{r.rai > 1 ? " × " + r.rai : ""} × {this.fmt(r.sellEa)} ({r.rune} after tax) − {this.fmt(r.essCost)} essence{r.extras > 0 ? " − " + r.extras + " extras" : ""} = <strong style={{ color: r.profitEss >= 0 ? C.green : C.red }}>{(r.profitEss >= 0 ? "+" : "−") + Math.abs(r.profitEss)}/ess</strong> · {r.xpEssEff != null ? r.xpEssEff : r.xpEss} xp</>
+                    : <>{this.fmt(r.essCost)} essence + {r.extras} extras (earth runes · {this.rccfg.imbue ? "Magic Imbue, no talismans" : "talismans"} · necklace charges) = <strong style={{ color: C.red }}>−{Math.abs(r.profitEss)}/ess</strong> · {r.xpEssEff != null ? r.xpEssEff : r.xpEss} xp</>}
                 </div>
                 {r.afford > 0 && r.kind === "craft" && (
                   <div style={{ ...serif({ fontSize: 12, fontStyle: "normal" }), marginTop: 6 }}>
                     <span style={mono({ fontSize: 9, letterSpacing: ".12em", color: TH.accent, textTransform: "uppercase" })}>A full restock · </span>
-                    {this.fmt(r.afford)} essence → {this.fmt(r.afford * r.mult)} runes sell for {this.fmt(r.afford * r.mult * r.sellEa)} − {this.fmt(r.afford * r.essCost)} essence = <strong style={{ color: r.estTotal >= 0 ? C.green : C.red }}>{this.signed(r.estTotal)}</strong>{r.sustainHrs ? <span style={mono({ fontSize: 10, color: C.muted2 })}> · {r.sustainHrs.toFixed(1)}h of crafting</span> : null}
+                    {this.fmt(r.afford)} essence → {this.fmt(Math.round(r.afford * r.mult * (r.rai || 1)))} runes sell for {this.fmt(Math.round(r.afford * r.mult * (r.rai || 1) * r.sellEa))} − {this.fmt(r.afford * r.essCost)} essence = <strong style={{ color: r.estTotal >= 0 ? C.green : C.red }}>{this.signed(r.estTotal)}</strong>{r.sustainHrs ? <span style={mono({ fontSize: 10, color: C.muted2 })}> · {r.sustainHrs.toFixed(1)}h of crafting</span> : null}
                   </div>
                 )}
               </div>
@@ -4055,6 +4162,39 @@ export default class Almanac extends React.Component {
           </div>
           <div style={setupCell}><Kicker>The Abyss</Kicker>{sel("abyss", cfg.abyss !== false ? "yes" : "no", [["yes", "Unlocked (Enter the Abyss)"], ["no", "Not unlocked"]])}{hint("The fast route to cosmic/chaos/nature/law/death altars. Off locks those rows honestly instead of pretending altar-run rates.")}</div>
           <div style={setupCell}><Kicker>Magic Imbue</Kicker>{sel("imbue", cfg.imbue ? "yes" : "no", [["no", "No (talismans consumed)"], ["yes", "Yes (Lunar spell)"]])}{hint("Removes the consumed talisman from combination-rune costs (lavas).")}</div>
+          <div style={{ ...setupCell, gridColumn: "span 2" }}>
+            {(() => { const raim = this.rcRaiment(); return (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><Kicker>Raiments of the Eye</Kicker><Tag color={raim.mult > 1 ? C.green : C.muted2} bg="rgba(68,84,158,.10)">runes ×{raim.mult}</Tag></div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                  {RAIMENTS.map((p) => {
+                    const on = !!cfg[p.key];
+                    return (
+                      <div key={p.key} onClick={() => this.setRcOpt(p.key, on ? "no" : "yes")}
+                        style={{ padding: "7px 12px", borderRadius: 6, cursor: "pointer", border: `2px solid ${on ? TH.accent : "rgba(44,32,19,.18)"}`, background: on ? "rgba(68,84,158,.10)" : "transparent" }}>
+                        <div style={cinzel({ fontWeight: 700, fontSize: 12.5 })}>{on ? "✓ " : ""}{p.name}</div>
+                        <div style={mono({ fontSize: 9.5, color: C.muted })}>+10% runes</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {hint("GOTR reward-shop outfit (abyssal pearls). Each piece mints +10% bonus runes, +20% more with the full set — pure gp, no bonus xp. Applies to book rates only; a measured Zeah rate already includes what you wore.")}
+              </div>
+            ); })()}
+          </div>
+          <div style={setupCell}>
+            <Kicker>Daeyalt essence</Kicker>
+            {this.rcDaeyaltQuestDone()
+              ? sel("daeyalt", cfg.daeyalt ? "yes" : "no", [["no", "Pure essence (GE)"], ["yes", "Daeyalt (+50% xp)"]])
+              : <div style={{ ...mono({ fontSize: 11, color: C.red }), marginTop: 8, cursor: "pointer" }} onClick={() => this.go("quests")}>🔒 Sins of the Father →</div>}
+            {hint("Darkmeyer's essence mine: +50% crafting xp. Untradeable — its mining supply time isn't priced, so the gp columns still assume pure-essence cost.")}
+          </div>
+          <div style={setupCell}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><Kicker>Karamja gloves 2</Kicker><Tag color={this.rcKaramjaGloves() ? C.green : C.muted2} bg={this.rcKaramjaGloves() ? "rgba(92,110,53,.14)" : "rgba(44,32,19,.08)"}>{this.rcKaramjaGloves() ? "ACTIVE" : "NOT YET"}</Tag></div>
+            <div style={{ ...serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted }), marginTop: 8 }}>
+              +10% xp at the nature altar — read straight from <a href="#" onClick={(e) => { e.preventDefault(); this.go("diary"); }} style={{ color: themeFor("runecraft").accent }}>your Karamja Medium diary</a>. No toggle: finish the diary and the ledger re-reckons itself.
+            </div>
+          </div>
           <div style={{ ...setupCell, gridColumn: "span 2" }}>
             <Kicker>Trip &amp; gather rates</Kicker>
             {hint("Book defaults ship with each route. The honest override is measurement: log timed runs and hit “Adopt” in the RUN LOG — the ledger then carries a “your rate” tag on that row.")}
