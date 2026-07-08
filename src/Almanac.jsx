@@ -417,7 +417,7 @@ export default class Almanac extends React.Component {
     this._enterCommit = (e) => { if (e.key === "Enter" && e.target && e.target.tagName === "INPUT") e.target.blur(); };
     document.addEventListener("keydown", this._enterCommit);
     // Tick the live field-session clock (elapsed + kills/hr) while one runs.
-    this._sessTick = setInterval(() => { if (this.bossSession) this.bump(); }, 10000);
+    this._sessTick = setInterval(() => { if (this.bossSession || this.slayTask) this.bump(); }, 10000);
   }
   componentWillUnmount() { if (this._enterCommit) document.removeEventListener("keydown", this._enterCommit); if (this._sessTick) clearInterval(this._sessTick); if (this._mq && this._mqFn && this._mq.removeEventListener) this._mq.removeEventListener("change", this._mqFn); }
 
@@ -481,6 +481,9 @@ export default class Almanac extends React.Component {
     // Live boss field session (survives refresh/navigation; not an undo key —
     // ENDING a session writes the logs, and that write is the undo point).
     this.bossSession = this._load("almanac.bosssession.v1", null) || null;
+    // Live slayer task (same contract as bossSession: survives refresh, not an
+    // undo key — FINISHING the task writes the log, and that's the undo point).
+    this.slayTask = this._load("almanac.slaytask.v1", null) || null;
   }
 
   // ---------- undo / redo ----------
@@ -1504,6 +1507,7 @@ export default class Almanac extends React.Component {
       case "slayerLog": return [
         { k: "date", label: "Date", type: "date" },
         { k: "task", label: "Task", type: "sel", opts: sel(D.slayer.map((t) => t.task), entry.task), w: 170 },
+        { k: "kills", label: "Kills", type: "num", w: 80, opt: true },
         { k: "xp", label: "XP", type: "num", w: 100 },
         { k: "gp", label: "Loot gp", type: "num", w: 110 },
         { k: "mins", label: "Minutes", type: "num", w: 90, opt: true },
@@ -1850,6 +1854,67 @@ export default class Almanac extends React.Component {
     }
     this.bossSession = null; this._save("almanac.bosssession.v1", null); this.setState({ sessQ: "" });
   };
+  // ---------- live slayer task (the Task Ledger) ----------
+  // The in-game source of truth is REMAINING kills (the slayer gem tells you
+  // "x monsters left"), so that's the input; done = assigned − remaining.
+  _saveSlay() { this._save("almanac.slaytask.v1", this.slayTask); }
+  startSlayTask = () => {
+    if (this.slayTask) return;
+    const task = this.val("st_task") || D.slayer[0].task;
+    const assigned = Math.max(1, this.num("st_count") || 1);
+    this.slayTask = { task, master: this.state.slayMaster || "Duradel", assigned, remaining: assigned, startAt: Date.now(), loot: [] };
+    this._saveSlay(); this.bump();
+  };
+  slayRemaining = (raw) => {
+    const s = this.slayTask; if (!s) return;
+    const r = Math.max(0, Math.min(s.assigned, Math.round(this.parseNum(raw) || 0)));
+    if (r === s.remaining) return;
+    s.remaining = r; s.lastAt = Date.now(); this._saveSlay(); this.bump();
+  };
+  slayQuick = (n) => { const s = this.slayTask; if (!s) return; s.remaining = Math.max(0, Math.min(s.assigned, s.remaining - n)); s.lastAt = Date.now(); this._saveSlay(); this.bump(); };
+  // Loot logging: qty parsing + live GE re-price at add time, exactly like
+  // boss-session drops ("250 death rune" → 250 × today's quote).
+  slayAddLoot = (raw) => {
+    const s = this.slayTask; if (!s || !raw) return;
+    const { qty, rest } = this.sessParseQty(raw);
+    let v = 0;
+    if (this.priceRows) { const m = this.priceRows.find((r) => (r.name || "").toLowerCase() === rest.toLowerCase()); if (m) v = m.sell || m.buy || 0; }
+    const it = { n: rest, v, q: qty, at: Date.now(), src: v ? "scan" : "" };
+    s.loot.push(it); s.lastAt = Date.now(); this._saveSlay(); this.bump();
+    fetchPrices().then(({ byName }) => {
+      const cur = this.slayTask;
+      if (!cur || cur !== s || !cur.loot.includes(it) || it.src === "manual") return;
+      const m = byName[it.n.toLowerCase()];
+      if (m && (m.high || m.low)) { it.v = m.high || m.low; it.src = "live"; this._saveSlay(); this.bump(); }
+    }).catch(() => {});
+  };
+  slaySetLootV = (i, raw) => { const s = this.slayTask; if (!s || !s.loot[i]) return; const v = Math.max(0, Math.round(this.parseNum(raw) || 0)); if (v === s.loot[i].v) return; s.loot[i].v = v; s.loot[i].src = "manual"; this._saveSlay(); this.bump(); };
+  slayDelLoot = (i) => { const s = this.slayTask; if (!s) return; s.loot.splice(i, 1); this._saveSlay(); this.bump(); };
+  slayLootGp(s) { return (s.loot || []).reduce((a, d) => a + (d.v || 0) * (d.q || 1), 0); }
+  // Everything the live card displays, derived once per render.
+  slayTaskStats() {
+    const s = this.slayTask; if (!s) return null;
+    const done = Math.max(0, s.assigned - s.remaining);
+    const mins = Math.max(0.5, (Date.now() - s.startAt) / 60000);
+    const kph = done > 0 ? (done * 60) / mins : 0;
+    const etaMin = kph > 0 && s.remaining > 0 ? Math.round((s.remaining / kph) * 60) : null;
+    const loot = this.slayLootGp(s);
+    const gpHr = loot > 0 ? Math.round((loot * 60) / mins) : 0;
+    const def = D.slayer.find((t) => t.task === s.task) || null;
+    return { s, done, mins, kph, etaMin, loot, gpHr, def, pct: Math.round((done / Math.max(1, s.assigned)) * 100) };
+  }
+  endSlayTask = (save) => {
+    const s = this.slayTask; if (!s) return;
+    if (save) {
+      const st = this.slayTaskStats();
+      const entry = { date: this.today(), task: s.task, xp: this.num("st_xp") || 0, gp: st.loot, mins: Math.max(1, Math.round(st.mins)) };
+      if (st.done > 0) entry.kills = st.done;
+      this.logs.slayerLog.unshift(entry);
+      this.saveLogs();
+    }
+    this.slayTask = null; this._save("almanac.slaytask.v1", null); this.bump();
+  };
+
   // Fuzzy scorer for the drop picker: substring beats subsequence, earlier and
   // tighter matches rank higher. Returns -1 for no match.
   fuzzyScore(q, s) {
@@ -5096,6 +5161,90 @@ export default class Almanac extends React.Component {
   }
 
   // ===================== SLAYER =====================
+  // The Task Ledger — the live current-task card pinned atop the Slayer tab.
+  renderSlayTask() {
+    const TH = themeFor("slayer");
+    const st = this.slayTaskStats();
+    if (!st) {
+      return (
+        <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div style={{ flex: "1 1 100%", marginBottom: 2 }}><Kicker color={TH.accent}>⚔ The Task Ledger · no task on the gem</Kicker></div>
+            <div><div style={mono({ fontSize: 8.5, letterSpacing: ".12em", color: C.muted, textTransform: "uppercase", marginBottom: 3 })}>Task</div>
+              <select className="led" id="st_task" style={{ width: 190 }}>{D.slayer.map((t) => <option key={t.task} value={t.task}>{t.task}</option>)}</select></div>
+            <div><div style={mono({ fontSize: 8.5, letterSpacing: ".12em", color: C.muted, textTransform: "uppercase", marginBottom: 3 })}>Master</div>
+              <select className="led" value={this.state.slayMaster} onChange={(e) => this.setState({ slayMaster: e.target.value })} style={{ width: 130 }}>{["Turael", "Mazchna", "Vannaka", "Chaeldar", "Nieve", "Duradel", "Konar", "Krystilia"].map((m) => <option key={m} value={m}>{m}</option>)}</select></div>
+            {this.field("st_count", "Assigned", { w: 100 })}
+            <Btn tone="gold" onClick={this.startSlayTask}>▶ Start task</Btn>
+            <div style={{ flexBasis: "100%", ...serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted }) }}>Punch in what the master gave you and this card turns into a live tracker — update <strong>remaining</strong> from your gem, drop loot in as it lands, finish to log it all in one undoable entry.</div>
+          </div>
+        </Card>
+      );
+    }
+    const { s, done, mins, kph, etaMin, loot, gpHr, def, pct } = st;
+    const cell = (label, value, sub, color) => (
+      <div style={{ minWidth: 92 }}>
+        <div style={mono({ fontSize: 8.5, letterSpacing: ".14em", color: "#c8a07a", textTransform: "uppercase" })}>{label}</div>
+        <div style={cinzel({ fontWeight: 800, fontSize: 21, color: color || "#f0e2bd" })}>{value}</div>
+        {sub && <div style={mono({ fontSize: 9.5, color: "#b08a6a" })}>{sub}</div>}
+      </div>
+    );
+    const finishAt = etaMin != null ? new Date(Date.now() + etaMin * 60000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
+    return (
+      <div style={{ background: `linear-gradient(115deg, ${TH.g1}, ${TH.g2})`, border: `2px solid ${TH.accent}`, borderRadius: 8, padding: "16px 18px", marginBottom: 14, boxShadow: "0 4px 16px rgba(30,20,8,.3)" }}>
+        <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "center" }}>
+          <Donut size={108} thickness={16} centerLabel={done + " / " + s.assigned} centerValue={pct + "%"} centerColor="#e3c878"
+            segments={[{ v: done, color: "#d57a5a" }, { v: Math.max(0.001, s.remaining), color: "rgba(255,255,255,.12)" }]} />
+          <div style={{ flex: 1, minWidth: 230 }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+              <span style={mono({ fontSize: 9.5, letterSpacing: ".16em", color: TH.lite, textTransform: "uppercase" })}>⚔ On task · {s.master}</span>
+              {def && <Tag color={def.verdict === "Keep" ? "#9fbf6a" : "#d57a5a"} bg="rgba(0,0,0,.25)">{def.verdict === "Keep" ? "worth doing" : def.verdict.toLowerCase() + " next time"}</Tag>}
+            </div>
+            <div style={cinzel({ fontWeight: 800, fontSize: 24, color: "#f0e2bd", margin: "2px 0 8px" })}>{s.task}</div>
+            <div style={{ display: "flex", gap: 22, flexWrap: "wrap" }}>
+              {cell("Remaining", this.fmt(s.remaining), "of " + this.fmt(s.assigned))}
+              {cell("Elapsed", mins >= 60 ? (mins / 60).toFixed(1) + "h" : Math.round(mins) + "m", kph > 0 ? Math.round(kph) + " kills/hr" : "update remaining ↓")}
+              {cell("ETA", etaMin != null ? (etaMin >= 60 ? (etaMin / 60).toFixed(1) + "h" : etaMin + "m") : "—", finishAt ? "done ≈ " + finishAt : null, "#9fbf6a")}
+              {cell("Loot", loot > 0 ? this.short(loot) : "—", gpHr > 0 ? this.short(gpHr) + "/hr" : null, "#e3c878")}
+            </div>
+            {def && (
+              <div style={{ ...serif({ fontSize: 11.5, fontStyle: "normal", color: "#c8a07a" }), marginTop: 8 }}>
+                Book EV for this task: {this.short(def.gpHr)} loot/hr · {this.short(def.xpHr)} xp/hr{gpHr > 0 ? <> — you're pacing <strong style={{ color: gpHr >= def.gpHr ? "#9fbf6a" : "#d57a5a" }}>{this.short(gpHr)}/hr</strong> on logged loot</> : ""}.
+              </div>
+            )}
+          </div>
+          <div style={{ flex: "1 1 260px", minWidth: 240 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+              <span style={mono({ fontSize: 9, letterSpacing: ".12em", color: "#c8a07a", textTransform: "uppercase" })}>Remaining</span>
+              <input className="led" key={"rem-" + s.remaining} defaultValue={s.remaining} onBlur={(e) => this.slayRemaining(e.target.value)} style={{ width: 74, textAlign: "right" }} />
+              {[1, 5, 10].map((n) => <Btn key={n} tone="quiet" onClick={() => this.slayQuick(n)}>−{n}</Btn>)}
+            </div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
+              <input className="led" id="st_loot" list="tradeItems" placeholder="log loot… e.g. 250 death rune" onKeyDown={(e) => { if (e.key === "Enter") { this.slayAddLoot(e.target.value); e.target.value = ""; } }} style={{ flex: 1, minWidth: 150 }} />
+              <Btn tone="quiet" onClick={() => { const el = document.getElementById("st_loot"); if (el && el.value) { this.slayAddLoot(el.value); el.value = ""; } }}>＋</Btn>
+            </div>
+            <datalist id="tradeItems">{(this.itemNames || []).map((n) => <option key={n} value={n} />)}</datalist>
+            {(s.loot || []).length > 0 && (
+              <div style={{ maxHeight: 110, overflowY: "auto", marginBottom: 8 }}>
+                {s.loot.map((d, i) => (
+                  <div key={i} style={{ display: "flex", gap: 7, alignItems: "center", padding: "2px 0" }}>
+                    <span style={{ ...serif({ fontSize: 12, fontStyle: "normal", color: "#e8d9b8" }), flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.q > 1 ? this.fmt(d.q) + "× " : ""}{d.n}</span>
+                    <input className="led" defaultValue={this.fmt((d.v || 0) * (d.q || 1))} onBlur={(e) => this.slaySetLootV(i, (this.parseNum(e.target.value) || 0) / Math.max(1, d.q))} style={{ width: 80, textAlign: "right", fontSize: 11, padding: "3px 6px" }} title={d.src === "live" ? "live GE quote at drop time" : d.src === "manual" ? "hand-set" : "pending live quote"} />
+                    <span onClick={() => this.slayDelLoot(i)} style={{ cursor: "pointer", color: "#d57a5a", ...mono({ fontSize: 11 }) }}>✕</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              {this.field("st_xp", "XP gained (opt)", { w: 120 })}
+              <Btn tone="gold" onClick={() => this.endSlayTask(true)}>✓ Finish & log</Btn>
+              <Btn tone="quiet" onClick={() => { if (typeof window === "undefined" || window.confirm("Discard this task without logging?")) this.endSlayTask(false); }}>✕</Btn>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
   renderSlayer() {
     const view = this.state.slayView;
     const slayLvl = (this.skillMap.Slayer || { l: 1 }).l;
@@ -5104,6 +5253,7 @@ export default class Almanac extends React.Component {
       <div>
         <SectionTitle kicker={"The Slayer · " + (this.mode === "iron" ? "Ironman lens (keep resources)" : "Main lens (sell drops)")} title="Task Planner" accent={themeFor("slayer").accent}
           right={<Seg options={[{ key: "planner", label: "BLOCK CALC" }, { key: "monsters", label: "MONSTER DB" }, { key: "log", label: "LOG" }]} active={view} onPick={(v) => this.setState({ slayView: v, openForm: null })} />} />
+        {this.renderSlayTask()}
         <StatCards cols={4} items={[
           { label: "Weighted XP/hr (after blocks)", value: this.short(w.xp) },
           { label: "Weighted loot/hr", value: this.short(w.gp) },
