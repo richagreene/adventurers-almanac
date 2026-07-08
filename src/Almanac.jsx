@@ -305,6 +305,15 @@ export default class Almanac extends React.Component {
     this._prof.active = id; this._profilesSave();
     this._reloadProfile();
   };
+  renameProfile = () => {
+    const P = this.profile;
+    const cur = P.list.find((p) => p.id === P.active); if (!cur) return;
+    const name = typeof window !== "undefined" ? window.prompt("Rename this profile:", cur.name) : "";
+    if (!name || !name.trim() || name.trim() === cur.name) return;
+    cur.name = name.trim().slice(0, 24);
+    this._profilesSave();
+    this.bump();
+  };
   deleteProfile = () => {
     const P = this.profile;
     if (P.list.length <= 1) { this.setState({ fetchMsg: "This is the only profile — make another before deleting it." }); return; }
@@ -1929,6 +1938,7 @@ export default class Almanac extends React.Component {
               {this.state.profMenu && (
                 <div style={{ position: "absolute", top: 62, right: 30, zIndex: 40, background: "#f2e7cb", border: "2px solid rgba(44,32,19,.3)", borderRadius: 8, padding: 13, boxShadow: "0 10px 26px rgba(30,20,8,.3)", display: "flex", flexDirection: "column", gap: 8, width: 250 }}>
                   <Kicker color={C.goldDeep}>Profile · {(this.profile.list.find((p) => p.id === this.profile.active) || {}).name}</Kicker>
+                  <Btn tone="quiet" onClick={this.renameProfile}>✎ Rename this profile</Btn>
                   <Btn tone="quiet" onClick={this.exportProfile}>⬇ Export backup (.json)</Btn>
                   <Btn tone="quiet" onClick={() => this._importInput && this._importInput.click()}>⬆ Import backup…</Btn>
                   <input ref={(el) => (this._importInput = el)} type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) this.importProfile(f); e.target.value = ""; }} />
