@@ -3,6 +3,7 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "functions": {
-    "api/hiscores.js": { "maxDuration": 15 }
+    "api/hiscores.js": { "maxDuration": 15 },
+    "api/wikisync.js": { "maxDuration": 15 }
   }
 }

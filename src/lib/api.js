@@ -103,6 +103,38 @@ export async function fetchPlayer(rsn) {
   };
 }
 
+// ---- RuneLite WikiSync (opt-in quest / diary completion sync) ----
+// Players who run the WikiSync plugin publish their quest & diary state to
+// sync.runescape.wiki. Direct fetch first (the API serves CORS); fall back to
+// our /api/wikisync serverless proxy. Returns normalized maps ready for the
+// almanac's questOv / diaryOv:
+//   quests:  { "<quest name>": true }        (only COMPLETED, state === 2)
+//   diaries: { "<Region>|<Tier>": true }     (only complete tiers)
+export async function fetchWikiSync(rsn) {
+  const name = (rsn || "").trim();
+  if (!name) return { ok: false, error: "Load a RuneScape name first — WikiSync looks the player up by RSN." };
+  const urls = [
+    "https://sync.runescape.wiki/runelite/player/" + encodeURIComponent(name) + "/STANDARD",
+    "/api/wikisync?player=" + encodeURIComponent(name),
+  ];
+  let lastErr = "WikiSync unreachable from this browser.";
+  for (const u of urls) {
+    try {
+      const r = await fetch(u, { headers: { Accept: "application/json" } });
+      if (r.status === 404) return { ok: false, error: `WikiSync has no data for "${name}". They need the free WikiSync plugin enabled in RuneLite, then to log in once — it syncs automatically after that.` };
+      if (!r.ok) { lastErr = "WikiSync answered " + r.status + "."; continue; }
+      const d = await r.json();
+      const quests = {};
+      Object.entries(d.quests || {}).forEach(([n, st]) => { if (st === 2) quests[n] = true; });
+      const diaries = {};
+      Object.entries(d.achievement_diaries || {}).forEach(([region, tiers]) =>
+        Object.entries(tiers || {}).forEach(([tier, v]) => { if (v && v.complete) diaries[region + "|" + tier] = true; }));
+      return { ok: true, rsn: d.username || name, at: d.timestamp || null, quests, diaries };
+    } catch (e) { /* try the next route */ }
+  }
+  return { ok: false, error: lastErr };
+}
+
 // ----------------------------------------------------------------------------
 // Grand Exchange prices (OSRS Wiki real-time prices API)
 // ----------------------------------------------------------------------------

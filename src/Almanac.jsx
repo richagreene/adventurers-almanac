@@ -20,7 +20,7 @@ import { BOSS_GUIDES } from "./data/bossGuides.js";
 import { HERBS, POTIONS, ZAHUR_CLEAN_FEE, ZAHUR_UNF_FEE, CHEM_AMULET, MIX_SNAPSHOT, mixItemNames } from "./data/herbloreData.js";
 import { ESSENCE, POUCHES, RC_RUNES, RC_DIRECT, RC_XPONLY, RC_SNAPSHOT, RAIMENTS, RAIMENT_PIECE, RAIMENT_SET, KARAMJA_GLOVES, DAEYALT, rcItemNames } from "./data/runecraftData.js";
 import { refreshActivityGp, liveGpRate, geSellNet } from "./lib/activityPrices.js";
-import { fetchPlayer, fetchPrices, priceById, combatLevel, fetchItemNames, natureRunePrice, wikiExtract, wikiSections } from "./lib/api.js";
+import { fetchPlayer, fetchPrices, priceById, combatLevel, fetchItemNames, natureRunePrice, wikiExtract, wikiSections, fetchWikiSync } from "./lib/api.js";
 import { C, mono, serif, cinzel, Card, Kicker, SectionTitle, StatCards, Bar, Seg, Tag, Btn, DataTable, Hero, themeFor, LineChart, BarChartH, Icon, Donut, BandBar } from "./lib/ui.jsx";
 import { loadItemIndex, itemIconUrl, skillIconUrl, ensureItemStats, getItemStats } from "./lib/icons.js";
 
@@ -274,8 +274,86 @@ export default class Almanac extends React.Component {
     { skill: "Farming", tgt: 85, method: "Herb + tree runs (daily)", xpHr: 0, gpHr: 0 },
   ];
 
+  // ---------- profiles ----------
+  // Several adventurers can share one browser: every almanac.* key routes
+  // through _pk(), which namespaces it per profile. The FIRST profile keeps
+  // the original key names, so an existing solo save needs no migration.
+  _profilesLoad() { try { const p = JSON.parse(localStorage.getItem("almanac.profiles.v1")); if (p && p.list && p.list.length && p.list.find((x) => x.id === p.active)) return p; } catch (e) {} return { list: [{ id: "default", name: "Adventurer 1" }], active: "default" }; }
+  _profilesSave() { try { localStorage.setItem("almanac.profiles.v1", JSON.stringify(this._prof)); } catch (e) {} }
+  _pk(k) { const a = this._prof ? this._prof.active : "default"; return a === "default" ? k : k.replace(/^almanac\./, "almanac.p." + a + "."); }
+  get profile() { return this._prof || (this._prof = this._profilesLoad()); }
+  // Reload every instance field from the (possibly different) active profile.
+  // Undo history is per-profile state and must not leak across the switch.
+  _reloadProfile() {
+    this._undoStack = []; this._redoStack = [];
+    this._undoSuspended = true; this.loadState(); this._undoSuspended = false;
+    this._pfCache = null;
+    this.recordXpSnapshot();
+    this.setState({ profMenu: false, fetchMsg: "", syncMsg: "", editLog: null, openForm: null });
+    this.bump();
+  }
+  switchProfile = (id) => {
+    if (!this.profile.list.find((p) => p.id === id) || id === this._prof.active) return;
+    this._prof.active = id; this._profilesSave();
+    this._reloadProfile();
+  };
+  addProfile = () => {
+    const name = typeof window !== "undefined" ? window.prompt("Name the new profile (e.g. a friend's RSN):") : "";
+    if (!name || !name.trim()) { this.bump(); return; }
+    const id = "p" + Date.now().toString(36);
+    this.profile.list.push({ id, name: name.trim().slice(0, 24) });
+    this._prof.active = id; this._profilesSave();
+    this._reloadProfile();
+  };
+  deleteProfile = () => {
+    const P = this.profile;
+    if (P.list.length <= 1) { this.setState({ fetchMsg: "This is the only profile — make another before deleting it." }); return; }
+    if (typeof window !== "undefined" && !window.confirm("Delete this profile and ALL its saved data on this browser? This cannot be undone.")) return;
+    const a = P.active;
+    if (a === "default") {
+      Object.keys(localStorage).filter((k) => k.startsWith("almanac.") && !k.startsWith("almanac.p.") && k !== "almanac.profiles.v1").forEach((k) => localStorage.removeItem(k));
+    } else {
+      const pre = "almanac.p." + a + ".";
+      Object.keys(localStorage).filter((k) => k.startsWith(pre)).forEach((k) => localStorage.removeItem(k));
+    }
+    P.list = P.list.filter((p) => p.id !== a);
+    P.active = P.list[0].id; this._profilesSave();
+    this._reloadProfile();
+  };
+  // Backup = every almanac.* key of the ACTIVE profile, under logical names —
+  // portable across devices/profiles, and the cheap answer to "localStorage is
+  // the only copy of my data".
+  exportProfile = () => {
+    const a = this.profile.active; const out = {};
+    Object.keys(localStorage).forEach((k) => {
+      if (k === "almanac.profiles.v1") return;
+      if (a === "default") { if (k.startsWith("almanac.") && !k.startsWith("almanac.p.")) out[k] = localStorage.getItem(k); }
+      else if (k.startsWith("almanac.p." + a + ".")) out[k.replace("almanac.p." + a + ".", "almanac.")] = localStorage.getItem(k);
+    });
+    const name = ((this.stats && !this.stats.demo && this.stats.rsn) || (this.profile.list.find((p) => p.id === a) || {}).name || "profile").replace(/\W+/g, "-");
+    const blob = new Blob([JSON.stringify({ almanacExport: 1, at: Date.now(), data: out })], { type: "application/json" });
+    const el = document.createElement("a");
+    el.href = URL.createObjectURL(blob); el.download = "almanac-" + name + ".json";
+    document.body.appendChild(el); el.click(); el.remove();
+    setTimeout(() => URL.revokeObjectURL(el.href), 2000);
+  };
+  importProfile = (file) => {
+    const rd = new FileReader();
+    rd.onload = () => {
+      try {
+        const j = JSON.parse(rd.result);
+        if (!j || j.almanacExport !== 1 || !j.data) throw new Error("bad");
+        if (typeof window !== "undefined" && !window.confirm("Replace THIS profile's data with the backup file? Current data on this profile is overwritten.")) return;
+        Object.entries(j.data).forEach(([k, v]) => { if (k.startsWith("almanac.") && !k.startsWith("almanac.p.") && typeof v === "string") localStorage.setItem(this._pk(k), v); });
+        this._reloadProfile();
+        this.setState({ fetchMsg: "Backup imported ✓" });
+      } catch (e) { this.setState({ fetchMsg: "That file isn't an Almanac backup." }); }
+    };
+    rd.readAsText(file);
+  };
+
   // ---------- persistence ----------
-  _load(k, fb) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fb; } catch (e) { return fb; } }
+  _load(k, fb) { try { const v = localStorage.getItem(this._pk(k)); return v ? JSON.parse(v) : fb; } catch (e) { return fb; } }
   _save(k, v) {
     try {
       // Capture one undo point per synchronous action, before the first write.
@@ -285,13 +363,14 @@ export default class Almanac extends React.Component {
         this._redoStack = [];
         this._undoTxn = true; Promise.resolve().then(() => { this._undoTxn = false; });
       }
-      localStorage.setItem(k, JSON.stringify(v));
+      localStorage.setItem(this._pk(k), JSON.stringify(v));
     } catch (e) {}
   }
   saveLogs() { this._save("almanac.logs.v1", this.logs); }
   bump() { this.setState((s) => ({ _v: s._v + 1 })); }
 
   componentDidMount() {
+    this._prof = this._profilesLoad(); this._profilesSave();
     this._undoSuspended = true;
     this.loadState();
     this.recordXpSnapshot(); // stamp today's baseline so history accrues on real accounts
@@ -352,7 +431,7 @@ export default class Almanac extends React.Component {
       ["Within the Light", "Dealing with Scabaras"].forEach((n) => { if (ov[n] != null) { delete ov[n]; dirty = true; } }); // RS3-only, removed
       // Persist directly — a one-time schema migration must run even while
       // undo capture is suspended during boot, and shouldn't be an undo step.
-      if (dirty) { try { localStorage.setItem("almanac.questdone.v1", JSON.stringify(ov)); } catch (e) {} }
+      if (dirty) { try { localStorage.setItem(this._pk("almanac.questdone.v1"), JSON.stringify(ov)); } catch (e) {} }
     }
     // Diary + Combat Achievement completion, user-markable (seeded from the
     // static data statuses the first time, like quests).
@@ -392,10 +471,10 @@ export default class Almanac extends React.Component {
   // (localStorage lags the in-memory mutation by one write), grouped per
   // synchronous action, so any add/edit/delete/config change is one undo step.
   _undoKeys = ["almanac.logs.v1", "almanac.goals.v1", "almanac.objectives.v1", "almanac.flipcfg.v1", "almanac.alchcfg.v1", "almanac.farmcfg.v1", "almanac.mixcfg.v1", "almanac.rccfg.v1", "almanac.gcfg.v1", "almanac.blocks.v1", "almanac.bossov.v1", "almanac.questdone.v1", "almanac.stats.v1", "almanac.avoiddismiss.v1", "almanac.loadout.v1", "almanac.gearowned.v1", "almanac.diarydone.v1", "almanac.cadone.v1", "almanac.journal.v1"];
-  _snap() { const s = {}; this._undoKeys.forEach((k) => { s[k] = localStorage.getItem(k); }); return s; }
+  _snap() { const s = {}; this._undoKeys.forEach((k) => { s[k] = localStorage.getItem(this._pk(k)); }); return s; }
   _restore(snap) {
     this._undoSuspended = true;
-    this._undoKeys.forEach((k) => { const v = snap[k]; if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); });
+    this._undoKeys.forEach((k) => { const v = snap[k]; if (v == null) localStorage.removeItem(this._pk(k)); else localStorage.setItem(this._pk(k), v); });
     this.loadState();
     this._undoSuspended = false;
     this.bump();
@@ -785,6 +864,31 @@ export default class Almanac extends React.Component {
       Object.values(this.bossDrops).forEach((arr) => arr.forEach((d) => { const m = byName[(d.n || "").toLowerCase().replace(/\s*\(pet\)/, "")]; if (m && (m.high || m.low)) { d.v = m.high || m.low; n++; } }));
       this.setState({ priceStatus: `Re-priced ${n} drops · ${new Date().toLocaleTimeString()}` });
     } catch (err) { this.setState({ priceStatus: "Live prices unavailable here." }); }
+  };
+
+  // Import quest + diary completion from RuneLite's WikiSync plugin, so a new
+  // user never hand-marks 209 quests. Additive: WikiSync-completed entries are
+  // marked done; manual marks it doesn't know about are left alone. One undo
+  // step. Our quest names ARE the RuneLite names, so mapping is exact — any
+  // stragglers (e.g. the dropped RFD umbrella) are counted, not guessed.
+  importWikiSync = async () => {
+    const rsn = this.stats && !this.stats.demo ? this.stats.rsn : this.val("rsn_input");
+    this.setState({ syncMsg: "Asking WikiSync for " + (rsn || "…") + "…" });
+    const res = await fetchWikiSync(rsn);
+    if (!res.ok) { this.setState({ syncMsg: res.error }); return; }
+    const knownQ = new Set((D.quests || []).map((q) => q.n));
+    const knownD = new Set((D.diaries || []).map((d) => d.region + "|" + d.tier));
+    let qN = 0, dN = 0, skipped = 0;
+    Object.keys(res.quests).forEach((n) => {
+      if (!knownQ.has(n)) { if (n !== "Recipe for Disaster") skipped++; return; }
+      if (!this.questOv[n]) { this.questOv[n] = true; qN++; }
+    });
+    Object.keys(res.diaries).forEach((k) => { if (knownD.has(k) && !this.diaryOv[k]) { this.diaryOv[k] = true; dN++; } });
+    this._save("almanac.questdone.v1", this.questOv);
+    this._save("almanac.diarydone.v1", this.diaryOv);
+    this._pfCache = null;
+    this.setState({ syncMsg: `WikiSync (${res.rsn}): imported ${qN} quest${qN === 1 ? "" : "s"} + ${dN} diary tier${dN === 1 ? "" : "s"}${skipped ? ` · ${skipped} unrecognized name${skipped === 1 ? "" : "s"} skipped` : ""} — undoable.` });
+    this.bump();
   };
 
   // ---------- handlers: navigation & forms ----------
@@ -1817,6 +1921,21 @@ export default class Almanac extends React.Component {
                 <Btn tone="quiet" onClick={this.redo} style={{ opacity: (this._redoStack || []).length ? 1 : 0.4 }}>↷ Redo</Btn>
                 <Btn tone="quiet" onClick={this.clearAllLogs} style={{ color: C.red }}>⌫ Clear all</Btn>
               </div>
+              <select className="led" value={this.profile.active} onChange={(e) => (e.target.value === "__new__" ? this.addProfile() : this.switchProfile(e.target.value))} title="Profiles — a separate save for each adventurer on this browser" style={{ width: 132 }}>
+                {this.profile.list.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                <option value="__new__">＋ New profile…</option>
+              </select>
+              <Btn tone="quiet" onClick={() => this.setState((s) => ({ profMenu: !s.profMenu }))} title="Profile backup & management">⛃</Btn>
+              {this.state.profMenu && (
+                <div style={{ position: "absolute", top: 62, right: 30, zIndex: 40, background: "#f2e7cb", border: "2px solid rgba(44,32,19,.3)", borderRadius: 8, padding: 13, boxShadow: "0 10px 26px rgba(30,20,8,.3)", display: "flex", flexDirection: "column", gap: 8, width: 250 }}>
+                  <Kicker color={C.goldDeep}>Profile · {(this.profile.list.find((p) => p.id === this.profile.active) || {}).name}</Kicker>
+                  <Btn tone="quiet" onClick={this.exportProfile}>⬇ Export backup (.json)</Btn>
+                  <Btn tone="quiet" onClick={() => this._importInput && this._importInput.click()}>⬆ Import backup…</Btn>
+                  <input ref={(el) => (this._importInput = el)} type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) this.importProfile(f); e.target.value = ""; }} />
+                  <Btn tone="quiet" onClick={this.deleteProfile} style={{ color: C.red }}>✕ Delete this profile</Btn>
+                  <div style={serif({ fontSize: 10.5, fontStyle: "normal", color: C.muted })}>Each profile is its own save in this browser. Export a backup to move devices or share your setup with a friend.</div>
+                </div>
+              )}
               <input className="led" id="rsn_input" defaultValue={this.stats && !this.stats.demo ? rsn : ""} placeholder="RuneScape name…" onKeyDown={(e) => { if (e.key === "Enter") this.fetchStats(e); }} style={{ width: 168 }} />
               <Btn tone="gold" onClick={this.fetchStats}>{this.state.fetching ? "…" : "Fetch stats"}</Btn>
               <Seg options={[{ key: "main", label: "MAIN" }, { key: "iron", label: "IRONMAN" }]} active={this.mode} onPick={this.setMode} size={9.5} />
@@ -5881,7 +6000,8 @@ export default class Almanac extends React.Component {
     return (
       <div>
         <SectionTitle kicker="The Adventure Log" title="Quest Sequencer" accent={QTH.accent}
-          right={<Seg options={[{ key: "optimal", label: "OPTIMAL" }, { key: "ironman", label: "IRONMAN" }, { key: "release", label: "RELEASE" }, { key: "series", label: "SERIES" }]} active={method} onPick={(v) => this.setState({ questMethod: v })} size={9} />} />
+          right={<div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}><Btn onClick={this.importWikiSync} title="Pull your completed quests & diaries from RuneLite's WikiSync plugin (enable it in RuneLite, log in once)">⟲ Sync from RuneLite</Btn><Seg options={[{ key: "optimal", label: "OPTIMAL" }, { key: "ironman", label: "IRONMAN" }, { key: "release", label: "RELEASE" }, { key: "series", label: "SERIES" }]} active={method} onPick={(v) => this.setState({ questMethod: v })} size={9} /></div>} />
+        {this.state.syncMsg && <div style={{ ...mono({ fontSize: 11, color: "#6a5436" }), marginBottom: 10 }}>{this.state.syncMsg}</div>}
         <Card style={{ marginBottom: 14, borderTop: `3px solid ${QTH.accent}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 26, flexWrap: "wrap" }}>
             <Donut size={130} thickness={20} centerLabel={`${d.qDone} / ${d.qTotal}`} centerValue={d.qPct + "%"} centerColor={QTH.accent} segments={qSeg} />
@@ -5973,7 +6093,9 @@ export default class Almanac extends React.Component {
     const statRow = [["Completed", count("Done"), C.green], ["Stat-ready", count("Stat-ready"), "#9a7530"], ["Blocked", count("Blocked"), C.red]];
     return (
       <div>
-        <SectionTitle kicker="Regional Renown" title="Diary & Combat Achievements" accent={DTH.accent} />
+        <SectionTitle kicker="Regional Renown" title="Diary & Combat Achievements" accent={DTH.accent}
+          right={<Btn onClick={this.importWikiSync} title="Pull your completed quests & diaries from RuneLite's WikiSync plugin">⟲ Sync from RuneLite</Btn>} />
+        {this.state.syncMsg && <div style={{ ...mono({ fontSize: 11, color: "#6a5436" }), marginBottom: 10 }}>{this.state.syncMsg}</div>}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 12, marginBottom: 16 }}>
           {statRow.map(([l, v, c], i) => (<Card key={i} pad={16} style={{ borderTop: `3px solid ${c}` }}><Kicker>{l}</Kicker><div style={cinzel({ fontWeight: 800, fontSize: 30, color: c, marginTop: 6 })}>{v}</div></Card>))}
         </div>
