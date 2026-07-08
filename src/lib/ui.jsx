@@ -102,7 +102,7 @@ export function Kicker({ children, color = C.muted, style }) {
 export function SectionTitle({ kicker, title, right, accent }) {
   const a = accent || C.goldDeep;
   return (
-    <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 18 }}>
+    <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 18, flexWrap: "wrap", gap: 10 }}>
       <div>
         {kicker && <Kicker color={a}>{kicker}</Kicker>}
         <div style={cinzel({ fontWeight: 700, fontSize: 26, color: C.ink, marginTop: 4 })}>{title}</div>
@@ -119,7 +119,7 @@ export function StatCards({ items, cols }) {
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: `repeat(${cols || items.length}, minmax(0,1fr))`,
+        gridTemplateColumns: `repeat(auto-fit, minmax(min(${cols >= 5 ? 130 : 150}px, 100%), 1fr))`,
         gap: 12,
         marginBottom: 16,
       }}
@@ -261,7 +261,7 @@ export function Bar({ pct, c1 = C.gold, c2 = C.goldBright, h = 8 }) {
 // Segmented control. options: [{key,label}]; active = current key.
 export function Seg({ options, active, onPick, size = 10.5 }) {
   return (
-    <div style={{ display: "inline-flex" }}>
+    <div style={{ display: "inline-flex", flexWrap: "wrap" }}>
       {options.map((o, i) => {
         const on = o.key === active;
         return (

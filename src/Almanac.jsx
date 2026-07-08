@@ -380,6 +380,14 @@ export default class Almanac extends React.Component {
 
   componentDidMount() {
     this._prof = this._profilesLoad(); this._profilesSave();
+    // Track the mobile breakpoint — layout branches (drawer nav, bottom tab
+    // bar, compact header) key off state.mobile.
+    if (typeof window !== "undefined" && window.matchMedia) {
+      this._mq = window.matchMedia("(max-width: 860px)");
+      this._mqFn = () => this.setState({ mobile: this._mq.matches, navOpen: false });
+      if (this._mq.addEventListener) this._mq.addEventListener("change", this._mqFn);
+      if (this._mq.matches) this.setState({ mobile: true });
+    }
     this._undoSuspended = true;
     this.loadState();
     this.recordXpSnapshot(); // stamp today's baseline so history accrues on real accounts
@@ -411,7 +419,7 @@ export default class Almanac extends React.Component {
     // Tick the live field-session clock (elapsed + kills/hr) while one runs.
     this._sessTick = setInterval(() => { if (this.bossSession) this.bump(); }, 10000);
   }
-  componentWillUnmount() { if (this._enterCommit) document.removeEventListener("keydown", this._enterCommit); if (this._sessTick) clearInterval(this._sessTick); }
+  componentWillUnmount() { if (this._enterCommit) document.removeEventListener("keydown", this._enterCommit); if (this._sessTick) clearInterval(this._sessTick); if (this._mq && this._mqFn && this._mq.removeEventListener) this._mq.removeEventListener("change", this._mqFn); }
 
   // Load every persisted collection from localStorage into instance fields.
   // Reused on first mount, on undo/redo, and after a clear. `firstRun` (no saved
@@ -901,7 +909,7 @@ export default class Almanac extends React.Component {
   };
 
   // ---------- handlers: navigation & forms ----------
-  go = (s) => { this.setState({ section: s, openForm: null, editLog: null }); if ((s === "flipping" || s === "farming" || s === "herblore" || s === "runecraft") && !this.priceRows && !this._marketLoading) { this._marketLoading = true; this.refreshPrices(); } };
+  go = (s) => { this.setState({ section: s, openForm: null, editLog: null, navOpen: false }); if (typeof window !== "undefined" && this.state.mobile) window.scrollTo(0, 0); if ((s === "flipping" || s === "farming" || s === "herblore" || s === "runecraft") && !this.priceRows && !this._marketLoading) { this._marketLoading = true; this.refreshPrices(); } };
   setLens = (id) => this.setState({ counselLens: id });
   setGoal = (id) => { this.setState({ goalId: id }); this._save("almanac.counselgoal.v1", id); };
   setPfSort = (id) => this.setState({ pfSort: id });
@@ -1874,8 +1882,66 @@ export default class Almanac extends React.Component {
     return <input className="led" id={id} placeholder={ph} defaultValue={opts.def != null ? opts.def : ""} list={opts.list} type={opts.type || "text"} style={{ width: opts.w || 150, ...opts.style }} />;
   }
 
+  // Sidebar body — one source of truth for the desktop rail AND the mobile
+  // slide-over drawer (nav taps close the drawer via go()).
+  renderSidebarInner(sec) {
+    return (
+      <>
+        <div style={{ padding: "24px 22px 16px", borderBottom: "1px solid rgba(201,162,74,.22)", textAlign: "center" }}>
+          <div style={{ width: 60, height: 60, margin: "0 auto 12px", borderRadius: "50%", background: "radial-gradient(circle at 38% 32%, #e3c878, #b98f3e 55%, #7c5a22)", border: "2px solid #e3c878", display: "flex", alignItems: "center", justifyContent: "center", animation: "sealpulse 4.5s ease-in-out infinite", boxShadow: "0 6px 16px rgba(0,0,0,.5)" }}>
+            <span style={cinzel({ fontWeight: 800, fontSize: 26, color: "#3a2410" })}>⚔</span>
+          </div>
+          <div style={cinzel({ fontWeight: 700, fontSize: 17, letterSpacing: ".12em", color: "#e7cf8c", textTransform: "uppercase" })}>Almanac</div>
+          <div style={mono({ fontSize: 9, letterSpacing: ".26em", color: "#9c7c44", textTransform: "uppercase", marginTop: 4 })}>Adventurer's Ledger</div>
+        </div>
+        <nav style={{ padding: "12px 12px 24px" }}>
+          {NAV.map((grp) => (
+            <div key={grp.label} style={{ margin: "6px 0 14px" }}>
+              <div style={mono({ fontSize: 9, letterSpacing: ".3em", color: "#8a6a38", textTransform: "uppercase", padding: "6px 12px" })}>{grp.label}</div>
+              {grp.items.map(([id, label]) => {
+                const on = sec === id;
+                return (
+                  <a key={id} href="#" onClick={(e) => { e.preventDefault(); this.go(id); }}
+                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", textDecoration: "none", borderRadius: 6, margin: "1px 4px", background: on ? "linear-gradient(100deg, rgba(201,162,74,.22), rgba(201,162,74,.05))" : "transparent", borderLeft: on ? "2px solid #e3c878" : "2px solid transparent" }}>
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", flex: "0 0 7px", background: on ? "#e3c878" : "#6b5226" }} />
+                    <span style={{ ...serif({ fontSize: 15, color: on ? "#f0e2bd" : "#c2a877" }), flex: 1 }}>{label}</span>
+                  </a>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
+      </>
+    );
+  }
+  // Mobile bottom tab bar — thumb-reach shortcuts to the field-use sections
+  // (log a kill, tick a farm run, check the Standing Order) + the drawer.
+  renderTabBar(sec) {
+    const TABS = [
+      ["__menu__", "☰", "Menu"],
+      ["dashboard", "⌂", "Home"],
+      ["bossing", "☠", "Boss"],
+      ["farming", "🌱", "Farm"],
+      ["quests", "📜", "Quests"],
+    ];
+    return (
+      <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 60, display: "flex", background: "#241509", borderTop: "2px solid #6b5226", boxShadow: "0 -6px 18px rgba(0,0,0,.45)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+        {TABS.map(([id, icon, label]) => {
+          const on = sec === id;
+          return (
+            <a key={id} href="#" onClick={(e) => { e.preventDefault(); if (id === "__menu__") this.setState((s) => ({ navOpen: !s.navOpen })); else this.go(id); }}
+              style={{ flex: 1, textAlign: "center", textDecoration: "none", padding: "9px 0 8px", borderTop: on ? "2px solid #e3c878" : "2px solid transparent", marginTop: -2 }}>
+              <div style={{ fontSize: 17, lineHeight: "20px" }}>{icon}</div>
+              <div style={mono({ fontSize: 8.5, letterSpacing: ".12em", color: on ? "#e7cf8c" : "#9c7c44", textTransform: "uppercase" })}>{label}</div>
+            </a>
+          );
+        })}
+      </div>
+    );
+  }
   render() {
     if (!this.logs) return <div style={{ padding: 40, color: "#999" }}>Loading…</div>;
+    const mobile = !!this.state.mobile;
     const sec = this.state.section;
     const TH = themeFor(sec);
     const t = TITLES[sec] || TITLES.dashboard;
@@ -1886,57 +1952,47 @@ export default class Almanac extends React.Component {
     return (
       <div style={{ display: "flex", minHeight: "100vh", background: "#1c130c", backgroundImage: "radial-gradient(circle at 30% 20%, rgba(120,86,40,.18), transparent 60%), radial-gradient(circle at 80% 80%, rgba(80,55,30,.22), transparent 55%)" }}>
         {/* ---- sidebar ---- */}
-        <aside style={{ width: 256, flex: "0 0 256px", minHeight: "100vh", position: "sticky", top: 0, alignSelf: "flex-start", height: "100vh", overflowY: "auto", background: "#2a1a10", backgroundImage: "linear-gradient(100deg, #321f12, #241509)", borderRight: "3px solid #6b5226", boxShadow: "inset -14px 0 26px rgba(0,0,0,.45)" }}>
-          <div style={{ padding: "24px 22px 16px", borderBottom: "1px solid rgba(201,162,74,.22)", textAlign: "center" }}>
-            <div style={{ width: 60, height: 60, margin: "0 auto 12px", borderRadius: "50%", background: "radial-gradient(circle at 38% 32%, #e3c878, #b98f3e 55%, #7c5a22)", border: "2px solid #e3c878", display: "flex", alignItems: "center", justifyContent: "center", animation: "sealpulse 4.5s ease-in-out infinite", boxShadow: "0 6px 16px rgba(0,0,0,.5)" }}>
-              <span style={cinzel({ fontWeight: 800, fontSize: 26, color: "#3a2410" })}>⚔</span>
+        {!mobile && (
+          <aside style={{ width: 256, flex: "0 0 256px", minHeight: "100vh", position: "sticky", top: 0, alignSelf: "flex-start", height: "100vh", overflowY: "auto", background: "#2a1a10", backgroundImage: "linear-gradient(100deg, #321f12, #241509)", borderRight: "3px solid #6b5226", boxShadow: "inset -14px 0 26px rgba(0,0,0,.45)" }}>
+            {this.renderSidebarInner(sec)}
+          </aside>
+        )}
+        {mobile && this.state.navOpen && (
+          <div style={{ position: "fixed", inset: 0, zIndex: 90 }}>
+            <div onClick={() => this.setState({ navOpen: false })} style={{ position: "absolute", inset: 0, background: "rgba(12,7,3,.62)" }} />
+            <div style={{ position: "absolute", top: 0, left: 0, bottom: 0, width: 272, maxWidth: "82vw", overflowY: "auto", background: "#2a1a10", backgroundImage: "linear-gradient(100deg, #321f12, #241509)", borderRight: "3px solid #6b5226", boxShadow: "8px 0 30px rgba(0,0,0,.6)" }}>
+              {this.renderSidebarInner(sec)}
             </div>
-            <div style={cinzel({ fontWeight: 700, fontSize: 17, letterSpacing: ".12em", color: "#e7cf8c", textTransform: "uppercase" })}>Almanac</div>
-            <div style={mono({ fontSize: 9, letterSpacing: ".26em", color: "#9c7c44", textTransform: "uppercase", marginTop: 4 })}>Adventurer's Ledger</div>
           </div>
-          <nav style={{ padding: "12px 12px 24px" }}>
-            {NAV.map((grp) => (
-              <div key={grp.label} style={{ margin: "6px 0 14px" }}>
-                <div style={mono({ fontSize: 9, letterSpacing: ".3em", color: "#8a6a38", textTransform: "uppercase", padding: "6px 12px" })}>{grp.label}</div>
-                {grp.items.map(([id, label]) => {
-                  const on = sec === id;
-                  return (
-                    <a key={id} href="#" onClick={(e) => { e.preventDefault(); this.go(id); }}
-                      style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", textDecoration: "none", borderRadius: 6, margin: "1px 4px", background: on ? "linear-gradient(100deg, rgba(201,162,74,.22), rgba(201,162,74,.05))" : "transparent", borderLeft: on ? "2px solid #e3c878" : "2px solid transparent" }}>
-                      <span style={{ width: 7, height: 7, borderRadius: "50%", flex: "0 0 7px", background: on ? "#e3c878" : "#6b5226" }} />
-                      <span style={{ ...serif({ fontSize: 15, color: on ? "#f0e2bd" : "#c2a877" }), flex: 1 }}>{label}</span>
-                    </a>
-                  );
-                })}
-              </div>
-            ))}
-          </nav>
-        </aside>
+        )}
 
         {/* ---- main column ---- */}
         <main style={{ flex: 1, minWidth: 0, minHeight: "100vh", background: "#e9dcbf", backgroundImage: `radial-gradient(circle at 15% 0%, rgba(255,250,235,.55), transparent 45%), radial-gradient(circle at 85% 6%, ${TH.accent}1f, transparent 42%), radial-gradient(circle at 85% 100%, rgba(150,120,70,.16), transparent 50%)`, transition: "background-image .4s ease" }}>
           {/* header + RSN bar */}
-          <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "14px 30px", borderBottom: `2px solid ${TH.accent}`, boxShadow: `inset 0 -4px 0 -2px ${TH.accent}55`, background: "linear-gradient(180deg, rgba(231,217,184,.97), rgba(231,217,184,.85))", position: "sticky", top: 0, zIndex: 25 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
-              <div style={{ width: 34, height: 34, borderRadius: 8, flex: "0 0 34px", background: `linear-gradient(140deg, ${TH.g1}, ${TH.g2})`, border: `1px solid ${TH.accent}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, boxShadow: `0 0 12px ${TH.accent}44` }}>{TH.icon}</div>
-              <div>
-                <div style={mono({ fontSize: 9, letterSpacing: ".22em", color: TH.accent, textTransform: "uppercase" })}>{t[0]}</div>
-                <div style={cinzel({ fontWeight: 700, fontSize: 21, color: "#3a2812" })}>{t[1]}</div>
-              </div>
+          <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: mobile ? 8 : 16, padding: mobile ? "10px 12px" : "14px 30px", borderBottom: `2px solid ${TH.accent}`, boxShadow: `inset 0 -4px 0 -2px ${TH.accent}55`, background: "linear-gradient(180deg, rgba(231,217,184,.97), rgba(231,217,184,.85))", position: "sticky", top: 0, zIndex: 25 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: mobile ? 9 : 13, minWidth: 0 }}>
+              {mobile && <Btn tone="quiet" onClick={() => this.setState((s) => ({ navOpen: !s.navOpen }))} style={{ fontSize: 16, padding: "7px 11px" }}>☰</Btn>}
+              {!mobile && <div style={{ width: 34, height: 34, borderRadius: 8, flex: "0 0 34px", background: `linear-gradient(140deg, ${TH.g1}, ${TH.g2})`, border: `1px solid ${TH.accent}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, boxShadow: `0 0 12px ${TH.accent}44` }}>{TH.icon}</div>}
+              {!mobile && (
+                <div style={{ minWidth: 0 }}>
+                  <div style={mono({ fontSize: 9, letterSpacing: ".22em", color: TH.accent, textTransform: "uppercase" })}>{t[0]}</div>
+                  <div style={{ ...cinzel({ fontWeight: 700, fontSize: 21, color: "#3a2812" }), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t[1]}</div>
+                </div>
+              )}
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: mobile ? 6 : 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
               <div style={{ display: "flex", gap: 4, paddingRight: 6, marginRight: 2, borderRight: "1px solid rgba(44,32,19,.2)" }}>
-                <Btn tone="quiet" onClick={this.undo} style={{ opacity: (this._undoStack || []).length ? 1 : 0.4 }}>↶ Undo</Btn>
-                <Btn tone="quiet" onClick={this.redo} style={{ opacity: (this._redoStack || []).length ? 1 : 0.4 }}>↷ Redo</Btn>
-                <Btn tone="quiet" onClick={this.clearAllLogs} style={{ color: C.red }}>⌫ Clear all</Btn>
+                <Btn tone="quiet" onClick={this.undo} style={{ opacity: (this._undoStack || []).length ? 1 : 0.4 }}>{mobile ? "↶" : "↶ Undo"}</Btn>
+                <Btn tone="quiet" onClick={this.redo} style={{ opacity: (this._redoStack || []).length ? 1 : 0.4 }}>{mobile ? "↷" : "↷ Redo"}</Btn>
+                {!mobile && <Btn tone="quiet" onClick={this.clearAllLogs} style={{ color: C.red }}>⌫ Clear all</Btn>}
               </div>
-              <select className="led" value={this.profile.active} onChange={(e) => (e.target.value === "__new__" ? this.addProfile() : this.switchProfile(e.target.value))} title="Profiles — a separate save for each adventurer on this browser" style={{ width: 132 }}>
+              <select className="led" value={this.profile.active} onChange={(e) => (e.target.value === "__new__" ? this.addProfile() : this.switchProfile(e.target.value))} title="Profiles — a separate save for each adventurer on this browser" style={{ width: mobile ? 104 : 132 }}>
                 {this.profile.list.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 <option value="__new__">＋ New profile…</option>
               </select>
               <Btn tone="quiet" onClick={() => this.setState((s) => ({ profMenu: !s.profMenu }))} title="Profile backup & management">⛃</Btn>
               {this.state.profMenu && (
-                <div style={{ position: "absolute", top: 62, right: 30, zIndex: 40, background: "#f2e7cb", border: "2px solid rgba(44,32,19,.3)", borderRadius: 8, padding: 13, boxShadow: "0 10px 26px rgba(30,20,8,.3)", display: "flex", flexDirection: "column", gap: 8, width: 250 }}>
+                <div style={{ position: "absolute", top: 62, right: mobile ? 10 : 30, zIndex: 40, background: "#f2e7cb", border: "2px solid rgba(44,32,19,.3)", borderRadius: 8, padding: 13, boxShadow: "0 10px 26px rgba(30,20,8,.3)", display: "flex", flexDirection: "column", gap: 8, width: 250, maxWidth: "92vw" }}>
                   <Kicker color={C.goldDeep}>Profile · {(this.profile.list.find((p) => p.id === this.profile.active) || {}).name}</Kicker>
                   <Btn tone="quiet" onClick={this.renameProfile}>✎ Rename this profile</Btn>
                   <Btn tone="quiet" onClick={this.exportProfile}>⬇ Export backup (.json)</Btn>
@@ -1946,10 +2002,10 @@ export default class Almanac extends React.Component {
                   <div style={serif({ fontSize: 10.5, fontStyle: "normal", color: C.muted })}>Each profile is its own save in this browser. Export a backup to move devices or share your setup with a friend.</div>
                 </div>
               )}
-              <input className="led" id="rsn_input" defaultValue={this.stats && !this.stats.demo ? rsn : ""} placeholder="RuneScape name…" onKeyDown={(e) => { if (e.key === "Enter") this.fetchStats(e); }} style={{ width: 168 }} />
-              <Btn tone="gold" onClick={this.fetchStats}>{this.state.fetching ? "…" : "Fetch stats"}</Btn>
-              <Seg options={[{ key: "main", label: "MAIN" }, { key: "iron", label: "IRONMAN" }]} active={this.mode} onPick={this.setMode} size={9.5} />
-              <div style={{ width: 40, height: 40, borderRadius: "50%", background: "radial-gradient(circle at 38% 32%, #e3c878, #b98f3e 60%, #7c5a22)", border: "2px solid #6b5226", display: "flex", alignItems: "center", justifyContent: "center", ...cinzel({ fontWeight: 800, color: "#3a2410", fontSize: 16 }) }}>{initial}</div>
+              <input className="led" id="rsn_input" defaultValue={this.stats && !this.stats.demo ? rsn : ""} placeholder={mobile ? "RSN…" : "RuneScape name…"} onKeyDown={(e) => { if (e.key === "Enter") this.fetchStats(e); }} style={{ width: mobile ? 108 : 168 }} />
+              <Btn tone="gold" onClick={this.fetchStats}>{this.state.fetching ? "…" : mobile ? "Fetch" : "Fetch stats"}</Btn>
+              <Seg options={[{ key: "main", label: "MAIN" }, { key: "iron", label: mobile ? "IRON" : "IRONMAN" }]} active={this.mode} onPick={this.setMode} size={9.5} />
+              {!mobile && <div style={{ width: 40, height: 40, borderRadius: "50%", background: "radial-gradient(circle at 38% 32%, #e3c878, #b98f3e 60%, #7c5a22)", border: "2px solid #6b5226", display: "flex", alignItems: "center", justifyContent: "center", ...cinzel({ fontWeight: 800, color: "#3a2410", fontSize: 16 }) }}>{initial}</div>}
             </div>
           </header>
           {this.state.fetchMsg && (
@@ -1959,7 +2015,7 @@ export default class Almanac extends React.Component {
             </div>
           )}
 
-          <div style={{ padding: "24px 30px 60px" }}>
+          <div style={{ padding: mobile ? "16px 12px 86px" : "24px 30px 60px" }}>
             {sec === "dashboard" && this.renderDashboard(A)}
             {sec === "skills" && this.renderSkills()}
             {sec === "pathfinder" && this.renderPathfinder()}
@@ -1977,6 +2033,7 @@ export default class Almanac extends React.Component {
             {sec === "diary" && this.renderDiary()}
             {sec === "journal" && this.renderJournal()}
           </div>
+          {mobile && this.renderTabBar(sec)}
         </main>
       </div>
     );
@@ -2844,7 +2901,7 @@ export default class Almanac extends React.Component {
     return (
       <div>
         <SectionTitle kicker="Live from your hiscores" title="Skills" accent={TH.accent} />
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 12, marginBottom: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(170px, 100%), 1fr))", gap: 12, marginBottom: 16 }}>
           {statCards.map((s, i) => (
             <Card key={i} pad={14} style={{ borderTop: `3px solid ${s.c}` }}>
               <Kicker>{s.label}</Kicker>
@@ -2932,7 +2989,7 @@ export default class Almanac extends React.Component {
           </div>
         )}
         {/* reachability tier cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 22 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(160px, 100%), 1fr))", gap: 14, marginBottom: 22 }}>
           {[[pf.pfTotalLocked, "Locked pieces", "#6a4a8a", "#2c2013"], [pf.pfTierOne, "One lock away", "#5c7a35", "#5c6e35"], [pf.pfTierTwo, "Two locks away", "#9a7530", "#9a7530"], [pf.pfTierDeep, "Deeper in the web", "#963a2c", "#963a2c"]].map(([v, l, bc, fc], i) => (
             <div key={i} style={{ background: "#f2e9d2", border: "1px solid rgba(44,32,19,.2)", borderTop: `3px solid ${bc}`, borderRadius: 5, padding: "16px 18px" }}>
               <div style={cinzel({ fontWeight: 800, fontSize: 30, color: fc })}>{v}</div>
@@ -3182,7 +3239,7 @@ export default class Almanac extends React.Component {
         })()}
         <Card>
           <Kicker color={C.goldDeep}>Funding & timeline</Kicker>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginTop: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(160px, 100%), 1fr))", gap: 12, marginTop: 12 }}>
             {[["Bank available", this.short(bank)], ["Cost to fund buyables", this.short(cost)], ["Flip profit / day", this.signed(flipPerDay)], ["Days flipping to fund", flipPerDay > 0 ? Math.ceil(shortfall / flipPerDay) : "—"]].map(([l, v], i) => (
               <div key={i}><Kicker>{l}</Kicker><div style={cinzel({ fontWeight: 700, fontSize: 18, marginTop: 5 })}>{v}</div></div>
             ))}
@@ -3365,7 +3422,7 @@ export default class Almanac extends React.Component {
               <Btn tone="quiet" onClick={() => this.toggleForm("scan")}>+ Item</Btn>
             </div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(170px, 100%), 1fr))", gap: 10 }}>
             {controls.map((c) => (
               <div key={c.key} style={{ background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)", display: "flex", flexDirection: "column", minHeight: 108 }}>
                 <Kicker style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.label}</Kicker>
@@ -3667,7 +3724,7 @@ export default class Almanac extends React.Component {
             <Kicker color={C.purple}>⚙ Setup</Kicker>
             <Btn tone="quiet" onClick={this.refreshNatRune}>⟳ Nat price (Wiki)</Btn>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(170px, 100%), 1fr))", gap: 12 }}>
             <div style={setupCell}><Kicker>Casts / hour</Kicker><input className="led" defaultValue={this.fmt(this.alchcfg.castsPerHour)} onBlur={(e) => this.setCfg("alchcfg", "castsPerHour", e.target.value)} style={{ width: "100%", marginTop: 6 }} /></div>
             <div style={setupCell}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><Kicker>Nature rune</Kicker><Tag color={C.purple} bg="rgba(106,74,138,.14)">LIVE</Tag></div><div style={cinzel({ fontWeight: 700, fontSize: 19, marginTop: 6 })}>{this.fmt(this.alchcfg.natRune)} <span style={mono({ fontSize: 11, color: C.muted })}>gp</span></div><div style={serif({ fontSize: 10.5, fontStyle: "normal", color: C.muted, marginTop: 2 })}>OSRS Wiki · id 561</div></div>
             <div style={setupCell}><Kicker>Fire rune source</Kicker>
@@ -3786,7 +3843,7 @@ export default class Almanac extends React.Component {
     );
     return (
       <div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 12, marginBottom: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(320px, 100%), 1fr))", gap: 12, marginBottom: 14 }}>
           {profit
             ? heroCard("💰 Best profit now · at your level " + lvl, profit.name,
                 `${this.signed(profit.net)}/pot · ${profit.label}` + (profit.qtyAfford > 0 ? ` · ${this.fmt(profit.qtyAfford)} affordable → ${this.signed(profit.totalAfford)} total` : " · log a net-worth snapshot to size affordability"),
@@ -3969,7 +4026,7 @@ export default class Almanac extends React.Component {
     return (
       <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
         <Kicker color={TH.accent}>⚗ Bench &amp; logistics — every knob re-prices the whole recipe book instantly</Kicker>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 12, marginTop: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(225px, 100%), 1fr))", gap: 12, marginTop: 12 }}>
           <div style={setupCell}><Kicker>Bench actions / hour</Kicker><input className="led" defaultValue={this.fmt(cfg.mixesPerHour)} onBlur={(e) => this.setCfg("mixcfg", "mixesPerHour", e.target.value)} style={{ width: "100%", marginTop: 6 }} />{hint("Mixing at a bank: ~2,400/hr is the practical ceiling. A self-made unf costs a second action — the planner halves those recipes' pots/hr automatically.")}</div>
           <div style={setupCell}><Kicker>Herb cleans / hour</Kicker><input className="led" defaultValue={this.fmt(cfg.cleansPerHour)} onBlur={(e) => this.setCfg("mixcfg", "cleansPerHour", e.target.value)} style={{ width: "100%", marginTop: 6 }} />{hint("Only matters on self-clean paths (grimy herbs, bonus xp). ~6,000/hr banked.")}</div>
           <div style={setupCell}><Kicker>Zahur (Nardah)</Kicker>{sel("zahur", cfg.zahur ? "yes" : "no", [["yes", "Use Zahur (200 gp/item)"], ["no", "Skip Zahur"]])}{hint("Cleans grimy herbs and makes water-based unf potions for 200 gp each — instant, noted, no xp, no bench time.")}</div>
@@ -4110,7 +4167,7 @@ export default class Almanac extends React.Component {
     );
     return (
       <div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 12, marginBottom: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(320px, 100%), 1fr))", gap: 12, marginBottom: 14 }}>
           {profit
             ? heroCard("💰 Best craft now · at your level " + lvl, profit.name,
                 (profit.profitEss != null ? "+" + profit.profitEss + "/ess · ×" + profit.mult + " · " + profit.via : profit.via) + (profit.measured ? " · your measured rate" : ""),
@@ -4287,7 +4344,7 @@ export default class Almanac extends React.Component {
     return (
       <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
         <Kicker color={TH.accent}>⚒ Pouches &amp; logistics — every toggle re-runs the whole ledger</Kicker>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 12, marginTop: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(225px, 100%), 1fr))", gap: 12, marginTop: 12 }}>
           <div style={{ ...setupCell, gridColumn: "span 2" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><Kicker>Essence pouches</Kicker><Tag color={TH.accent} bg="rgba(68,84,158,.12)">{t.ess} ess / trip</Tag></div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
@@ -5650,7 +5707,7 @@ export default class Almanac extends React.Component {
           <div>
           <Card style={{ marginBottom: 14, borderTop: `3px solid ${TH.accent}` }}>
             <Kicker color={TH.accent}>Run mechanics · these feed every net/run</Kicker>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10, marginTop: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(170px, 100%), 1fr))", gap: 10, marginTop: 10 }}>
               <div style={{ background: C.cardLight, padding: "11px 13px", borderRadius: 6, border: "1px solid rgba(44,32,19,.12)" }}>
                 <Kicker>Patches / run</Kicker>
                 <div style={cinzel({ fontWeight: 800, fontSize: 24, color: C.ink, marginTop: 4 })}>{Y.P}</div>
@@ -6106,7 +6163,7 @@ export default class Almanac extends React.Component {
         <SectionTitle kicker="Regional Renown" title="Diary & Combat Achievements" accent={DTH.accent}
           right={<Btn onClick={this.importWikiSync} title="Pull your completed quests & diaries from RuneLite's WikiSync plugin">⟲ Sync from RuneLite</Btn>} />
         {this.state.syncMsg && <div style={{ ...mono({ fontSize: 11, color: "#6a5436" }), marginBottom: 10 }}>{this.state.syncMsg}</div>}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 12, marginBottom: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(225px, 100%), 1fr))", gap: 12, marginBottom: 16 }}>
           {statRow.map(([l, v, c], i) => (<Card key={i} pad={16} style={{ borderTop: `3px solid ${c}` }}><Kicker>{l}</Kicker><div style={cinzel({ fontWeight: 800, fontSize: 30, color: c, marginTop: 6 })}>{v}</div></Card>))}
         </div>
         <Card style={{ marginBottom: 16, borderTop: `3px solid ${DTH.accent}` }}>
