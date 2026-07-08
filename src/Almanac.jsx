@@ -1589,7 +1589,7 @@ export default class Almanac extends React.Component {
     );
   }
 
-  addGoal = () => { const skill = this.val("sg_skill"); if (!skill || this.goals.find((g) => g.skill === skill)) { this.setState({ openForm: null }); return; } this.goals.push({ skill, tgt: Math.max(2, Math.min(99, this.num("sg_tgt") || 99)), method: this.val("sg_method") || "Custom plan", xpHr: this.num("sg_xphr"), gpHr: this.num("sg_gphr") }); this._save("almanac.goals.v1", this.goals); this.setState({ openForm: null }); };
+  addGoal = () => { const skill = this.val("sg_skill"); if (!skill || this.goals.find((g) => g.skill === skill)) { this.setState({ openForm: null }); return; } this.goals.push({ skill, tgt: Math.max(2, Math.min(99, this.num("sg_tgt") || 99)), method: this.val("sg_method") || "Custom plan", xpHr: this.num("sg_xphr") || 0, gpHr: this.num("sg_gphr") || 0 }); this._save("almanac.goals.v1", this.goals); this.setState({ openForm: null }); };
   removeGoal = (sk) => { this.goals = this.goals.filter((g) => g.skill !== sk); this._save("almanac.goals.v1", this.goals); this.bump(); };
 
   // ---------- comprehensive objectives (bank / quest / diary / loot) ----------
@@ -2034,14 +2034,18 @@ export default class Almanac extends React.Component {
         {/* ---- main column ---- */}
         <main style={{ flex: 1, minWidth: 0, minHeight: "100vh", background: "#e9dcbf", backgroundImage: `radial-gradient(circle at 15% 0%, rgba(255,250,235,.55), transparent 45%), radial-gradient(circle at 85% 6%, ${TH.accent}1f, transparent 42%), radial-gradient(circle at 85% 100%, rgba(150,120,70,.16), transparent 50%)`, transition: "background-image .4s ease" }}>
           {/* header + RSN bar */}
-          <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: mobile ? 8 : 16, padding: mobile ? "10px 12px" : "14px 30px", borderBottom: `2px solid ${TH.accent}`, boxShadow: `inset 0 -4px 0 -2px ${TH.accent}55`, background: "linear-gradient(180deg, rgba(231,217,184,.97), rgba(231,217,184,.85))", position: "sticky", top: 0, zIndex: 25 }}>
+          <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: mobile ? 8 : 16, padding: mobile ? "10px 12px" : "11px 30px", borderBottom: `2px solid ${TH.accent}`, boxShadow: `inset 0 -4px 0 -2px ${TH.accent}55`, background: "linear-gradient(180deg, rgba(231,217,184,.97), rgba(231,217,184,.85))", position: "sticky", top: 0, zIndex: 25 }}>
             <div style={{ display: "flex", alignItems: "center", gap: mobile ? 9 : 13, minWidth: 0, flexShrink: mobile ? 1 : 0 }}>
               {mobile && <Btn tone="quiet" onClick={() => this.setState((s) => ({ navOpen: !s.navOpen }))} style={{ fontSize: 16, padding: "7px 11px" }}>☰</Btn>}
-              {!mobile && <div style={{ width: 34, height: 34, borderRadius: 8, flex: "0 0 34px", background: `linear-gradient(140deg, ${TH.g1}, ${TH.g2})`, border: `1px solid ${TH.accent}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, boxShadow: `0 0 12px ${TH.accent}44` }}>{TH.icon}</div>}
+              {!mobile && <div style={{ width: 30, height: 30, borderRadius: 8, flex: "0 0 30px", background: `linear-gradient(140deg, ${TH.g1}, ${TH.g2})`, border: `1px solid ${TH.accent}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, boxShadow: `0 0 12px ${TH.accent}44` }}>{TH.icon}</div>}
+              {/* One-line breadcrumb — the page names itself with its big themed
+                  SectionTitle just below, so the header stays a slim utility bar
+                  instead of repeating the same title twice. */}
               {!mobile && (
-                <div style={{ minWidth: 0 }}>
-                  <div style={mono({ fontSize: 9, letterSpacing: ".22em", color: TH.accent, textTransform: "uppercase" })}>{t[0]}</div>
-                  <div style={{ ...cinzel({ fontWeight: 700, fontSize: 21, color: "#3a2812" }), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t[1]}</div>
+                <div style={{ ...mono({ fontSize: 10, letterSpacing: ".2em", textTransform: "uppercase", color: "#6a5436" }), minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <span style={{ color: TH.accent, fontWeight: 600 }}>{t[0]}</span>
+                  <span style={{ opacity: 0.45, margin: "0 8px" }}>·</span>
+                  <span>{t[1]}</span>
                 </div>
               )}
             </div>
@@ -2761,7 +2765,7 @@ export default class Almanac extends React.Component {
         </div>
         {/* but first — the cheap one-time win to grab before grinding */}
         {bf && (
-          <a href="#" onClick={(e) => { e.preventDefault(); this.go(bf.goto); }} style={{ position: "relative", display: "flex", alignItems: "center", gap: 13, padding: "12px 22px", borderTop: "1px solid rgba(227,200,120,.16)", background: "linear-gradient(90deg, rgba(92,110,53,.20), rgba(92,110,53,.04))", textDecoration: "none" }}>
+          <a href="#" onClick={(e) => { e.preventDefault(); this.go(bf.goto); }} style={{ position: "relative", display: "flex", alignItems: "center", gap: 13, padding: "12px 22px", borderTop: "1px solid rgba(227,200,120,.16)", background: "linear-gradient(90deg, rgba(92,110,53,.20), rgba(92,110,53,.04))", textDecoration: "none", flexWrap: "wrap" }}>
             <span style={mono({ fontWeight: 600, fontSize: 10, color: "#a9c46a", letterSpacing: ".2em", flex: "0 0 auto" })}>◈ BUT FIRST</span>
             <span style={{ width: 30, height: 30, flex: "0 0 30px", borderRadius: 7, background: bf.domColor, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>{bf.glyph}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -2773,7 +2777,7 @@ export default class Almanac extends React.Component {
         )}
         {/* on the horizon — the best thing one unlock away */}
         {horizon && (
-          <a href="#" onClick={(e) => { e.preventDefault(); this.go(horizon.goto); }} style={{ position: "relative", display: "flex", alignItems: "center", gap: 13, padding: "12px 22px", borderTop: "1px solid rgba(227,200,120,.16)", background: "linear-gradient(90deg, rgba(106,74,138,.20), rgba(106,74,138,.04))", textDecoration: "none" }}>
+          <a href="#" onClick={(e) => { e.preventDefault(); this.go(horizon.goto); }} style={{ position: "relative", display: "flex", alignItems: "center", gap: 13, padding: "12px 22px", borderTop: "1px solid rgba(227,200,120,.16)", background: "linear-gradient(90deg, rgba(106,74,138,.20), rgba(106,74,138,.04))", textDecoration: "none", flexWrap: "wrap" }}>
             <span style={mono({ fontWeight: 600, fontSize: 10, color: "#b8a6d8", letterSpacing: ".2em", flex: "0 0 auto" })}>◈ ON THE HORIZON</span>
             <span style={{ width: 30, height: 30, flex: "0 0 30px", borderRadius: 7, background: horizon.typeColor, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>{horizon.glyph}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -2795,6 +2799,7 @@ export default class Almanac extends React.Component {
   }
   renderDashboard(A) {
     const d = this.derive();
+    const M = !!this.state.mobile;
     const sm = this.skillMap;
     // money makers
     const aCost = this.alchCost(), cphr = this.alchcfg.castsPerHour || 1200;
@@ -2868,7 +2873,7 @@ export default class Almanac extends React.Component {
         )}
         {this.renderCounsel()}
         {/* hero */}
-        <Card style={{ marginBottom: 16, background: "linear-gradient(135deg,#2a1a10,#3a2410)", border: "1px solid #6b5226", display: "flex", alignItems: "center", gap: 20 }}>
+        <Card style={{ marginBottom: 16, background: "linear-gradient(135deg,#2a1a10,#3a2410)", border: "1px solid #6b5226", display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
           <div style={{ width: 78, height: 78, borderRadius: "50%", background: "radial-gradient(circle at 38% 32%, #e3c878, #b98f3e 60%, #7c5a22)", border: "3px solid #e3c878", display: "flex", alignItems: "center", justifyContent: "center", ...cinzel({ fontWeight: 800, fontSize: 38, color: "#3a2410" }) }}>{(d.logs && (this.stats.rsn[0] || "A")).toUpperCase()}</div>
           <div style={{ flex: 1 }}>
             <Kicker color="#9c7c44">The ledger of</Kicker>
@@ -2889,7 +2894,7 @@ export default class Almanac extends React.Component {
           { label: "Quest Cape", value: d.qPct + "%", sub: d.qRemaining + " quests · " + this.questPoints + " QP", subColor: C.red },
         ]} />
 
-        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: M ? "1fr" : "1.4fr 1fr", gap: 16 }}>
           <Card>
             <Kicker color={C.goldDeep}>💰 Money meta · earn the most now</Kicker>
             <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -3135,7 +3140,7 @@ export default class Almanac extends React.Component {
     const vel = this.xpVelocity();
     const rows = this.goals.map((g) => {
       const cur = sm[g.skill] || { l: 1, x: 0 }; const tgtXp = this.xpFor(g.tgt); const xpLeft = Math.max(0, tgtXp - cur.x);
-      const hours = g.xpHr > 0 ? xpLeft / g.xpHr : 0; const total = Math.round(hours * g.gpHr);
+      const hours = g.xpHr > 0 ? xpLeft / g.xpHr : 0; const total = Math.round(hours * (g.gpHr || 0)) || 0;
       const bar = xpLeft <= 0 ? 100 : Math.max(3, Math.min(100, (cur.x / tgtXp) * 100));
       // Real ETA: your MEASURED xp/day for this skill vs the theoretical days
       // the method assumes (its xp/hr × your hours/day). Green = ahead of plan.
@@ -3145,7 +3150,7 @@ export default class Almanac extends React.Component {
       return { ...g, cur: cur.l, hours: g.xpHr > 0 ? hours.toFixed(1) + " h" : xpLeft <= 0 ? "done" : "—", total, xpLeft, bar, pace, realDays, planDays };
     });
     let gH = 0, gG = 0, gActive = 0;
-    rows.forEach((r) => { gH += this.parseNum(r.hours) || 0; gG += r.total; if (r.xpLeft > 0) gActive++; });
+    rows.forEach((r) => { gH += this.parseNum(r.hours) || 0; gG += r.total || 0; if (r.xpLeft > 0) gActive++; });
     const hpd = this.gcfg.hoursPerDay || 2;
     const owned = new Set(this.goals.map((g) => g.skill));
     const addable = this.skillsRaw.map(([n]) => n).filter((n) => !owned.has(n));
@@ -3258,14 +3263,14 @@ export default class Almanac extends React.Component {
                     <td style={{ ...mono({ fontSize: 12 }), padding: "7px 9px" }}>{r.cur}</td>
                     <td style={{ padding: "7px 9px" }}><input className="led" defaultValue={r.tgt} onBlur={(e) => this.setGoalField(r.skill, "tgt", e.target.value)} style={{ width: 52 }} /></td>
                     <td style={{ padding: "7px 9px" }}><input className="led" defaultValue={r.method} onBlur={(e) => this.setGoalField(r.skill, "method", e.target.value)} style={{ width: 200 }} /></td>
-                    <td style={{ padding: "7px 9px", textAlign: "right" }}><input className="led" defaultValue={this.fmt(r.xpHr)} onBlur={(e) => this.setGoalField(r.skill, "xpHr", e.target.value)} style={{ width: 76, textAlign: "right" }} /></td>
+                    <td style={{ padding: "7px 9px", textAlign: "right" }}><input className="led" defaultValue={r.xpHr > 0 ? this.fmt(r.xpHr) : ""} placeholder="xp/hr" onBlur={(e) => this.setGoalField(r.skill, "xpHr", e.target.value)} style={{ width: 76, textAlign: "right" }} /></td>
                     <td style={{ ...mono({ fontSize: 12, color: C.muted2 }), padding: "7px 9px", textAlign: "right" }}>{r.hours}</td>
                     <td style={{ padding: "7px 9px", textAlign: "right" }} title={r.pace > 0 ? this.short(Math.round(r.pace)) + " xp/day measured" : "no measured pace for this skill yet"}>
                       {r.xpLeft <= 0 ? <span style={mono({ fontSize: 12, color: C.green })}>done</span>
                         : r.realDays != null ? <span style={mono({ fontSize: 12, fontWeight: 600, color: r.planDays != null && r.realDays <= r.planDays ? C.green : "#9a7530" })}>{this.fmtDays(r.realDays)}</span>
                         : <span style={mono({ fontSize: 11, color: C.muted })}>—</span>}
                     </td>
-                    <td style={{ padding: "7px 9px", textAlign: "right" }}><input className="led" defaultValue={this.fmt(r.gpHr)} onBlur={(e) => this.setGoalField(r.skill, "gpHr", e.target.value)} style={{ width: 90, textAlign: "right" }} /></td>
+                    <td style={{ padding: "7px 9px", textAlign: "right" }}><input className="led" defaultValue={r.gpHr ? this.fmt(r.gpHr) : ""} placeholder="± gp/hr" onBlur={(e) => this.setGoalField(r.skill, "gpHr", e.target.value)} style={{ width: 90, textAlign: "right" }} /></td>
                     <td style={{ ...mono({ fontSize: 12, color: r.total >= 0 ? C.green : C.red }), padding: "7px 9px", textAlign: "right" }}>{r.total === 0 ? "—" : this.signed(r.total)}</td>
                     <td style={{ padding: "7px 9px", width: 120 }}><Bar pct={r.bar} c1={r.xpLeft <= 0 ? C.green : C.gold} c2={r.xpLeft <= 0 ? C.green : C.goldBright} h={6} /></td>
                     <td style={{ padding: "7px 9px" }}><span onClick={() => this.removeGoal(r.skill)} style={{ cursor: "pointer", color: C.red, ...mono({ fontSize: 12 }) }}>✕</span></td>
@@ -3288,7 +3293,7 @@ export default class Almanac extends React.Component {
             <Card style={{ marginBottom: 14, borderTop: `3px solid ${themeFor("herblore").accent}` }}>
               <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
                 <span style={serif({ fontSize: 12.5, fontStyle: "normal" })}>
-                  🧪 <strong>The Apothecary says:</strong> cheapest xp at your level right now is <strong>{cx.name}</strong> — {this.short(cx.xpHr)} xp/hr at {this.signed(cx.netHr)} gp/hr (live prices){adopted ? " · your plan row already matches" : ", vs your plan's " + this.short(hg.xpHr) + " xp/hr at " + this.signed(hg.gpHr) + " gp/hr"}.
+                  🧪 <strong>The Apothecary says:</strong> cheapest xp at your level right now is <strong>{cx.name}</strong> — {this.short(cx.xpHr)} xp/hr at {this.signed(cx.netHr)} gp/hr (live prices){adopted ? " · your plan row already matches" : hg.xpHr > 0 ? ", vs your plan's " + this.short(hg.xpHr) + " xp/hr at " + this.signed(hg.gpHr || 0) + " gp/hr" : " — your plan row has no rate yet"}.
                 </span>
                 {!adopted && <Btn tone="gold" onClick={() => { hg.method = "Mix " + cx.name + " (Apothecary)"; hg.xpHr = cx.xpHr; hg.gpHr = cx.netHr; this._save("almanac.goals.v1", this.goals); this.bump(); }}>Adopt into plan</Btn>}
                 <a href="#" onClick={(e) => { e.preventDefault(); this.go("herblore"); }} style={{ ...mono({ fontSize: 10.5 }), color: themeFor("herblore").accent }}>open the Apothecary →</a>
@@ -3308,7 +3313,7 @@ export default class Almanac extends React.Component {
             <Card style={{ marginBottom: 14, borderTop: `3px solid ${themeFor("runecraft").accent}` }}>
               <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
                 <span style={serif({ fontSize: 12.5, fontStyle: "normal" })}>
-                  🌀 <strong>The Rune Forge says:</strong> best xp at your level right now is <strong>{xb.name}</strong> — {this.short(xb.xpHr)} xp/hr at {this.signed(xb.netHr)} gp/hr{xb.unpriced ? " (rewards unpriced)" : " (live prices)"}{adopted ? " · your plan row already matches" : ", vs your plan's " + this.short(rg.xpHr) + " xp/hr at " + this.signed(rg.gpHr) + " gp/hr"}.
+                  🌀 <strong>The Rune Forge says:</strong> best xp at your level right now is <strong>{xb.name}</strong> — {this.short(xb.xpHr)} xp/hr at {this.signed(xb.netHr)} gp/hr{xb.unpriced ? " (rewards unpriced)" : " (live prices)"}{adopted ? " · your plan row already matches" : rg.xpHr > 0 ? ", vs your plan's " + this.short(rg.xpHr) + " xp/hr at " + this.signed(rg.gpHr || 0) + " gp/hr" : " — your plan row has no rate yet"}.
                 </span>
                 {!adopted && <Btn tone="gold" onClick={() => { rg.method = xb.name + " (Rune Forge)"; rg.xpHr = xb.xpHr; rg.gpHr = xb.netHr; this._save("almanac.goals.v1", this.goals); this.bump(); }}>Adopt into plan</Btn>}
                 <a href="#" onClick={(e) => { e.preventDefault(); this.go("runecraft"); }} style={{ ...mono({ fontSize: 10.5 }), color: themeFor("runecraft").accent }}>open the Rune Forge →</a>
@@ -3366,7 +3371,7 @@ export default class Almanac extends React.Component {
             </div>
           </Card>
         )}
-        <div style={{ display: "grid", gridTemplateColumns: n >= 2 ? "1.7fr 1fr" : "1fr", gap: 16, marginBottom: 14 }}>
+        <div className="g2col" style={{ display: "grid", gridTemplateColumns: n >= 2 ? "1.7fr 1fr" : "1fr", gap: 16, marginBottom: 14 }}>
           <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
             <Kicker color={TH.accent}>Wealth curve</Kicker>
             <div style={{ marginTop: 6 }}><LineChart points={points} theme={TH} yFmt={(v) => this.short(v)} valueLabel={this.short(d.netWorth)} /></div>
@@ -3638,7 +3643,7 @@ export default class Almanac extends React.Component {
           </div>
         </Card>
         {fc.length > 0 && (
-          <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16, marginBottom: 16 }}>
+          <div className="g2col" style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16, marginBottom: 16 }}>
             <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
               <Kicker color={TH.accent}>Cumulative realized P&L</Kicker>
               <div style={{ marginTop: 6 }}><LineChart points={cumPts} theme={TH} yFmt={(v) => this.short(v)} valueLabel={this.signed(cum)} /></div>
@@ -3649,7 +3654,7 @@ export default class Almanac extends React.Component {
             </Card>
           </div>
         )}
-      <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
+      <div className="g2col" style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
         <Card>
           <Kicker color={C.goldDeep}>Performance by item</Kicker>
           <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 10 }}>
@@ -3693,7 +3698,7 @@ export default class Almanac extends React.Component {
               <Btn tone="gold" onClick={this.addWatch}>Save</Btn>
             </div>
           )}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 14 }}>
+          <div className="g2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 14 }}>
             <div>
               <div style={mono({ fontSize: 9, letterSpacing: ".16em", color: C.muted, textTransform: "uppercase", marginBottom: 8 })}>Watching</div>
               {av.manual.filter((m) => m.type === "watch").map((m) => (
@@ -3748,7 +3753,7 @@ export default class Almanac extends React.Component {
       <div>
         <Card>
           <Kicker color={C.goldDeep}>Fill calculator · weighted-average a multi-fill flip</Kicker>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 12 }}>
+          <div className="g2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 12 }}>
             {col("b", "Buy fills", C.green)}
             {col("s", "Sell fills", C.red)}
           </div>
@@ -4015,7 +4020,7 @@ export default class Almanac extends React.Component {
                 })}
               </div>
               <div style={serif({ fontSize: 11.5, fontStyle: "normal", color: C.muted, marginTop: 8 })}>
-                Own herbs are priced at what selling them would net (opportunity cost), so mixing with your harvest beats buying by the GE spread + tax. Recipe rows below use your stock automatically ("your farmed grimy…"), afford caps at the stock, and logged mix sessions draw it down. Toggle off in SETUP.
+                Own herbs are priced at their raw-sale value (opportunity cost) — mixing your harvest beats buying by the GE spread + tax. Rows marked "your farmed grimy…" use your stock, afford caps at it, and logged mixes draw it down · toggle in SETUP.
               </div>
             </Card>
           );
@@ -4670,7 +4675,7 @@ export default class Almanac extends React.Component {
           </div>
           <div style={{ position: "relative", padding: "12px 22px 15px", borderTop: "1px solid rgba(213,122,90,.22)", fontSize: 13.5, lineHeight: 1.6, color: "#e2c6b2" }}>{g.summary}</div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 16, alignItems: "start" }}>
+        <div className="g2col" style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 16, alignItems: "start" }}>
           {/* left — the fight */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <Card style={{ borderTop: `3px solid ${TH.accent}` }}>
@@ -4979,7 +4984,7 @@ export default class Almanac extends React.Component {
           <Btn tone="gold" onClick={() => this.endBossSession(true)}>■ End &amp; save</Btn>
         </div>
         {ctxBoss && ctxBoss !== s.boss && <div style={{ marginTop: 6, ...mono({ fontSize: 10, color: "#9a7530" }) }}>⚠ this session is at {s.boss} — end it before starting one at {ctxBoss}.</div>}
-        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 18, marginTop: 12, alignItems: "start" }}>
+        <div className="g2col" style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 18, marginTop: 12, alignItems: "start" }}>
           <div style={{ textAlign: "center", padding: "10px 18px", background: C.cardLight, borderRadius: 8, border: "1px solid rgba(44,32,19,.12)" }}>
             <div style={mono({ fontSize: 8.5, letterSpacing: ".16em", color: C.muted, textTransform: "uppercase" })}>Kills</div>
             <div style={cinzel({ fontWeight: 800, fontSize: 34, color: C.ink, lineHeight: 1.1 })}>{s.kills}</div>
@@ -5101,7 +5106,7 @@ export default class Almanac extends React.Component {
             <select className="led" value={name} onChange={(ev) => this.setState({ bossFocus: ev.target.value })} style={{ width: 240 }}>{opts.map((o) => <option key={o} value={o}>{o}</option>)}</select>
           </div>
         </Card>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div className="g2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           <Card>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <span style={cinzel({ fontWeight: 700, fontSize: 22 })}>{b.n}</span>
@@ -5234,7 +5239,7 @@ export default class Almanac extends React.Component {
               {[1, 5, 10].map((n) => <Btn key={n} tone="quiet" onClick={() => this.slayQuick(n)}>−{n}</Btn>)}
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
-              <input className="led" id="st_loot" list="tradeItems" placeholder="log loot… e.g. 250 death rune" onKeyDown={(e) => { if (e.key === "Enter") { this.slayAddLoot(e.target.value); e.target.value = ""; } }} style={{ flex: 1, minWidth: 150 }} />
+              <input className="led" id="st_loot" list="tradeItems" placeholder="loot: 250 death rune…" onKeyDown={(e) => { if (e.key === "Enter") { this.slayAddLoot(e.target.value); e.target.value = ""; } }} style={{ flex: 1, minWidth: 150 }} />
               <Btn tone="quiet" onClick={() => { const el = document.getElementById("st_loot"); if (el && el.value) { this.slayAddLoot(el.value); el.value = ""; } }}>＋</Btn>
             </div>
             <datalist id="tradeItems">{(this.itemNames || []).map((n) => <option key={n} value={n} />)}</datalist>
@@ -5250,7 +5255,7 @@ export default class Almanac extends React.Component {
               </div>
             )}
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-              {this.field("st_xp", "XP gained (opt)", { w: 120 })}
+              {this.field("st_xp", "XP gained", { w: 110 })}
               <Btn tone="gold" onClick={() => this.endSlayTask(true)}>✓ Finish & log</Btn>
               <Btn tone="quiet" onClick={() => { if (typeof window === "undefined" || window.confirm("Discard this task without logging?")) this.endSlayTask(false); }}>✕</Btn>
             </div>
@@ -5308,7 +5313,7 @@ export default class Almanac extends React.Component {
           <div style={serif({ fontSize: 13, fontStyle: "normal", color: C.muted, marginBottom: 10 })}>Click a row's BLOCK toggle to remove it from your assignment pool — weighted XP/hr & loot/hr above recompute instantly (you get 6 block slots at Duradel).</div>
           <DataTable tableKey="slayTask" model={model} cols={cols} open={this.state.tOpen} on={this.tableHandlers()} />
         </Card>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div className="g2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           <Card>
             <Kicker color={C.goldDeep}>Master progression</Kicker>
             <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
@@ -5794,7 +5799,7 @@ export default class Almanac extends React.Component {
             </div>
             <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>GP/run includes seeds, compost and protection payments at live prices. <strong>GP priority</strong> ranks by gp per active minute — money-losing runs are flagged as XP purchases. <strong>XP priority</strong> ranks by xp per active minute and prices each run's cost in gp/xp (≤15 efficient · ≤30 fair · above that premium). Cap/day is what grow times physically allow; “→ run this” switches the herb crop your circuit and KPIs are computed from.</div>
           </Card>
-          <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
+          <div className="g2col" style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
             <Card>
               <Kicker color={C.goldDeep}>Daily run circuit · unlocked at Farming {farmLvl}</Kicker>
               <div className="sheetwrap" style={{ marginTop: 10 }}>
@@ -5864,6 +5869,17 @@ export default class Almanac extends React.Component {
               </table>
             </div>
             <div style={serif({ fontSize: 12, fontStyle: "normal", color: C.muted, marginTop: 8 })}>Net/run = {Y.P} patches × ({Y.eff.toFixed(2)} herbs/patch from the run-mechanics model above × herb value after the 2% GE tax − seed − compost). Seed & herb prices re-price with ⟳ Live prices; the yield reacts instantly to the controls.</div>
+            {(() => {
+              // Cross-link: harvested herbs are live mixing inventory in the Apothecary.
+              const held = Object.values(this.herbStock()).filter((s) => s.stock > 0);
+              if (!held.length) return null;
+              const tot = held.reduce((a, s) => a + s.stock, 0);
+              return (
+                <a href="#" onClick={(e) => { e.preventDefault(); this.go("herblore"); }} style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 8, textDecoration: "none", ...mono({ fontSize: 10.5, color: themeFor("herblore").accent }) }}>
+                  🧪 {this.fmt(tot)} harvested herb{tot === 1 ? "" : "s"} in stock — mix them in the Apothecary →
+                </a>
+              );
+            })()}
           </Card>
           </div>
         )}
@@ -6108,7 +6124,7 @@ export default class Almanac extends React.Component {
         <SectionTitle kicker="The Chronicle · in your own hand" title="Adventurer's Journal" accent={TH.accent}
           right={<Btn tone="gold" onClick={() => this.setState({ jEdit: "new", jSeal: "crimson" })}>🖋 Write a new page</Btn>} />
         <div className="jrn-desk">
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 0.85fr) minmax(340px, 1.35fr)", gap: 0, alignItems: "stretch" }}>
+          <div className="g2col" style={{ display: "grid", gridTemplateColumns: "minmax(240px, 0.85fr) minmax(340px, 1.35fr)", gap: 0, alignItems: "stretch" }}>
             {/* left page — Table of Days */}
             <div className="jrn-page jrn-left" style={{ padding: "26px 30px 24px 26px", minHeight: 560 }}>
               <div className="jrn-crease-l" />

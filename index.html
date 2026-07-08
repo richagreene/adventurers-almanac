@@ -58,6 +58,8 @@
          every data table scroll inside its own box instead of the page. ---- */
       @media (max-width: 860px) {
         input.led, select.led { font-size: 16px; }
+        /* Any desktop side-by-side panel pair tagged .g2col stacks to one column. */
+        .g2col { grid-template-columns: 1fr !important; }
         table.sheet th { font-size: 8px; padding: 6px 6px; white-space: nowrap; }
         table.sheet td { padding: 6px 7px; font-size: 12px; }
         main table:not(.sheet) { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
